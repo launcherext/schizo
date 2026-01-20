@@ -272,7 +272,22 @@ export class TradingLoop {
   /**
    * Quick filter to reject obvious rugs before full analysis
    */
-  private passesQuickFilter(token: PumpNewTokenEvent): { passes: boolean; reason?: string } {
+  private passesQuickFilter(token: PumpNewTokenEvent): { passes: boolean; reason?: string; isGraduating?: boolean } {
+    // GRADUATION CHECK: Tokens near bonding curve completion (75-84 SOL)
+    // These are about to graduate to Raydium and often see big volume
+    const GRADUATION_MIN_SOL = 75;
+    const GRADUATION_MAX_SOL = 84.9; // Just before the 85 SOL graduation
+    const isNearGraduation = token.marketCapSol >= GRADUATION_MIN_SOL && token.marketCapSol <= GRADUATION_MAX_SOL;
+
+    if (isNearGraduation) {
+      logger.info({
+        mint: token.mint,
+        symbol: token.symbol,
+        marketCapSol: token.marketCapSol,
+      }, '🎓 TOKEN NEAR GRADUATION - Priority analysis!');
+      return { passes: true, isGraduating: true };
+    }
+
     // Filter 1: Minimum market cap - need some action (not brand new with zero)
     const MIN_MARKET_CAP_SOL = 2; // At least 2 SOL market cap (some trading happened)
     if (!token.marketCapSol || token.marketCapSol < MIN_MARKET_CAP_SOL) {
@@ -345,15 +360,23 @@ export class TradingLoop {
       return;
     }
 
+    const emoji = filterResult.isGraduating ? '🎓' : '🆕';
+    const description = filterResult.isGraduating ? 'GRADUATING token' : 'New token';
+    
     logger.info({
       mint: token.mint,
       symbol: token.symbol,
       name: token.name,
       marketCapSol: token.marketCapSol,
-    }, '🆕 New token from PumpPortal passed filters!');
+      isGraduating: filterResult.isGraduating,
+    }, `${emoji} ${description} from PumpPortal passed filters!`);
 
-    // Add to queue for processing
-    this.newTokenQueue.push(token);
+    // Graduating tokens get priority (add to front of queue)
+    if (filterResult.isGraduating) {
+      this.newTokenQueue.unshift(token); // Add to front for priority
+    } else {
+      this.newTokenQueue.push(token); // Normal tokens go to back
+    }
 
     // Limit queue size
     if (this.newTokenQueue.length > 50) {
@@ -857,8 +880,9 @@ export class TradingLoop {
         },
       });
 
-      // Emit DECISION thought - SCHIZO announces his verdict
-      if (this.claude) {
+      // Emit DECISION thought - ONLY on BUY decisions (not every single reject)
+      // This prevents SCHIZO from being too chatty about every token he passes on
+      if (this.claude && decision.shouldTrade) {
         try {
           const decisionThought = await this.claude.generateAnalysisThought('decision', {
             symbol,

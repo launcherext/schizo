@@ -863,6 +863,9 @@ export class TradingEngine {
    * Get all open positions (tokens with net positive holdings)
    */
   async getOpenPositions(): Promise<OpenPosition[]> {
+    // Dust threshold: ignore positions worth less than ~$0.10 (at $200/SOL)
+    const DUST_THRESHOLD_SOL = 0.0005; 
+    
     const allTrades = this.db.trades.getRecent(1000);
     const positions = new Map<string, {
       tokenMint: string;
@@ -908,11 +911,23 @@ export class TradingEngine {
 
     for (const [, pos] of positions) {
       const netTokens = pos.totalTokensBought - pos.totalTokensSold;
+      
+      // Skip if no tokens left
       if (netTokens <= 0) continue;
 
       // Calculate average entry price
       const entryPrice = pos.totalSolSpent / pos.totalTokensBought;
       const entrySol = (netTokens / pos.totalTokensBought) * pos.totalSolSpent;
+
+      // Skip dust positions (< ~$0.10 worth, likely from rounding/slippage)
+      if (entrySol < DUST_THRESHOLD_SOL) {
+        logger.debug({
+          mint: pos.tokenMint,
+          entrySol,
+          reason: 'Dust position filtered out'
+        }, 'Ignoring dust position');
+        continue;
+      }
 
       openPositions.push({
         tokenMint: pos.tokenMint,

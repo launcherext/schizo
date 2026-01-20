@@ -104,7 +104,7 @@ export class TransactionParser {
       } else {
         // For sell: we spend tokens, receive SOL
         tokenAmount = tokenChange ? Math.abs(tokenChange.change) : 0;
-        solAmount = Math.abs(solChange) + fee; // Add fee back for accurate proceeds
+        solAmount = Math.abs(solChange) - fee; // FIXED: Subtract fee from proceeds (was incorrectly adding)
       }
 
       // Calculate price per token

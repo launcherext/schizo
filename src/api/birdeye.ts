@@ -89,13 +89,56 @@ export class BirdeyeClient {
   private apiKey: string;
   private baseUrl: string;
   private lastRequestTime = 0;
-  private readonly MIN_REQUEST_DELAY_MS = 200; // Rate limiting
+  // FREE TIER: 100 requests/minute = ~1.67 req/s, so 1000ms delay is safe
+  private readonly MIN_REQUEST_DELAY_MS = 1000; // Rate limiting for FREE tier
 
   constructor(config: BirdeyeConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl || 'https://public-api.birdeye.so';
 
-    log.info('Birdeye client initialized');
+    log.info('Birdeye client initialized (FREE tier rate limits)');
+  }
+
+  /**
+   * Retry wrapper with exponential backoff for 429 errors
+   * Free tier can hit rate limits easily, so we need robust retry logic
+   */
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    method: string,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as Error;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Check for 429 rate limit
+        if (errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit')) {
+          const delay = 2000 * Math.pow(2, attempt - 1); // 2s, 4s, 8s
+          log.warn({
+            method,
+            attempt,
+            maxRetries,
+            delay,
+          }, 'Birdeye rate limited (429), backing off');
+
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        }
+
+        // For non-429 errors or last attempt, throw immediately
+        throw error;
+      }
+    }
+
+    throw lastError!;
   }
 
   /**
@@ -106,7 +149,7 @@ export class BirdeyeClient {
   async getTrendingTokens(limit: number = 20, offset: number = 0): Promise<BirdeyeToken[]> {
     await this.enforceRateLimit();
 
-    try {
+    return this.retryWithBackoff(async () => {
       const response = await fetch(
         `${this.baseUrl}/defi/token_trending?sort_by=rank&sort_type=asc&offset=${offset}&limit=${limit}`,
         {
@@ -153,14 +196,14 @@ export class BirdeyeClient {
         liquidity: t.liquidity || 0,
         marketCap: t.mc,
       }));
-    } catch (error) {
+    }, 'getTrendingTokens').catch(error => {
       log.error({ 
         error,
         errorMessage: error instanceof Error ? error.message : String(error),
         errorStack: error instanceof Error ? error.stack : undefined,
         errorName: error instanceof Error ? error.name : undefined,
         method: 'getTrendingTokens'
-      }, 'Failed to fetch trending tokens');
+      }, 'Failed to fetch trending tokens after retries');
       
       // Check for specific issues
       if (error instanceof Error && (error.message.includes('fetch') || error.message.includes('ENOTFOUND'))) {
@@ -168,7 +211,7 @@ export class BirdeyeClient {
       }
       
       return [];
-    }
+    });
   }
 
   /**
@@ -179,7 +222,7 @@ export class BirdeyeClient {
   async getTopGainers(limit: number = 20, timeframe: '1h' | '4h' | '12h' | '24h' = '1h'): Promise<BirdeyeToken[]> {
     await this.enforceRateLimit();
 
-    try {
+    return this.retryWithBackoff(async () => {
       const response = await fetch(
         `${this.baseUrl}/defi/token_top_gainers?sort_by=price_change_${timeframe}_percent&sort_type=desc&offset=0&limit=${limit}`,
         {
@@ -228,7 +271,7 @@ export class BirdeyeClient {
         liquidity: t.liquidity || 0,
         marketCap: t.mc,
       }));
-    } catch (error) {
+    }, `getTopGainers(${timeframe})`).catch(error => {
       log.error({ 
         error,
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -236,19 +279,19 @@ export class BirdeyeClient {
         errorName: error instanceof Error ? error.name : undefined,
         method: 'getTopGainers',
         timeframe: timeframe
-      }, 'Failed to fetch top gainers');
+      }, 'Failed to fetch top gainers after retries');
       
       // Check for specific issues
       if (error instanceof Error) {
         if (error.message.includes('fetch') || error.message.includes('ENOTFOUND')) {
           log.error('Network connectivity issue - check Railway outbound access');
         } else if (error.message.includes('429')) {
-          log.error('Birdeye API rate limit hit');
+          log.error('Birdeye API rate limit hit even after retries - may need to reduce scan frequency');
         }
       }
       
       return [];
-    }
+    });
   }
 
   /**
