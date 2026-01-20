@@ -1534,3 +1534,44 @@ td a:hover {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
 }
+/* Fixed About Button - Bottom Right */
+.about-btn-fixed {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(20, 30, 30, 0.9);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 10px 16px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-size: 0.85rem;
+    z-index: 1000;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px);
+}
+
+.about-btn-fixed:hover {
+    background: rgba(30, 45, 45, 0.95);
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(78, 255, 205, 0.2);
+}
+
+.about-btn-fixed svg {
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .about-btn-fixed span {
+        display: none;
+    }
+    .about-btn-fixed {
+        padding: 10px;
+        border-radius: 50%;
+    }
+}
