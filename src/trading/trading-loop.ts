@@ -709,31 +709,26 @@ export class TradingLoop {
       // PRE-CHECK: Minimum activity check - don't buy zero-action tokens
       // Skip for trending tokens (already vetted by Birdeye)
       if (!isTrending) {
-        const MIN_AGE_MINUTES = 2; // Reduced from 5 to 2 minutes - allow newer tokens
-        const MIN_VOLUME_USD = 50; // Reduced from 100 to 50
-        const MIN_TRANSACTIONS = 5; // Reduced from 10 to 5
+        // AGGRESSIVE FILTER: No age requirement, only need SOME activity
+        const MIN_VOLUME_USD = 10;  // Just need $10 in volume
+        const MIN_TRANSACTIONS = 2; // Or 2 transactions
 
-        const tokenAge = metadata?.ageMinutes || 0;
         const volume = metadata?.volume1h || 0;
         const totalTxns = (metadata?.buys5m || 0) + (metadata?.sells5m || 0);
 
-        // Allow tokens younger than MIN_AGE if they have strong activity signals
-        const hasStrongActivity = volume >= 200 || totalTxns >= 20;
-
-        if (tokenAge < MIN_AGE_MINUTES && !hasStrongActivity) {
-          logger.info({ 
-            mint, symbol, tokenAge, volume, totalTxns,
-            reason: 'Too new without strong activity' 
-          }, 'REJECTED: Token too new without sufficient activity');
-          return;
-        }
-
+        // Reject ONLY if there's literally zero activity
         if (volume < MIN_VOLUME_USD && totalTxns < MIN_TRANSACTIONS) {
-          logger.info({ mint, symbol, volume, totalTxns }, 'REJECTED: Zero/low activity - no trading history');
+          logger.info({ 
+            mint, symbol, volume, totalTxns,
+            reason: 'Zero activity detected' 
+          }, 'REJECTED: Token has no trading activity');
           return;
         }
 
-        logger.info({ mint, symbol, tokenAge, volume, totalTxns, hasStrongActivity }, 'Token passed activity checks');
+        logger.info({ 
+          mint, symbol, volume, totalTxns,
+          ageMinutes: metadata?.ageMinutes || 0
+        }, '✅ Token has activity - proceeding to analysis');
       } else {
         logger.info({ mint, symbol, volume24h: birdeyeToken?.volume24h, liquidity: birdeyeToken?.liquidity }, 'Trending token - skipping new token activity checks');
       }

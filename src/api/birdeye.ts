@@ -154,7 +154,19 @@ export class BirdeyeClient {
         marketCap: t.mc,
       }));
     } catch (error) {
-      log.error({ error }, 'Failed to fetch trending tokens');
+      log.error({ 
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorName: error instanceof Error ? error.name : undefined,
+        method: 'getTrendingTokens'
+      }, 'Failed to fetch trending tokens');
+      
+      // Check for specific issues
+      if (error instanceof Error && (error.message.includes('fetch') || error.message.includes('ENOTFOUND'))) {
+        log.error('Network connectivity issue - check Railway outbound access');
+      }
+      
       return [];
     }
   }
@@ -217,7 +229,24 @@ export class BirdeyeClient {
         marketCap: t.mc,
       }));
     } catch (error) {
-      log.error({ error }, 'Failed to fetch top gainers');
+      log.error({ 
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorName: error instanceof Error ? error.name : undefined,
+        method: 'getTopGainers',
+        timeframe: timeframe
+      }, 'Failed to fetch top gainers');
+      
+      // Check for specific issues
+      if (error instanceof Error) {
+        if (error.message.includes('fetch') || error.message.includes('ENOTFOUND')) {
+          log.error('Network connectivity issue - check Railway outbound access');
+        } else if (error.message.includes('429')) {
+          log.error('Birdeye API rate limit hit');
+        }
+      }
+      
       return [];
     }
   }
@@ -401,7 +430,13 @@ export class BirdeyeClient {
         pnlPercent: t.pnl_percent,
       }));
     } catch (error) {
-      log.error({ address, error }, 'Failed to fetch top traders');
+      log.error({ 
+        address,
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        method: 'getTopTraders'
+      }, 'Failed to fetch top traders');
       return [];
     }
   }
