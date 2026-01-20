@@ -16,6 +16,7 @@ import { Connection } from '@solana/web3.js';
 import { TTLCache } from './cache.js';
 import { createRateLimiter, getConfigForTier, HeliusTier } from './rate-limiter.js';
 import { createLogger } from '../lib/logger.js';
+import { GetAssetResponse } from '../analysis/types.js';
 
 const logger = createLogger('helius');
 
@@ -259,6 +260,94 @@ class HeliusClient {
               error: error.message,
             },
             'Request failed, retrying'
+          );
+        },
+      }
+    );
+  }
+
+  /**
+   * Get token metadata using Helius DAS API.
+   * 
+   * Uses rate limiting and retry logic (without circuit breaker).
+   * 
+   * @param mintAddress - Token mint address (base58)
+   * @returns Token metadata including authorities and extensions
+   */
+  async getAsset(mintAddress: string): Promise<GetAssetResponse> {
+    const body = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getAsset',
+      params: { id: mintAddress },
+    };
+
+    // Use enhanced API limiter (DAS API is part of Enhanced tier)
+    return this.enhancedLimiter.schedule(() => this.fetchAssetWithRetry(body, mintAddress));
+  }
+
+  /**
+   * Fetch asset with exponential backoff retry.
+   * Does not use circuit breaker (different API endpoint).
+   */
+  private async fetchAssetWithRetry(body: object, mintAddress: string): Promise<GetAssetResponse> {
+    const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
+
+    return pRetry(
+      async () => {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        // Retry on rate limit or server errors
+        if (response.status === 429) {
+          const error = new Error('Rate limited (429)');
+          (error as Error & { status: number }).status = 429;
+          throw error;
+        }
+
+        if (response.status >= 500) {
+          throw new Error(`Server error (${response.status})`);
+        }
+
+        // Don't retry client errors
+        if (!response.ok) {
+          throw new AbortError(`Client error (${response.status})`);
+        }
+
+        const json = (await response.json()) as {
+          result?: GetAssetResponse;
+          error?: { message: string };
+        };
+
+        if (json.error) {
+          logger.warn({ mintAddress, error: json.error.message }, 'getAsset API error');
+          throw new AbortError(`API error: ${json.error.message}`);
+        }
+
+        if (!json.result) {
+          throw new AbortError('No result in getAsset response');
+        }
+
+        logger.debug({ mintAddress }, 'Successfully fetched asset metadata');
+        return json.result;
+      },
+      {
+        retries: 3,
+        minTimeout: 1000,
+        maxTimeout: 10000,
+        factor: 2,
+        onFailedAttempt: (error) => {
+          logger.warn(
+            {
+              mintAddress,
+              attempt: error.attemptNumber,
+              retriesLeft: error.retriesLeft,
+              error: error.message,
+            },
+            'getAsset request failed, retrying'
           );
         },
       }

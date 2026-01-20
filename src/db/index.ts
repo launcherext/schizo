@@ -6,8 +6,10 @@
  * - Database: The better-sqlite3 Database type
  * - TradeRepository, Trade: Trade CRUD operations
  * - StateRepository, PnLSnapshot: Agent state and P&L tracking
+ * - AnalysisCacheRepository: Cached analysis results with TTL
  */
 
 export { createDatabase, Database } from './database.js';
 export { TradeRepository, Trade } from './repositories/trades.js';
 export { StateRepository, PnLSnapshot } from './repositories/state.js';
+export { AnalysisCacheRepository } from './repositories/analysis-cache.js';

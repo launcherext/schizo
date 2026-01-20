@@ -1,0 +1,595 @@
+/**
+ * Trading Loop - Automatic token monitoring and trading
+ */
+
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import type { DatabaseWithRepositories } from '../db/database-with-repos.js';
+import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
+import type { SmartMoneyTracker } from '../analysis/smart-money.js';
+import type { TradingEngine } from './trading-engine.js';
+import type { ClaudeClient } from '../personality/claude-client.js';
+import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
+import { pumpPortalData, type PumpNewTokenEvent } from '../api/pumpportal-data.js';
+import { agentEvents } from '../events/emitter.js';
+import { logger } from '../lib/logger.js';
+
+/**
+ * Trading loop configuration
+ */
+export interface TradingLoopConfig {
+  runLoop: boolean;      // Controls if the loop actively fetches and analyzes tokens
+  enableTrading: boolean; // Controls if trades are actually executed
+  pollIntervalMs: number;
+  maxTokensPerCycle: number;
+}
+
+/**
+ * Default configuration
+ */
+export const DEFAULT_TRADING_LOOP_CONFIG: TradingLoopConfig = {
+  runLoop: true,
+  enableTrading: false,
+  pollIntervalMs: 10000, // 10 seconds - gotta catch those runners
+  maxTokensPerCycle: 10,
+};
+
+/**
+ * Trading Loop - Orchestrates the full trading flow
+ */
+export class TradingLoop {
+  private config: TradingLoopConfig;
+  private connection: Connection;
+  private db: DatabaseWithRepositories;
+  private tokenSafety: TokenSafetyAnalyzer;
+  private smartMoney: SmartMoneyTracker;
+  private tradingEngine?: TradingEngine;
+  private claude?: ClaudeClient;
+  private walletPublicKey?: PublicKey;
+  private isRunning: boolean = false;
+  private intervalId?: NodeJS.Timeout;
+  private seenTokens = new Set<string>(); // Track tokens we've already analyzed
+  private tokenMetadataCache = new Map<string, TokenMetadata>(); // Cache enriched data
+  private newTokenQueue: PumpNewTokenEvent[] = []; // Queue of new tokens from PumpPortal
+  private isProcessing = false; // Prevent concurrent processing
+
+  constructor(
+    config: TradingLoopConfig,
+    connection: Connection,
+    db: DatabaseWithRepositories,
+    tokenSafety: TokenSafetyAnalyzer,
+    smartMoney: SmartMoneyTracker,
+    tradingEngine?: TradingEngine,
+    claude?: ClaudeClient,
+    walletPublicKey?: PublicKey
+  ) {
+    this.config = config;
+    this.connection = connection;
+    this.db = db;
+    this.tokenSafety = tokenSafety;
+    this.smartMoney = smartMoney;
+    this.tradingEngine = tradingEngine;
+    this.claude = claude;
+    this.walletPublicKey = walletPublicKey;
+
+    const mode = tradingEngine ? 'FULL' : 'ANALYSIS-ONLY';
+    logger.info({ config, mode }, 'Trading Loop initialized');
+  }
+
+  /**
+   * Start the trading loop
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('Trading loop already running');
+      return;
+    }
+
+    if (!this.config.runLoop) {
+      logger.info('Trading loop disabled in config');
+      return;
+    }
+
+    this.isRunning = true;
+    logger.info('Starting trading loop...');
+
+    if (!this.config.enableTrading) {
+      logger.info('⚠️  ANALYSIS MODE ONLY - Trading execution is DISABLED');
+    }
+
+    // Connect to PumpPortal WebSocket for real-time new tokens
+    try {
+      await pumpPortalData.connect();
+
+      // Subscribe to new token events
+      pumpPortalData.subscribeNewTokens();
+
+      // Handle new tokens
+      pumpPortalData.onNewToken((token) => {
+        this.handleNewToken(token);
+      });
+
+      logger.info('🔌 Connected to PumpPortal - Listening for new tokens');
+    } catch (error) {
+      logger.error({ error }, 'Failed to connect to PumpPortal WebSocket');
+      // Fall back to polling mode
+      logger.info('Falling back to DexScreener polling mode');
+    }
+
+    // Process queue periodically
+    this.intervalId = setInterval(() => {
+      this.processTokenQueue().catch(error => {
+        logger.error({ error }, 'Error processing token queue');
+      });
+
+      // Also run position checks if trading
+      if (this.config.enableTrading && this.tradingEngine) {
+        this.checkPositionExits().catch(error => {
+          logger.error({ error }, 'Error checking position exits');
+        });
+      }
+
+      // Emit stats
+      this.emitStatsUpdate().catch(() => {});
+    }, this.config.pollIntervalMs);
+
+    logger.info({ intervalMs: this.config.pollIntervalMs }, 'Trading loop started');
+  }
+
+  /**
+   * Handle new token from PumpPortal
+   */
+  private handleNewToken(token: PumpNewTokenEvent): void {
+    // Skip if already seen
+    if (this.seenTokens.has(token.mint)) return;
+
+    this.seenTokens.add(token.mint);
+
+    logger.info({
+      mint: token.mint,
+      symbol: token.symbol,
+      name: token.name,
+      marketCapSol: token.marketCapSol,
+    }, '🆕 New token from PumpPortal!');
+
+    // Add to queue for processing
+    this.newTokenQueue.push(token);
+
+    // Limit queue size
+    if (this.newTokenQueue.length > 50) {
+      this.newTokenQueue = this.newTokenQueue.slice(-50);
+    }
+
+    // Limit seen tokens
+    if (this.seenTokens.size > 5000) {
+      const entries = Array.from(this.seenTokens);
+      this.seenTokens = new Set(entries.slice(-2500));
+    }
+  }
+
+  /**
+   * Process queued tokens
+   */
+  private async processTokenQueue(): Promise<void> {
+    if (this.isProcessing || this.newTokenQueue.length === 0) return;
+
+    this.isProcessing = true;
+
+    try {
+      // Process up to maxTokensPerCycle tokens
+      const tokensToProcess = this.newTokenQueue.splice(0, this.config.maxTokensPerCycle);
+
+      for (const pumpToken of tokensToProcess) {
+        await this.analyzeAndTrade(pumpToken.mint, pumpToken);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Stop the trading loop
+   */
+  stop(): void {
+    if (!this.isRunning) {
+      return;
+    }
+
+    this.isRunning = false;
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = undefined;
+    }
+
+    // Disconnect from PumpPortal
+    pumpPortalData.disconnect();
+
+    logger.info('Trading loop stopped');
+  }
+
+  /**
+   * Run one cycle of the trading loop
+   */
+  private async runCycle(): Promise<void> {
+    logger.debug('Running trading cycle...');
+
+    try {
+      // Step 1: Check existing positions for stop-loss/take-profit exits
+      if (this.config.enableTrading && this.tradingEngine) {
+        await this.checkPositionExits();
+      }
+
+      // Step 2: Get new tokens to analyze
+      const newTokens = await this.getNewTokens();
+
+      if (newTokens.length === 0) {
+        logger.debug('No new tokens found');
+        return;
+      }
+
+      logger.info({ count: newTokens.length }, 'Found new tokens to analyze');
+
+      // Step 3: Analyze and potentially trade each token
+      for (const mint of newTokens) {
+        await this.analyzeAndTrade(mint);
+      }
+
+      // Step 4: Emit stats update for dashboard
+      await this.emitStatsUpdate();
+
+      logger.debug('Trading cycle complete');
+    } catch (error) {
+      logger.error({ error }, 'Error in trading cycle');
+    }
+  }
+
+  /**
+   * Emit stats update event for dashboard
+   */
+  private async emitStatsUpdate(): Promise<void> {
+    try {
+      const stats = this.tradingEngine
+        ? await this.tradingEngine.getStats()
+        : { todayTrades: 0, openPositions: 0, dailyPnL: 0, consecutiveLosses: 0 };
+
+      // Calculate win rate from completed trades
+      const allTrades = this.db.trades.getRecent(100);
+      const completedRoundTrips = this.calculateCompletedTrades(allTrades);
+      const winRate = completedRoundTrips.total > 0
+        ? (completedRoundTrips.wins / completedRoundTrips.total) * 100
+        : 0;
+
+      // Count buybacks
+      const buybacks = allTrades.filter(t => t.metadata?.isBuyback).length;
+
+      // Get wallet balance
+      let balance = 0;
+      if (this.walletPublicKey) {
+        try {
+          const lamports = await this.connection.getBalance(this.walletPublicKey);
+          balance = lamports / LAMPORTS_PER_SOL;
+        } catch {
+          // Ignore balance fetch errors
+        }
+      }
+
+      agentEvents.emit({
+        type: 'STATS_UPDATE',
+        timestamp: Date.now(),
+        data: {
+          todayTrades: stats.todayTrades,
+          openPositions: stats.openPositions,
+          dailyPnL: stats.dailyPnL,
+          winRate,
+          totalBuybacks: buybacks,
+          balance,
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Error emitting stats update');
+    }
+  }
+
+  /**
+   * Calculate completed trades (wins/losses)
+   */
+  private calculateCompletedTrades(trades: Array<{ type: string; tokenMint: string; amountSol: number; metadata?: Record<string, unknown> }>): { wins: number; losses: number; total: number } {
+    const tokenBuyCosts = new Map<string, number[]>();
+    let wins = 0;
+    let losses = 0;
+
+    for (const trade of trades.filter(t => !t.metadata?.isBuyback)) {
+      if (trade.type === 'BUY') {
+        const costs = tokenBuyCosts.get(trade.tokenMint) || [];
+        costs.push(trade.amountSol);
+        tokenBuyCosts.set(trade.tokenMint, costs);
+      } else if (trade.type === 'SELL') {
+        const costs = tokenBuyCosts.get(trade.tokenMint) || [];
+        if (costs.length > 0) {
+          const buyCost = costs.shift()!;
+          tokenBuyCosts.set(trade.tokenMint, costs);
+          if (trade.amountSol > buyCost) {
+            wins++;
+          } else {
+            losses++;
+          }
+        }
+      }
+    }
+
+    return { wins, losses, total: wins + losses };
+  }
+
+  /**
+   * Check open positions for stop-loss/take-profit exits
+   */
+  private async checkPositionExits(): Promise<void> {
+    if (!this.tradingEngine) return;
+
+    try {
+      const exitSignatures = await this.tradingEngine.checkPositionsForExit();
+
+      for (const signature of exitSignatures) {
+        agentEvents.emit({
+          type: 'TRADE_EXECUTED',
+          timestamp: Date.now(),
+          data: {
+            mint: 'position-exit',
+            type: 'SELL',
+            signature,
+            amount: 0, // Amount determined by position
+          },
+        });
+      }
+
+      if (exitSignatures.length > 0) {
+        logger.info({ count: exitSignatures.length }, 'Position exits executed');
+      }
+    } catch (error) {
+      logger.error({ error }, 'Error checking position exits');
+    }
+  }
+
+  /**
+   * Check for smart money presence in a token's holders
+   * Returns the count of smart money wallets holding this token
+   *
+   * Note: Full implementation requires fetching top token holders.
+   * This is a placeholder that returns 0 until holder data is integrated.
+   */
+  private async checkSmartMoney(mint: string): Promise<number> {
+    // TODO: Implement when we have a way to get token holders
+    // The flow would be:
+    // 1. Fetch top N holders for this token (via Helius getTokenAccounts or PumpPortal)
+    // 2. For each holder, call this.smartMoney.isSmartMoney(holderAddress)
+    // 3. Return count of smart money wallets
+    //
+    // For now, return 0 as we don't have the holder data API integrated
+    logger.debug({ mint }, 'Smart money check skipped - holder data not available');
+    return 0;
+  }
+
+  /**
+   * Get new tokens to analyze from DexScreener
+   */
+  private async getNewTokens(): Promise<string[]> {
+    try {
+      // Get latest tokens and boosted tokens from DexScreener
+      const [latestTokens, boostedTokens] = await Promise.all([
+        dexscreener.getLatestTokens(10),
+        dexscreener.getBoostedTokens(),
+      ]);
+
+      // Combine and dedupe
+      const allTokens = [...boostedTokens, ...latestTokens];
+      const newTokens: string[] = [];
+
+      for (const token of allTokens) {
+        // Skip if we've seen it
+        if (this.seenTokens.has(token.mint)) continue;
+
+        // Mark as seen
+        this.seenTokens.add(token.mint);
+
+        // Cache metadata
+        this.tokenMetadataCache.set(token.mint, token);
+
+        // Only add tokens with reasonable liquidity
+        if (token.liquidity >= 1000) {
+          newTokens.push(token.mint);
+          logger.info({
+            mint: token.mint,
+            symbol: token.symbol,
+            name: token.name,
+            price: token.priceUsd,
+            liquidity: token.liquidity,
+            age: token.ageMinutes ? `${token.ageMinutes}m` : 'unknown',
+          }, 'New token found');
+        }
+      }
+
+      // Limit seen tokens to prevent memory bloat
+      if (this.seenTokens.size > 5000) {
+        const entries = Array.from(this.seenTokens);
+        this.seenTokens = new Set(entries.slice(-2500));
+      }
+
+      return newTokens.slice(0, this.config.maxTokensPerCycle);
+    } catch (error) {
+      logger.error({ error }, 'Error fetching new tokens');
+      return [];
+    }
+  }
+
+  /**
+   * Get cached metadata for a token
+   */
+  getTokenMetadata(mint: string): TokenMetadata | undefined {
+    return this.tokenMetadataCache.get(mint);
+  }
+
+  /**
+   * Analyze a token and execute trade if approved
+   */
+  private async analyzeAndTrade(mint: string, pumpToken?: PumpNewTokenEvent): Promise<void> {
+    // Try to get enriched metadata from DexScreener
+    let metadata = this.tokenMetadataCache.get(mint);
+    if (!metadata) {
+      // Small delay for very new tokens to appear on DexScreener
+      if (pumpToken) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      metadata = await dexscreener.getTokenMetadata(mint) || undefined;
+      if (metadata) {
+        this.tokenMetadataCache.set(mint, metadata);
+      }
+    }
+
+    // Use PumpPortal data as fallback if DexScreener doesn't have it yet
+    const symbol = metadata?.symbol || pumpToken?.symbol || mint.slice(0, 6);
+    const name = metadata?.name || pumpToken?.name || 'Unknown';
+    const marketCapSol = pumpToken?.marketCapSol || 0;
+
+    logger.info({
+      mint,
+      symbol,
+      name,
+      hasDexData: !!metadata,
+      marketCapSol,
+    }, 'Analyzing token...');
+
+    // Emit TOKEN_DISCOVERED with best available data
+    // Use PumpPortal image if DexScreener doesn't have one
+    const imageUrl = metadata?.imageUrl || pumpToken?.imageUrl;
+
+    agentEvents.emit({
+      type: 'TOKEN_DISCOVERED',
+      timestamp: Date.now(),
+      data: {
+        mint,
+        name,
+        symbol,
+        priceUsd: metadata?.priceUsd || 0,
+        priceChange5m: metadata?.priceChange5m || 0,
+        priceChange1h: metadata?.priceChange1h || 0,
+        volume1h: metadata?.volume1h || 0,
+        liquidity: metadata?.liquidity || (marketCapSol * 170), // Rough estimate if no data
+        marketCap: metadata?.marketCap || (marketCapSol * 170), // SOL price ~$170
+        buys5m: metadata?.buys5m || 0,
+        sells5m: metadata?.sells5m || 0,
+        ageMinutes: metadata?.ageMinutes || 0,
+        dexUrl: metadata?.dexUrl || `https://dexscreener.com/solana/${mint}`,
+        imageUrl,
+        marketCapSol, // Include raw SOL market cap for PumpPortal tokens
+      },
+    });
+
+    // Emit analysis start event
+    agentEvents.emit({
+      type: 'ANALYSIS_START',
+      timestamp: Date.now(),
+      data: { mint },
+    });
+
+    try {
+      // Step 1: Safety analysis
+      const safetyResult = await this.tokenSafety.analyze(mint);
+      
+      agentEvents.emit({
+        type: 'SAFETY_CHECK',
+        timestamp: Date.now(),
+        data: { mint, result: safetyResult },
+      });
+
+      // Step 2: Smart money check
+      // Note: Full smart money detection requires fetching top token holders,
+      // which needs additional API calls. For now, we rely on the Trading Engine's
+      // safety analysis. Smart money signals can be added when holder data is available.
+      const smartMoneyCount = await this.checkSmartMoney(mint);
+
+      agentEvents.emit({
+        type: 'SMART_MONEY_CHECK',
+        timestamp: Date.now(),
+        data: { mint, count: smartMoneyCount },
+      });
+
+      // Step 3: Get trading decision from Trading Engine (if available)
+      if (!this.tradingEngine) {
+        // Analysis-only mode - just emit that we analyzed it
+        agentEvents.emit({
+          type: 'TRADE_DECISION',
+          timestamp: Date.now(),
+          data: {
+            mint,
+            decision: {
+              shouldTrade: false,
+              reasons: ['Analysis-only mode'],
+              positionSizeSol: 0,
+              safetyAnalysis: safetyResult,
+              smartMoneyCount,
+            },
+            reasoning: 'Running in analysis-only mode - no trading engine configured',
+          },
+        });
+        return;
+      }
+
+      const decision = await this.tradingEngine.evaluateToken(mint);
+
+      // Emit decision event with AI reasoning
+      agentEvents.emit({
+        type: 'TRADE_DECISION',
+        timestamp: Date.now(),
+        data: {
+          mint,
+          decision,
+          reasoning: decision.reasoning,
+        },
+      });
+
+      // Step 4: Execute trade if approved
+      if (decision.shouldTrade) {
+        if (!this.config.enableTrading) {
+          logger.info({ mint, decision }, 'Trade approved but execution DISABLED (Analysis Mode)');
+          
+          // Emit SIMULATED trade event for dashboard visualization
+          agentEvents.emit({
+            type: 'TRADE_EXECUTED',
+            timestamp: Date.now(),
+            data: {
+              mint,
+              type: 'BUY',
+              signature: 'SIMULATED_MODE',
+              amount: decision.positionSizeSol,
+            },
+          });
+          return;
+        }
+
+        logger.info({ mint, positionSize: decision.positionSizeSol }, 'Executing trade...');
+        
+        const signature = await this.tradingEngine.executeBuy(mint);
+        
+        if (signature) {
+          agentEvents.emit({
+            type: 'TRADE_EXECUTED',
+            timestamp: Date.now(),
+            data: {
+              mint,
+              type: 'BUY',
+              signature,
+              amount: decision.positionSizeSol,
+            },
+          });
+
+          logger.info({ mint, signature }, 'Trade executed successfully');
+        } else {
+          logger.warn({ mint }, 'Trade execution failed');
+        }
+      } else {
+        logger.info({ mint, reasons: decision.reasons }, 'Trade rejected');
+      }
+    } catch (error) {
+      logger.error({ mint, error }, 'Error analyzing token');
+    }
+  }
+}

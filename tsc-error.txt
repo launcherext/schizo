@@ -1,0 +1,11 @@
+src/trading/trading-engine.ts(10,15): error TS2305: Module '"../analysis/types.js"' has no exported member 'SafetyAnalysis'.
+src/trading/trading-engine.ts(61,15): error TS2709: Cannot use namespace 'Database' as a type.
+src/trading/trading-engine.ts(68,9): error TS2709: Cannot use namespace 'Database' as a type.
+src/trading/trading-engine.ts(92,24): error TS2339: Property 'isHoneypot' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(103,24): error TS2339: Property 'freezeAuthority' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(114,24): error TS2339: Property 'mintAuthority' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(125,24): error TS2339: Property 'top10Concentration' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(137,24): error TS2339: Property 'top10Concentration' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(142,24): error TS2339: Property 'holderCount' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(148,39): error TS2339: Property 'topHolders' does not exist on type 'TokenSafetyResult'.
+src/trading/trading-engine.ts(346,42): error TS7006: Parameter 't' implicitly has an 'any' type.

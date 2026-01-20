@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$SCHIZO - Paranoid AI Trader</title>
+    <link rel="icon" type="image/png" href="Untitled design (45).png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <header>
+        <img src="Untitled design (44).png" alt="$SCHIZO Logo" class="header-logo">
+        <h1>$SCHIZO</h1>
+        <p class="tagline">Paranoid AI Trading Agent</p>
+
+        <div id="schizo-token-card">
+            <div class="token-card-header">
+                <img src="Untitled design (44).png" alt="$SCHIZO" class="token-card-img">
+                <div class="token-card-title">
+                    <span class="token-card-name">$SCHIZO</span>
+                    <span class="token-card-status">Coming Soon</span>
+                </div>
+            </div>
+            <div class="token-card-stats">
+                <div class="token-card-stat">
+                    <span class="stat-label">Price</span>
+                    <span class="stat-value" id="schizo-price">--</span>
+                </div>
+                <div class="token-card-stat">
+                    <span class="stat-label">Market Cap</span>
+                    <span class="stat-value" id="schizo-mcap">--</span>
+                </div>
+                <div class="token-card-stat">
+                    <span class="stat-label">Holders</span>
+                    <span class="stat-value" id="schizo-holders">--</span>
+                </div>
+                <div class="token-card-stat">
+                    <span class="stat-label">24h Vol</span>
+                    <span class="stat-value" id="schizo-volume">--</span>
+                </div>
+            </div>
+            <div class="token-card-footer">
+                <span class="token-card-ca" id="schizo-ca">CA: TBA</span>
+                <div class="token-card-links">
+                    <a href="#" class="token-link" title="DexScreener">DEX</a>
+                    <a href="#" class="token-link" title="PumpPortal">PUMP</a>
+                    <a href="#" class="token-link" title="Twitter">X</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section id="stats">
+            <div class="stat">
+                <label>Status</label>
+                <span id="status" class="status-disconnected">Disconnected</span>
+            </div>
+            <div class="stat">
+                <label>Balance</label>
+                <span id="balance">-- SOL</span>
+            </div>
+            <div class="stat">
+                <label>Win Rate</label>
+                <span id="winRate">0%</span>
+            </div>
+            <div class="stat">
+                <label>Total P&L</label>
+                <span id="pnl">0 SOL</span>
+            </div>
+            <div class="stat">
+                <label>Buybacks</label>
+                <span id="buybacks">0</span>
+            </div>
+        </section>
+
+        <div id="main-panels">
+            <section id="token-stream-section">
+                <div id="token-stream-box">
+                    <div class="panel-header">
+                        <span>New Tokens</span>
+                        <button id="pauseTokensBtn">Pause</button>
+                    </div>
+                    <div id="token-stream"></div>
+                </div>
+            </section>
+
+            <section id="feed-container">
+                <div id="feed-box">
+                    <div class="panel-header">
+                        <span>Live Feed</span>
+                        <button id="pauseBtn">Pause</button>
+                    </div>
+                    <div id="feed"></div>
+                </div>
+            </section>
+
+            <section id="chat-container">
+                <div id="chat-box">
+                    <div id="chat-header">Chat with $SCHIZO</div>
+                    <div id="chat-messages"></div>
+                    <div id="chat-input-area">
+                        <input type="text" id="chatInput" placeholder="Ask $SCHIZO anything..." maxlength="500">
+                        <button id="sendBtn">Send</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section id="trades-container">
+            <h2>Recent Trades</h2>
+            <table id="trades">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Token</th>
+                        <th>Amount</th>
+                        <th>Signature</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+    </main>
+
+    <!-- Chart Popup -->
+    <div id="chart-popup" class="popup-overlay" onclick="closeChart()">
+        <div class="popup-content" onclick="event.stopPropagation()">
+            <button class="popup-close" onclick="closeChart()">✕</button>
+            <iframe id="chart-iframe" src="" frameborder="0"></iframe>
+        </div>
+    </div>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script src="app.js"></script>
+    <script type="module" src="schizo-3d.js"></script>
+
+    <!-- Schizo 3D Character Toggle Button -->
+    <button id="schizo-toggle-btn" onclick="toggleSchizo()">
+        <span class="schizo-btn-icon">🤖</span>
+        <span class="schizo-btn-text">Open Schizo</span>
+    </button>
+
+    <!-- Schizo 3D Character Container -->
+    <div id="schizo-3d-container" class="schizo-hidden">
+        <div id="schizo-3d-header">
+            <span>$SCHIZO</span>
+            <button onclick="toggleSchizo()" class="schizo-close-btn">✕</button>
+        </div>
+        <div id="schizo-3d-canvas"></div>
+        <div id="schizo-status">Waiting...</div>
+    </div>
+</body>
+
+</html>
