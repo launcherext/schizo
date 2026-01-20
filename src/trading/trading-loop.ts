@@ -708,7 +708,8 @@ export class TradingLoop {
     try {
       // PRE-CHECK: Minimum activity check - don't buy zero-action tokens
       // Skip for trending tokens (already vetted by Birdeye)
-      if (!isTrending) {
+      // ALSO skip for PumpPortal tokens (brand new, pre-vetted by PumpPortal feed)
+      if (!isTrending && !pumpToken) {
         // AGGRESSIVE FILTER: No age requirement, only need SOME activity
         const MIN_VOLUME_USD = 10;  // Just need $10 in volume
         const MIN_TRANSACTIONS = 2; // Or 2 transactions
@@ -729,6 +730,12 @@ export class TradingLoop {
           mint, symbol, volume, totalTxns,
           ageMinutes: metadata?.ageMinutes || 0
         }, '✅ Token has activity - proceeding to analysis');
+      } else if (pumpToken) {
+        logger.info({ 
+          mint, symbol, 
+          marketCapSol: pumpToken.marketCapSol,
+          source: 'PumpPortal'
+        }, '🚀 PumpPortal token - skipping activity check (pre-vetted)');
       } else {
         logger.info({ mint, symbol, volume24h: birdeyeToken?.volume24h, liquidity: birdeyeToken?.liquidity }, 'Trending token - skipping new token activity checks');
       }
