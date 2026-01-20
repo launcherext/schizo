@@ -34,7 +34,21 @@ export type AgentEvent =
   | VoiceAudioEvent
   | TokenDiscoveredEvent
   | TokenCommentaryEvent
-  | AnalysisThoughtEvent;
+  | AnalysisThoughtEvent
+  | CopyTradeSignalEvent;
+
+/**
+ * Copy trade signal detected
+ */
+export interface CopyTradeSignalEvent extends BaseEvent {
+  type: 'COPY_TRADE_SIGNAL';
+  data: {
+    mint: string;
+    sourceWallet: string;
+    signature: string;
+    solSpent: number;
+  };
+}
 
 /**
  * Analysis started for a token
@@ -257,6 +271,8 @@ export interface TokenCommentaryEvent extends BaseEvent {
     mint: string;
     symbol: string;
     commentary: string;
+    isSillyName?: boolean;
+    sillyCategory?: string;
   };
 }
 
@@ -268,6 +284,10 @@ export interface AnalysisThoughtEvent extends BaseEvent {
   data: {
     mint: string;
     symbol: string;
+    name?: string;
+    marketCapSol?: number;
+    liquidity?: number;
+    priceChange5m?: number;
     stage: 'scanning' | 'safety' | 'smart_money' | 'decision';
     thought: string;
     details?: {

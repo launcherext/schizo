@@ -516,6 +516,95 @@ export class TradingEngine {
   }
 
   /**
+   * Execute a copy trade (SCHIZO MODE)
+   * Bypasses some safety checks but still respects critical ones (honeypots)
+   */
+  async executeCopyTrade(mint: string, sourceWallet: string, solAmount: number): Promise<string | null> {
+    logger.info({ mint, sourceWallet, solAmount }, 'Executing COPY TRADE');
+
+    // 0. Check circuit breaker (max positions, daily trades, daily loss)
+    const canTrade = await this.canTrade();
+    if (!canTrade) {
+      logger.warn({ mint, sourceWallet }, 'Copy trade BLOCKED: Circuit breaker active');
+      return null;
+    }
+
+    // 1. Basic Safety Check (Honeypot only)
+    const safetyAnalysis = await this.tokenSafety.analyze(mint);
+    const hasCriticalRisk = safetyAnalysis.risks.some(r => 
+      r === 'MINT_AUTHORITY_ACTIVE' || r === 'FREEZE_AUTHORITY_ACTIVE'
+    );
+
+    if (hasCriticalRisk) {
+      logger.warn({ mint, risks: safetyAnalysis.risks }, 'Copy trade BLOCKED: Critical Token Risk');
+      return null;
+    }
+
+    // 2. Determine Scale
+    // We can match the SOL amount or use our own sizing logic.
+    // For now, let's stick to our base position but scale slightly if it's a big whale buy.
+    let positionSize = this.config.basePositionSol;
+    
+    // If the whale bought A LOT (> 10 SOL), we might ape harder
+    if (solAmount > 10) {
+      positionSize = Math.min(positionSize * 2, this.config.maxPositionSol);
+    }
+
+    // 3. Execute
+    try {
+      const signature = await this.pumpPortal.buy({
+        mint,
+        amount: positionSize,
+        slippage: this.config.slippageTolerance * 2, // Higher slippage for copy trading speed
+      });
+
+      // 4. Parse & Record
+      const parsedTx = await this.txParser.waitAndParse(
+        signature,
+        this.walletAddress,
+        mint,
+        'buy'
+      );
+
+       await this.db.trades.insert({
+        signature,
+        timestamp: Date.now(),
+        type: 'BUY',
+        tokenMint: mint,
+        amountTokens: parsedTx.tokenAmount,
+        amountSol: parsedTx.solAmount || positionSize,
+        pricePerToken: parsedTx.pricePerToken,
+        metadata: {
+          strategy: 'COPY_TRADE',
+          sourceWallet,
+          targetSolAmount: solAmount,
+          parseSuccess: parsedTx.success,
+        },
+      });
+
+      logger.info({ signature, mint, positionSize }, 'Copy trade executed successfully');
+      
+      // Emit event
+      agentEvents.emit({
+        type: 'TRADE_EXECUTED',
+        timestamp: Date.now(),
+        data: {
+          type: 'BUY',
+          mint,
+          amount: positionSize,
+          signature
+        }
+      });
+      
+      return signature;
+
+    } catch (error) {
+      logger.error({ mint, error }, 'Copy trade execution failed');
+      return null;
+    }
+  }
+
+  /**
    * Check if trading is allowed (circuit breaker)
    */
   async canTrade(): Promise<boolean> {

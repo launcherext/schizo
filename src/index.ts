@@ -19,6 +19,7 @@ import { TwitterClient } from './personality/twitter-client.js';
 import { MarketWatcher } from './analysis/market-watcher.js';
 import { PumpPortalClient } from './trading/pumpportal-client.js';
 import { agentEvents } from './events/emitter.js';
+import { detectSillyName } from './personality/name-analyzer.js';
 
 const log = createLogger('main');
 let db: ReturnType<typeof createDatabase> | null = null;
@@ -207,6 +208,44 @@ async function main(): Promise<void> {
       wallet?.publicKey // Pass wallet public key for balance tracking
     );
 
+    // Initialize Copy Trader
+    let copyTrader: any = null; // using any to avoid import cycles if not strict
+    const copyTradeWallet = process.env.COPY_TRADE_WALLET;
+    if (copyTradeWallet && wallet) {
+      log.info({ copyTradeWallet }, 'Initializing Private Copy Trader...');
+      const { CopyTrader } = await import('./trading/copy-trader.js');
+      copyTrader = new CopyTrader(
+        {
+          walletAddress: copyTradeWallet,
+          pollIntervalMs: 2000,
+          enabled: true
+        },
+        helius,
+        connection
+      );
+
+      copyTrader.start();
+
+      // Listen for copy signals
+      agentEvents.onAny(async (event) => {
+        if (event.type === 'COPY_TRADE_SIGNAL' && tradingEngine) {
+           const { mint, sourceWallet, solSpent } = event.data;
+           log.info(`⚡ COPY SIGNAL: ${sourceWallet} bought ${mint} (${solSpent} SOL)`);
+           
+           if (process.env.TRADING_ENABLED === 'true') {
+             await tradingEngine.executeCopyTrade(mint, sourceWallet, solSpent);
+             
+             // Voice it!
+             if (narrator) {
+               await narrator.say(`Copying the master. Buying ${mint.slice(0,6)}.`);
+             }
+           } else {
+             log.info('Trading disabled - skipping copy trade execution');
+           }
+        }
+      });
+    }
+
     // Start WebSocket server (Railway uses PORT, fallback to WEBSOCKET_PORT or 8080)
     const websocketPort = parseInt(process.env.PORT || process.env.WEBSOCKET_PORT || '8080');
     let wss: any = null;
@@ -217,7 +256,15 @@ async function main(): Promise<void> {
       const { agentEvents } = await import('./events/emitter.js');
 
       log.info({ port: websocketPort }, 'Starting WebSocket server...');
-      wss = createWebSocketServer(websocketPort, agentEvents, claude, narrator);
+      wss = createWebSocketServer(
+        websocketPort,
+        agentEvents,
+        claude,
+        narrator,
+        tradingEngine,
+        tokenSafety,
+        process.env.TRADING_ENABLED === 'true'
+      );
 
       // Set WebSocket on narrator if available
       if (narrator) {
@@ -365,31 +412,87 @@ async function main(): Promise<void> {
         setTimeout(speakRandomly, 120000 + Math.random() * 60000);
         log.info('💭 Random thoughts enabled (every 2-5 minutes)');
 
-        // Random commentary on new tokens (30% chance)
+        // Smart token commentary - comment on interesting tokens, not random ones
         let lastTokenCommentTime = 0;
         const TOKEN_COMMENT_COOLDOWN = 15000; // 15 second cooldown between comments
 
+        // Track trading context for chat responses
         agentEvents.onAny(async (event) => {
-          if (event.type !== 'TOKEN_DISCOVERED') return;
+          // Update trading context for chat
+          if (event.type === 'ANALYSIS_THOUGHT' && event.data.stage === 'scanning') {
+            claude.updateTradingContext({
+              currentlyAnalyzing: event.data.symbol,
+            });
+          }
+
+          if (event.type === 'ANALYSIS_THOUGHT' && event.data.stage === 'decision') {
+            claude.updateTradingContext({
+              currentlyAnalyzing: undefined,
+              tokensAnalyzed: [
+                ...([] as Array<{symbol: string; verdict: string}>),
+                {
+                  symbol: event.data.symbol,
+                  verdict: event.data.details?.shouldTrade ? 'potential' : 'skip',
+                }
+              ],
+            });
+          }
+
+          if (event.type === 'TRADE_EXECUTED') {
+            claude.updateTradingContext({
+              lastTrade: {
+                symbol: event.data.mint.slice(0, 8),
+                type: event.data.type,
+                time: Date.now(),
+              },
+            });
+          }
+        });
+
+        // Comment on tokens entering analysis pipeline (passed initial filters)
+        agentEvents.onAny(async (event) => {
+          // Only comment on tokens entering analysis (they have potential)
+          if (event.type !== 'ANALYSIS_THOUGHT') return;
+          if (event.data.stage !== 'scanning') return;
 
           const now = Date.now();
           // Skip if commented too recently
           if (now - lastTokenCommentTime < TOKEN_COMMENT_COOLDOWN) return;
 
-          // 30% chance to comment on a token
-          if (Math.random() > 0.3) return;
+          const token = event.data;
+
+          // Check if it has a silly name worth roasting
+          const sillyCategory = detectSillyName(token.symbol || '', token.name || '');
+
+          // Always roast silly names, otherwise 50% chance for interesting tokens
+          if (!sillyCategory && Math.random() > 0.5) return;
 
           lastTokenCommentTime = now;
 
           try {
-            const token = event.data;
-            const commentary = await claude.generateTokenCommentary({
-              symbol: token.symbol,
-              name: token.name,
-              marketCapSol: token.marketCapSol,
-              liquidity: token.liquidity,
-              priceChange5m: token.priceChange5m,
-            });
+            let commentary: string;
+
+            if (sillyCategory) {
+              // Generate a roast for the silly name
+              commentary = await claude.generateSillyNameRoast(
+                {
+                  symbol: token.symbol,
+                  name: token.name || token.symbol,
+                  marketCapSol: token.marketCapSol,
+                },
+                sillyCategory
+              );
+              log.debug({ symbol: token.symbol, category: sillyCategory }, 'Silly name detected - roasting');
+            } else {
+              // Generate standard commentary for interesting token
+              commentary = await claude.generateTokenCommentary({
+                symbol: token.symbol,
+                name: token.name || token.symbol,
+                marketCapSol: token.marketCapSol,
+                liquidity: token.liquidity,
+                priceChange5m: token.priceChange5m,
+              });
+            }
 
             // Emit commentary event for dashboard
             agentEvents.emit({
@@ -399,6 +502,8 @@ async function main(): Promise<void> {
                 mint: token.mint,
                 symbol: token.symbol,
                 commentary,
+                isSillyName: !!sillyCategory,
+                sillyCategory: sillyCategory || undefined,
               },
             });
 
@@ -411,7 +516,7 @@ async function main(): Promise<void> {
           }
         });
 
-        log.info('🎤 Token commentary enabled (30% of new tokens)');
+        log.info('🎤 Smart token commentary enabled (50% of interesting tokens, 100% of silly names)');
       }
 
       log.info('');

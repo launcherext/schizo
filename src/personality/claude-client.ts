@@ -13,6 +13,7 @@ import {
   formatBuybackContext
 } from './prompts.js';
 import type { AnalysisContext } from './prompts.js';
+import type { SillyCategory } from './name-analyzer.js';
 
 /**
  * Claude client configuration
@@ -41,6 +42,16 @@ interface ChatHistoryEntry {
 }
 
 /**
+ * Trading activity context for chat responses
+ */
+interface TradingActivity {
+  tokensAnalyzed: Array<{symbol: string; verdict: string; reason?: string}>;
+  lastTrade?: {symbol: string; type: 'BUY' | 'SELL'; time: number};
+  openPositions: number;
+  currentlyAnalyzing?: string;
+}
+
+/**
  * Claude API client for personality generation
  */
 export class ClaudeClient {
@@ -49,6 +60,9 @@ export class ClaudeClient {
   private chatHistory: ChatHistoryEntry[] = [];
   private readonly MAX_HISTORY_ENTRIES = 10; // Keep last 10 messages for context
   private readonly HISTORY_EXPIRY_MS = 5 * 60 * 1000; // Expire history after 5 minutes of silence
+
+  // Track recent trading activity for chat context
+  private recentActivity: TradingActivity = { tokensAnalyzed: [], openPositions: 0 };
 
   constructor(config: ClaudeConfig) {
     this.config = config;
@@ -77,6 +91,46 @@ export class ClaudeClient {
     if (this.chatHistory.length > this.MAX_HISTORY_ENTRIES) {
       this.chatHistory = this.chatHistory.slice(-this.MAX_HISTORY_ENTRIES);
     }
+  }
+
+  /**
+   * Update trading context (called from index.ts when events happen)
+   */
+  updateTradingContext(activity: Partial<TradingActivity>): void {
+    Object.assign(this.recentActivity, activity);
+    // Keep only last 5 analyzed tokens
+    if (this.recentActivity.tokensAnalyzed.length > 5) {
+      this.recentActivity.tokensAnalyzed = this.recentActivity.tokensAnalyzed.slice(-5);
+    }
+  }
+
+  /**
+   * Format trading context for injection into chat
+   */
+  private formatTradingContext(): string {
+    const parts: string[] = [];
+
+    if (this.recentActivity.currentlyAnalyzing) {
+      parts.push(`Currently analyzing: ${this.recentActivity.currentlyAnalyzing}`);
+    }
+
+    if (this.recentActivity.tokensAnalyzed.length > 0) {
+      const recent = this.recentActivity.tokensAnalyzed.slice(-3)
+        .map(t => `${t.symbol} (${t.verdict})`).join(', ');
+      parts.push(`Recently analyzed: ${recent}`);
+    }
+
+    if (this.recentActivity.lastTrade) {
+      const t = this.recentActivity.lastTrade;
+      const ago = Math.round((Date.now() - t.time) / 60000);
+      parts.push(`Last trade: ${t.type} ${t.symbol} (${ago}m ago)`);
+    }
+
+    if (this.recentActivity.openPositions > 0) {
+      parts.push(`Open positions: ${this.recentActivity.openPositions}`);
+    }
+
+    return parts.length > 0 ? `[YOUR CURRENT ACTIVITY: ${parts.join('. ')}]` : '';
   }
 
   /**
@@ -205,8 +259,14 @@ export class ClaudeClient {
         { role: 'user', content: userContext },
       ];
 
-      // Add context about what kind of response we need
+      // Add trading context and response type context
+      const tradingContext = this.formatTradingContext();
       const contextPrefix = this.getResponseContext(message);
+
+      // Combine trading context with user message
+      const enhancedMessage = tradingContext
+        ? `${tradingContext}\n\n${contextPrefix}${userContext}`
+        : `${contextPrefix}${userContext}`;
 
       const response = await this.anthropic.messages.create({
         model: this.config.model,
@@ -216,7 +276,7 @@ export class ClaudeClient {
           ...messages.slice(0, -1), // Previous history
           {
             role: 'user',
-            content: `${contextPrefix}${userContext}`
+            content: enhancedMessage
           },
         ],
       });
@@ -410,6 +470,105 @@ RULES:
       logger.error({ error, symbol: token.symbol }, 'Failed to generate token commentary');
       return this.generateFallbackTokenCommentary(token);
     }
+  }
+
+  /**
+   * Generate a roast for tokens with silly/meme names
+   */
+  async generateSillyNameRoast(
+    token: { symbol: string; name: string; marketCapSol?: number },
+    category: SillyCategory
+  ): Promise<string> {
+    const prompts: Record<SillyCategory, string> = {
+      food: `Food token "${token.symbol}" (${token.name}) just dropped. Roast it - who's funding these, DoorDash? One SHORT sentence, max 15 words.`,
+      animal: `Another animal token: ${token.symbol} (${token.name}). DOGE already happened. Mock this copycat in one SHORT sentence, max 15 words.`,
+      copycat: `${token.symbol} - they literally just added INU/PEPE/DOGE to something. Roast the lack of creativity. One SHORT sentence, max 15 words.`,
+      pump: `They named it "${token.symbol}". Very subtle pump signal there. Mock them in one SHORT sentence, max 15 words.`,
+      celebrity: `${token.symbol} token (${token.name})? Celebrity grift detected. One sarcastic sentence, max 15 words.`,
+      random: `${token.symbol} - just random letters. They didn't even try with the name. Quick roast, one sentence, max 15 words.`,
+      crude: `${token.symbol} (${token.name}) - I see what they did there. Keep it PG but acknowledge it's dumb. One sentence, max 15 words.`,
+    };
+
+    const context = `You're a paranoid AI trading agent live-streaming. A new token appeared with a silly name:
+- Symbol: ${token.symbol}
+- Name: ${token.name}
+- Market Cap: ${token.marketCapSol?.toFixed(2) || '?'} SOL
+
+${prompts[category]}
+
+RULES:
+- ONE sentence, max 15 words
+- Be funny/sarcastic about the NAME specifically
+- Stay in paranoid trader character
+- No generic responses`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: this.config.model,
+        max_tokens: 60,
+        system: SCHIZO_SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: context,
+        }],
+      });
+
+      return response.content[0].type === 'text'
+        ? response.content[0].text
+        : this.generateFallbackSillyRoast(token, category);
+    } catch (error) {
+      logger.error({ error, symbol: token.symbol }, 'Failed to generate silly name roast');
+      return this.generateFallbackSillyRoast(token, category);
+    }
+  }
+
+  /**
+   * Fallback roasts for silly names when Claude is unavailable
+   */
+  private generateFallbackSillyRoast(
+    token: { symbol: string; name: string },
+    category: SillyCategory
+  ): string {
+    const fallbacks: Record<SillyCategory, string[]> = {
+      food: [
+        `${token.symbol}? Someone's hungry for rug pulls.`,
+        `Food coin. The only thing getting eaten is your investment.`,
+        `${token.name}... I'm suddenly craving exit liquidity.`,
+      ],
+      animal: [
+        `${token.symbol}. Because DOGE worked so well for everyone.`,
+        `Another animal coin. The zoo of rugs expands.`,
+        `${token.name}. Cute name. Ugly tokenomics probably.`,
+      ],
+      copycat: [
+        `${token.symbol}. They really just... added INU to it. Revolutionary.`,
+        `Zero creativity. ${token.symbol}. At least try, devs.`,
+        `Copycat token detected. The pattern recognition is too easy.`,
+      ],
+      pump: [
+        `${token.symbol}. Subtle pump marketing there. Very subtle.`,
+        `They named it ${token.name}. Tell me you're rugpulling without telling me.`,
+        `${token.symbol}. The name screams "trust me bro."`,
+      ],
+      celebrity: [
+        `${token.symbol}. The celebrity probably doesn't even know this exists.`,
+        `Celebrity grift token #47829. Sure, this one will be different.`,
+        `${token.name}. Famous name. Anonymous dev. Classic combo.`,
+      ],
+      random: [
+        `${token.symbol}. They hit their keyboard and called it a token.`,
+        `Random letters. ${token.symbol}. The dev's cat named it.`,
+        `${token.symbol}. Even the name is low effort. Bullish? No.`,
+      ],
+      crude: [
+        `${token.symbol}. Very mature. Very professional. Very rug.`,
+        `${token.name}. The twelve-year-olds are launching tokens again.`,
+        `${token.symbol}. Edgy name. Probably edgy exit strategy too.`,
+      ],
+    };
+
+    const options = fallbacks[category];
+    return options[Math.floor(Math.random() * options.length)];
   }
 
   /**

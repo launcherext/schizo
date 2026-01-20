@@ -10,6 +10,8 @@ import { fileURLToPath } from 'url';
 import type { AgentEventEmitter } from '../events/emitter.js';
 import type { ClaudeClient } from '../personality/claude-client.js';
 import type { VoiceNarrator } from '../personality/deepgram-tts.js';
+import type { TradingEngine } from '../trading/trading-engine.js';
+import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
 import { logger } from '../lib/logger.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -44,6 +46,9 @@ export interface WebSocketContext {
   wss: WebSocketServer;
   claude?: ClaudeClient;
   narrator?: VoiceNarrator;
+  tradingEngine?: TradingEngine;
+  tokenSafety?: TokenSafetyAnalyzer;
+  tradingEnabled?: boolean;
 }
 
 /**
@@ -53,7 +58,10 @@ export function createWebSocketServer(
   port: number,
   eventEmitter: AgentEventEmitter,
   claude?: ClaudeClient,
-  narrator?: VoiceNarrator
+  narrator?: VoiceNarrator,
+  tradingEngine?: TradingEngine,
+  tokenSafety?: TokenSafetyAnalyzer,
+  tradingEnabled?: boolean
 ): WebSocketServer {
   // Create HTTP server to serve static files
   const server = createServer((req, res) => {
@@ -122,7 +130,7 @@ export function createWebSocketServer(
         const message = JSON.parse(data.toString());
 
         if (message.type === 'CHAT' && message.message) {
-          await handleChatMessage(message, ws, wss, eventEmitter, claude, narrator);
+          await handleChatMessage(message, ws, wss, eventEmitter, claude, narrator, tradingEngine, tokenSafety, tradingEnabled);
         }
       } catch (error) {
         logger.error({ error }, 'Error processing client message');
@@ -161,6 +169,37 @@ function broadcast(wss: WebSocketServer, event: object): void {
 }
 
 /**
+ * Detect Solana contract addresses in a message
+ * Solana addresses are base58 encoded, 32-44 characters
+ */
+function detectContractAddress(message: string): string | null {
+  // Solana address regex: base58 characters, 32-44 chars long
+  // Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+  const solanaAddressRegex = /\b([1-9A-HJ-NP-Za-km-z]{32,44})\b/g;
+  const matches = message.match(solanaAddressRegex);
+
+  if (!matches) return null;
+
+  // Filter to likely token mints (not wallet addresses which are also valid)
+  // Most token mints are 43-44 characters
+  for (const match of matches) {
+    if (match.length >= 32 && match.length <= 44) {
+      // Basic validation - ensure it's not just random text
+      // Real addresses typically have mixed case and numbers
+      const hasUpperCase = /[A-Z]/.test(match);
+      const hasLowerCase = /[a-z]/.test(match);
+      const hasNumbers = /[0-9]/.test(match);
+
+      if ((hasUpperCase || hasLowerCase) && hasNumbers) {
+        return match;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Handle a chat message from a client
  */
 async function handleChatMessage(
@@ -169,7 +208,10 @@ async function handleChatMessage(
   wss: WebSocketServer,
   eventEmitter: AgentEventEmitter,
   claude?: ClaudeClient,
-  narrator?: VoiceNarrator
+  narrator?: VoiceNarrator,
+  tradingEngine?: TradingEngine,
+  tokenSafety?: TokenSafetyAnalyzer,
+  tradingEnabled?: boolean
 ): Promise<void> {
   logger.info({
     username: chatMessage.username,
@@ -185,6 +227,42 @@ async function handleChatMessage(
       message: chatMessage.message,
     },
   });
+
+  // Check for contract address in message
+  const detectedCA = detectContractAddress(chatMessage.message);
+
+  if (detectedCA && tokenSafety) {
+    logger.info({ ca: detectedCA, username: chatMessage.username }, 'Contract address detected in chat');
+
+    // Handle CA analysis in background, respond immediately
+    handleContractAnalysis(detectedCA, chatMessage.username, wss, eventEmitter, claude, narrator, tradingEngine, tokenSafety, tradingEnabled);
+
+    // Quick acknowledgment
+    const ackResponse = pickRandom([
+      `Oh you want me to look at ${detectedCA.slice(0, 6)}...${detectedCA.slice(-4)}? Alright, running my paranoid checks...`,
+      `${detectedCA.slice(0, 6)}...${detectedCA.slice(-4)}? Let me scan this for honeypot vibes...`,
+      `Analyzing ${detectedCA.slice(0, 6)}...${detectedCA.slice(-4)}. Give me a sec to check the authorities...`,
+      `*squints at ${detectedCA.slice(0, 6)}...${detectedCA.slice(-4)}* Let me see what the whales know about this one...`,
+    ]);
+
+    // Send acknowledgment
+    const ackEvent = {
+      type: 'CHAT_RESPONSE' as const,
+      timestamp: Date.now(),
+      data: {
+        username: chatMessage.username,
+        originalMessage: chatMessage.message,
+        response: ackResponse,
+      },
+    };
+    broadcast(wss, ackEvent);
+
+    if (narrator) {
+      try { await narrator.say(ackResponse); } catch {}
+    }
+
+    return;
+  }
 
   // Try cached response first (instant, no API call)
   let response: string | null = getCachedResponse(chatMessage.message);
@@ -249,6 +327,159 @@ async function handleChatMessage(
   }
 
   logger.info({ response: response.slice(0, 50) }, 'Chat response sent');
+}
+
+/**
+ * Handle contract address analysis from chat
+ * Analyzes the token and either roasts it or buys it
+ */
+async function handleContractAnalysis(
+  mint: string,
+  username: string | undefined,
+  wss: WebSocketServer,
+  eventEmitter: AgentEventEmitter,
+  claude?: ClaudeClient,
+  narrator?: VoiceNarrator,
+  tradingEngine?: TradingEngine,
+  tokenSafety?: TokenSafetyAnalyzer,
+  tradingEnabled?: boolean
+): Promise<void> {
+  try {
+    if (!tokenSafety) {
+      logger.warn('Token safety analyzer not available');
+      return;
+    }
+
+    // Run safety analysis
+    const safetyResult = await tokenSafety.analyze(mint);
+    const shortMint = `${mint.slice(0, 6)}...${mint.slice(-4)}`;
+
+    logger.info({
+      mint,
+      isSafe: safetyResult.isSafe,
+      risks: safetyResult.risks,
+    }, 'Chat CA analysis complete');
+
+    let response: string;
+    let shouldBuy = false;
+
+    // Check for critical risks (honeypot flags)
+    const hasCriticalRisk = safetyResult.risks.some(r =>
+      r === 'MINT_AUTHORITY_ACTIVE' || r === 'FREEZE_AUTHORITY_ACTIVE'
+    );
+
+    if (hasCriticalRisk) {
+      // ROAST IT - Critical risks detected
+      const roasts = [
+        `${shortMint}? LOL. Mint authority is ACTIVE. They can print more tokens whenever they want. This is textbook honeypot setup. Hard pass, and you should run too.`,
+        `Bruh. ${shortMint} has freeze authority enabled. They can literally freeze your tokens and you can't sell. This is a trap. I'm not touching this garbage.`,
+        `*dies laughing* You want me to buy ${shortMint}? It has ${safetyResult.risks.join(' AND ')}. This is either a scam or the devs are idiots. Either way, NO.`,
+        `${shortMint} analysis complete: IT'S A TRAP. ${safetyResult.risks.join(', ')}. The only thing this token is good for is a screenshot for my "rugs I avoided" collection.`,
+        `My paranoid sensors are SCREAMING. ${shortMint} has ${safetyResult.risks.length} red flags: ${safetyResult.risks.join(', ')}. Whoever shilled you this wants your money.`,
+      ];
+      response = pickRandom(roasts);
+
+    } else if (!safetyResult.isSafe || safetyResult.risks.length > 2) {
+      // Sketchy but not critical - mock it
+      const skeptical = [
+        `${shortMint} passed the honeypot check but still looks sketchy. ${safetyResult.risks.length} yellow flags: ${safetyResult.risks.join(', ')}. I'm watching but not buying.`,
+        `Hmm. ${shortMint} isn't an obvious rug but my paranoid senses are tingling. ${safetyResult.risks.join(', ')}. Proceed with extreme caution fren.`,
+        `${shortMint}: Not the worst I've seen, but not great either. ${safetyResult.risks.join(', ')}. DYOR - I'm staying on the sidelines.`,
+      ];
+      response = pickRandom(skeptical);
+
+    } else {
+      // Looks clean - consider buying
+      shouldBuy = true;
+
+      if (tradingEngine && tradingEnabled) {
+        // Actually try to buy
+        const decision = await tradingEngine.evaluateToken(mint);
+
+        if (decision.shouldTrade) {
+          // Execute the buy
+          const signature = await tradingEngine.executeBuy(mint);
+
+          if (signature) {
+            const buyResponses = [
+              `${shortMint} passed my paranoid checks. ${decision.smartMoneyCount} smart money wallets in. I'm aping ${decision.positionSizeSol} SOL. Let's ride.`,
+              `You know what? ${shortMint} actually looks legit. Clean authorities, smart money present. Just bought ${decision.positionSizeSol} SOL worth. Thanks for the alpha fren.`,
+              `Alright ${username ? '@' + username : 'anon'}, you convinced me. ${shortMint} checks out. Bought ${decision.positionSizeSol} SOL. If this rugs, I'm blaming you.`,
+              `${shortMint}: No honeypot flags, ${decision.smartMoneyCount} whales already in. Taking a position. ${decision.positionSizeSol} SOL deployed. LFG.`,
+            ];
+            response = pickRandom(buyResponses);
+
+            // Emit trade event
+            eventEmitter.emit({
+              type: 'TRADE_EXECUTED',
+              timestamp: Date.now(),
+              data: {
+                mint,
+                type: 'BUY',
+                signature,
+                amount: decision.positionSizeSol,
+              },
+            });
+          } else {
+            response = `${shortMint} looked good but the trade failed. Probably slippage or liquidity issues. The universe is telling me no.`;
+          }
+        } else {
+          // Passed safety but failed other checks (smart money, liquidity, etc)
+          const passResponses = [
+            `${shortMint} isn't a honeypot but ${decision.reasons.join('. ')}. Not buying, but at least it probably won't rug you instantly.`,
+            `Clean token but meh setup. ${decision.reasons.join('. ')}. Maybe later if whales start loading.`,
+            `${shortMint}: Safe but not sexy. ${decision.reasons.join('. ')}. Wake me up when there's smart money.`,
+          ];
+          response = pickRandom(passResponses);
+        }
+      } else {
+        // Trading disabled - just report analysis
+        const analysisOnly = [
+          `${shortMint} looks clean! No honeypot flags, authorities are renounced. Would buy if trading was enabled. You might be onto something fren.`,
+          `Yo this actually passes my checks. ${shortMint} has clean authorities. I can't trade rn but this doesn't look like a rug. NFA.`,
+          `${shortMint}: Surprisingly not trash. Clean setup. Trading's off but if I could buy, I might consider it. DYOR tho.`,
+        ];
+        response = pickRandom(analysisOnly);
+      }
+    }
+
+    // Send the analysis response
+    const responseEvent = {
+      type: 'CHAT_RESPONSE' as const,
+      timestamp: Date.now(),
+      data: {
+        username,
+        originalMessage: mint,
+        response,
+      },
+    };
+    broadcast(wss, responseEvent);
+
+    // Voice it
+    if (narrator) {
+      try {
+        await narrator.say(response);
+      } catch (error) {
+        logger.error({ error }, 'Error voicing CA analysis');
+      }
+    }
+
+    logger.info({ mint, response: response.slice(0, 50), shouldBuy }, 'CA analysis response sent');
+
+  } catch (error) {
+    logger.error({ error, mint }, 'Error analyzing contract address from chat');
+
+    const errorResponse = `Something went wrong analyzing ${mint.slice(0, 6)}...${mint.slice(-4)}. My circuits are fried. Try again?`;
+    broadcast(wss, {
+      type: 'CHAT_RESPONSE',
+      timestamp: Date.now(),
+      data: {
+        username,
+        originalMessage: mint,
+        response: errorResponse,
+      },
+    });
+  }
 }
 
 /**

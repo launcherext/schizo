@@ -1,0 +1,2 @@
+src/trading/copy-trader.ts(173,33): error TS2339: Property 'connection' does not exist on type 'CopyTrader'.
+src/trading/copy-trader.ts(186,49): error TS7006: Parameter 'k' implicitly has an 'any' type.
