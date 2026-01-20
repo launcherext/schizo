@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About $SCHIZO - How It Works</title>
+    <link rel="icon" type="image/png" href="schizo-favicon.png">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .about-page {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .about-header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .about-header img {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            margin-bottom: 20px;
+            border: 3px solid var(--accent);
+            box-shadow: 0 0 30px rgba(78, 255, 205, 0.3);
+        }
+
+        .about-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+
+        .about-header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .about-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .about-section h2 {
+            color: var(--accent);
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .about-section h2 .emoji {
+            font-size: 1.8rem;
+        }
+
+        .about-section p {
+            color: var(--text);
+            line-height: 1.8;
+            margin-bottom: 15px;
+        }
+
+        .about-section ul {
+            color: var(--text);
+            line-height: 2;
+            padding-left: 20px;
+        }
+
+        .about-section li {
+            margin-bottom: 10px;
+        }
+
+        .flywheel-diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin: 30px 0;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+
+        .flywheel-step {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 25px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .flywheel-step .number {
+            background: var(--accent);
+            color: var(--bg);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .flywheel-arrow {
+            color: var(--accent);
+            font-size: 1.5rem;
+        }
+
+        .highlight-box {
+            background: rgba(78, 255, 205, 0.1);
+            border-left: 4px solid var(--accent);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .highlight-box p {
+            margin: 0;
+            color: var(--text);
+        }
+
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .tech-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .tech-item .icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .tech-item h4 {
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .tech-item p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent);
+            text-decoration: none;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            .about-header h1 {
+                font-size: 1.8rem;
+            }
+
+            .about-section {
+                padding: 20px;
+            }
+
+            .flywheel-step {
+                padding: 12px 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="scanlines"></div>
+
+    <div class="about-page">
+        <a href="/" class="back-link">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back to Dashboard
+        </a>
+
+        <div class="about-header">
+            <img src="schizo-logo.png" alt="$SCHIZO">
+            <h1>How $SCHIZO Works</h1>
+            <p>A self-sustaining AI trading agent</p>
+        </div>
+
+        <!-- The Simple Explanation -->
+        <section class="about-section">
+            <h2><span class="emoji">💡</span> The Simple Version</h2>
+            <p>
+                <strong>$SCHIZO is an AI that trades memecoins and uses its profits to buy back its own token.</strong>
+            </p>
+            <p>
+                Think of it like a robot trader that works 24/7. When it makes money, instead of keeping the profits,
+                it uses them to buy $SCHIZO tokens - which helps everyone who holds the token.
+            </p>
+        </section>
+
+        <!-- How the Money Works -->
+        <section class="about-section">
+            <h2><span class="emoji">💰</span> Where Does The Money Come From?</h2>
+            <p>
+                When you create a token on pump.fun, you earn <strong>creator rewards</strong> - a small fee from every
+                trade.
+                These rewards are what fund $SCHIZO's trading.
+            </p>
+
+            <div class="highlight-box">
+                <p>
+                    <strong>No investor funds at risk.</strong> The AI trades using creator rewards, not money from
+                    token buyers.
+                    If it loses a trade, it's the rewards that take the hit - not your investment.
+                </p>
+            </div>
+        </section>
+
+        <!-- The Flywheel -->
+        <section class="about-section">
+            <h2><span class="emoji">🔄</span> The Buyback Flywheel</h2>
+            <p>Here's how the cycle works:</p>
+
+            <div class="flywheel-diagram">
+                <div class="flywheel-step">
+                    <span class="number">1</span>
+                    <span>Creator rewards come in from trading fees</span>
+                </div>
+                <div class="flywheel-arrow">↓</div>
+                <div class="flywheel-step">
+                    <span class="number">2</span>
+                    <span>AI uses rewards to trade other memecoins</span>
+                </div>
+                <div class="flywheel-arrow">↓</div>
+                <div class="flywheel-step">
+                    <span class="number">3</span>
+                    <span>Profits from winning trades trigger buybacks</span>
+                </div>
+                <div class="flywheel-arrow">↓</div>
+                <div class="flywheel-step">
+                    <span class="number">4</span>
+                    <span>Buybacks increase $SCHIZO token value</span>
+                </div>
+                <div class="flywheel-arrow">↻</div>
+            </div>
+
+            <p>
+                The more the AI trades successfully, the more buybacks happen. The more buybacks, the better for
+                holders.
+                It's a flywheel that keeps spinning.
+            </p>
+        </section>
+
+        <!-- What Makes It Different -->
+        <section class="about-section">
+            <h2><span class="emoji">🧠</span> What Makes $SCHIZO Different?</h2>
+            <ul>
+                <li><strong>Fully Transparent</strong> - Watch every trade live on the dashboard</li>
+                <li><strong>AI-Powered</strong> - Uses pattern recognition to spot opportunities and avoid rugs</li>
+                <li><strong>Self-Sustaining</strong> - Profits feed back into the token through buybacks</li>
+                <li><strong>Paranoid by Design</strong> - The AI is programmed to be skeptical and cautious</li>
+                <li><strong>24/7 Operation</strong> - Never sleeps, always watching the market</li>
+            </ul>
+        </section>
+
+        <!-- The Tech (Simple) -->
+        <section class="about-section">
+            <h2><span class="emoji">⚙️</span> The Tech (Explained Simply)</h2>
+            <p>
+                Don't worry, you don't need to understand code. Here's what's happening under the hood:
+            </p>
+
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <div class="icon">👁️</div>
+                    <h4>Token Scanner</h4>
+                    <p>Watches for new tokens launching in real-time</p>
+                </div>
+                <div class="tech-item">
+                    <div class="icon">🔍</div>
+                    <h4>Safety Checker</h4>
+                    <p>Analyzes tokens for red flags and rug risks</p>
+                </div>
+                <div class="tech-item">
+                    <div class="icon">🧠</div>
+                    <h4>AI Brain</h4>
+                    <p>Decides what to trade based on patterns</p>
+                </div>
+                <div class="tech-item">
+                    <div class="icon">🎯</div>
+                    <h4>Risk Manager</h4>
+                    <p>Sets stop-losses to limit downside</p>
+                </div>
+                <div class="tech-item">
+                    <div class="icon">💬</div>
+                    <h4>Personality</h4>
+                    <p>The paranoid voice you hear on stream</p>
+                </div>
+                <div class="tech-item">
+                    <div class="icon">🔄</div>
+                    <h4>Buyback Engine</h4>
+                    <p>Automatically buys $SCHIZO with profits</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- FAQ -->
+        <section class="about-section">
+            <h2><span class="emoji">❓</span> Common Questions</h2>
+
+            <p><strong>What if the AI loses money?</strong></p>
+            <p>
+                The AI has built-in protection: stop-losses to cut bad trades early, position limits so it never bets
+                too big,
+                and a circuit breaker that pauses trading if losses pile up. It trades with creator rewards, not your
+                tokens.
+            </p>
+
+            <p><strong>How often do buybacks happen?</strong></p>
+            <p>
+                Every time the AI closes a profitable trade, a portion automatically goes to buying $SCHIZO.
+                You can watch buybacks happen live on the dashboard.
+            </p>
+
+            <p><strong>Is this a rug?</strong></p>
+            <p>
+                The AI is literally programmed to be paranoid about rugs. Everything is transparent -
+                watch the trades, see the wallet, verify the buybacks. Trust nothing, verify everything.
+            </p>
+        </section>
+
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="/" class="btn-primary" style="display: inline-block; padding: 15px 30px;">
+                Watch $SCHIZO Trade Live
+            </a>
+        </div>
+    </div>
+
+</body>
+
+</html>
