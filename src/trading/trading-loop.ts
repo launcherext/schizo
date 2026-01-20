@@ -702,44 +702,29 @@ export class TradingLoop {
       data: { mint },
     });
 
-    // Emit SCANNING thought - SCHIZO notices the token
-    if (this.claude) {
-      try {
-        const scanThought = await this.claude.generateAnalysisThought('scanning', {
-          symbol,
-          name,
-          marketCapSol,
-          liquidity,
-        });
-        agentEvents.emit({
-          type: 'ANALYSIS_THOUGHT',
-          timestamp: Date.now(),
-          data: {
-            mint,
-            symbol,
-            stage: 'scanning',
-            thought: scanThought,
-          },
-        });
-      } catch (err) {
-        logger.debug({ err }, 'Failed to generate scanning thought');
-      }
-    }
+    // NOTE: Removed verbose scanning thoughts - SCHIZO was too chatty
+    // Only speak on interesting findings (safety issues, trades, etc.)
 
     try {
       // PRE-CHECK: Minimum activity check - don't buy zero-action tokens
       // Skip for trending tokens (already vetted by Birdeye)
       if (!isTrending) {
-        const MIN_AGE_MINUTES = 5; // Token must be at least 5 mins old
-        const MIN_VOLUME_USD = 100; // Must have at least $100 volume
-        const MIN_TRANSACTIONS = 10; // Must have at least 10 transactions
+        const MIN_AGE_MINUTES = 2; // Reduced from 5 to 2 minutes - allow newer tokens
+        const MIN_VOLUME_USD = 50; // Reduced from 100 to 50
+        const MIN_TRANSACTIONS = 5; // Reduced from 10 to 5
 
         const tokenAge = metadata?.ageMinutes || 0;
         const volume = metadata?.volume1h || 0;
         const totalTxns = (metadata?.buys5m || 0) + (metadata?.sells5m || 0);
 
-        if (tokenAge < MIN_AGE_MINUTES) {
-          logger.info({ mint, symbol, tokenAge }, 'REJECTED: Token too new - need activity history');
+        // Allow tokens younger than MIN_AGE if they have strong activity signals
+        const hasStrongActivity = volume >= 200 || totalTxns >= 20;
+
+        if (tokenAge < MIN_AGE_MINUTES && !hasStrongActivity) {
+          logger.info({ 
+            mint, symbol, tokenAge, volume, totalTxns,
+            reason: 'Too new without strong activity' 
+          }, 'REJECTED: Token too new without sufficient activity');
           return;
         }
 
@@ -748,7 +733,7 @@ export class TradingLoop {
           return;
         }
 
-        logger.info({ mint, symbol, tokenAge, volume, totalTxns }, 'Token passed activity checks');
+        logger.info({ mint, symbol, tokenAge, volume, totalTxns, hasStrongActivity }, 'Token passed activity checks');
       } else {
         logger.info({ mint, symbol, volume24h: birdeyeToken?.volume24h, liquidity: birdeyeToken?.liquidity }, 'Trending token - skipping new token activity checks');
       }
@@ -762,14 +747,17 @@ export class TradingLoop {
         data: { mint, result: safetyResult },
       });
 
-      // Emit SAFETY thought - SCHIZO reacts to safety check
-      if (this.claude) {
+      // Only emit SAFETY thought if there are critical risks worth calling out
+      const hasCriticalRisk = safetyResult.risks.some(r =>
+        r === 'MINT_AUTHORITY_ACTIVE' || r === 'FREEZE_AUTHORITY_ACTIVE'
+      );
+      if (this.claude && hasCriticalRisk) {
         try {
           const safetyThought = await this.claude.generateAnalysisThought('safety', {
             symbol,
             name,
             isSafe: safetyResult.isSafe,
-            risks: safetyResult.risks, // TokenRisk is already a string literal type
+            risks: safetyResult.risks,
           });
           agentEvents.emit({
             type: 'ANALYSIS_THOUGHT',
@@ -802,8 +790,8 @@ export class TradingLoop {
         data: { mint, count: smartMoneyCount },
       });
 
-      // Emit SMART_MONEY thought - SCHIZO comments on whale activity
-      if (this.claude) {
+      // Only emit SMART_MONEY thought if we actually found smart money (rare/interesting)
+      if (this.claude && smartMoneyCount > 0) {
         try {
           const smartMoneyThought = await this.claude.generateAnalysisThought('smart_money', {
             symbol,

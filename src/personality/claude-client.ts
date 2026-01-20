@@ -666,7 +666,27 @@ Say ONE SHORT sentence (max 12 words) explaining why you're passing. Examples:
         ? response.content[0].text.trim()
         : this.generateFallbackAnalysisThought(stage, context);
     } catch (error) {
-      logger.error({ error, stage, symbol: context.symbol }, 'Failed to generate analysis thought');
+      // Enhanced error logging to expose actual API failures
+      logger.error({ 
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorName: error instanceof Error ? error.name : undefined,
+        stage, 
+        symbol: context.symbol 
+      }, 'Failed to generate analysis thought');
+      
+      // Check for specific error types to help with debugging
+      if (error instanceof Error) {
+        if (error.message.includes('rate_limit') || error.message.includes('429')) {
+          logger.warn('Claude API rate limit hit - using fallback');
+        } else if (error.message.includes('authentication') || error.message.includes('401')) {
+          logger.error('Claude API authentication failed - check ANTHROPIC_API_KEY');
+        } else if (error.message.includes('network') || error.message.includes('ECONNREFUSED')) {
+          logger.error('Network error connecting to Claude API');
+        }
+      }
+      
       return this.generateFallbackAnalysisThought(stage, context);
     }
   }
