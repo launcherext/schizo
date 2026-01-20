@@ -68,7 +68,7 @@ function handleEvent(event) {
       break;
     case 'TRADE_EXECUTED':
       const emoji = event.data.type === 'BUY' ? '💰' : '💸';
-      addToFeed(`${emoji} ${event.data.type}: ${event.data.amount.toFixed(2)} SOL - ${formatMint(event.data.mint)}`, 'trade');
+      addToFeed(`${emoji} ${event.data.type}: ${event.data.amount.toFixed(2)} SOL - ${formatMint(event.data.mint)}`, 'trade', event.data.mint);
       addToTradesTable(event.data);
       break;
     case 'BUYBACK_TRIGGERED':
@@ -80,10 +80,10 @@ function handleEvent(event) {
       updateStats(event.data);
       break;
     case 'STOP_LOSS':
-      addToFeed(`🛑 STOP-LOSS: ${formatMint(event.data.mint)} @ ${event.data.lossPercent.toFixed(1)}% loss`, 'stop-loss');
+      addToFeed(`🛑 STOP-LOSS: ${formatMint(event.data.mint)} @ ${event.data.lossPercent.toFixed(1)}% loss`, 'stop-loss', event.data.mint);
       break;
     case 'TAKE_PROFIT':
-      addToFeed(`🎯 TAKE-PROFIT: ${formatMint(event.data.mint)} @ +${event.data.profitPercent.toFixed(1)}% gain`, 'take-profit');
+      addToFeed(`🎯 TAKE-PROFIT: ${formatMint(event.data.mint)} @ +${event.data.profitPercent.toFixed(1)}% gain`, 'take-profit', event.data.mint);
       break;
     case 'SCHIZO_SPEAKS':
       // Voice only - no text in feed
@@ -152,6 +152,7 @@ function addToTokenStream(token) {
       <div class="token-stream-info">
         <span class="token-stream-symbol">${token.symbol || 'UNK'}</span>
         <span class="token-stream-name">${(token.name || 'Unknown').slice(0, 20)}</span>
+        <span class="token-stream-ca clickable-ca" data-ca="${token.mint}" title="Click to copy CA">${formatMint(token.mint)}</span>
       </div>
     </div>
     <div class="token-stream-right">
@@ -160,6 +161,15 @@ function addToTokenStream(token) {
       <span class="token-stream-change ${priceChangeClass}">${priceChangeSign}${(token.priceChange5m || 0).toFixed(1)}%</span>
     </div>
   `;
+
+  // Add click handler for CA copy (stop propagation to not trigger chart open)
+  const caElement = tokenEl.querySelector('.clickable-ca');
+  if (caElement) {
+    caElement.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyToClipboard(token.mint, caElement);
+    });
+  }
 
   // Add to top of stream
   container.insertBefore(tokenEl, container.firstChild);
@@ -283,7 +293,7 @@ function updateStats(stats) {
 }
 
 // Add event to feed
-function addToFeed(message, className = '') {
+function addToFeed(message, className = '', mint = null) {
   if (isPaused) return;
 
   const feed = document.getElementById('feed');
@@ -291,7 +301,23 @@ function addToFeed(message, className = '') {
   div.className = `event ${className}`;
 
   const timestamp = new Date().toLocaleTimeString();
+
+  // If mint provided, make it clickable
+  if (mint) {
+    const formattedMint = formatMint(mint);
+    const clickableMint = `<span class="clickable-ca" data-ca="${mint}" title="Click to copy CA">${formattedMint}</span>`;
+    message = message.replace(formattedMint, clickableMint);
+  }
+
   div.innerHTML = `<span class="timestamp">[${timestamp}]</span>${message}`;
+
+  // Add click handler for CA if present
+  const caElement = div.querySelector('.clickable-ca');
+  if (caElement) {
+    caElement.addEventListener('click', (e) => {
+      copyToClipboard(caElement.dataset.ca, caElement);
+    });
+  }
 
   feed.appendChild(div);
 
@@ -351,21 +377,29 @@ function hideTypingIndicator() {
 function addToTradesTable(trade) {
   const tbody = document.querySelector('#trades tbody');
   const row = document.createElement('tr');
-  
+
   const time = new Date(trade.timestamp || Date.now()).toLocaleTimeString();
   const typeClass = trade.type === 'BUY' ? 'trade-buy' : 'trade-sell';
   const signature = formatSignature(trade.signature);
-  
+
   row.innerHTML = `
     <td>${time}</td>
     <td class="${typeClass}">${trade.type}</td>
-    <td>${formatMint(trade.mint)}</td>
+    <td><span class="clickable-ca" data-ca="${trade.mint}" title="Click to copy CA">${formatMint(trade.mint)}</span></td>
     <td>${trade.amount.toFixed(2)} SOL</td>
     <td><a href="https://solscan.io/tx/${trade.signature}" target="_blank">${signature}</a></td>
   `;
-  
+
+  // Add click handler for CA copy
+  const caElement = row.querySelector('.clickable-ca');
+  if (caElement) {
+    caElement.addEventListener('click', (e) => {
+      copyToClipboard(trade.mint, caElement);
+    });
+  }
+
   tbody.insertBefore(row, tbody.firstChild);
-  
+
   // Limit table to 20 rows
   while (tbody.children.length > 20) {
     tbody.removeChild(tbody.lastChild);
@@ -392,6 +426,43 @@ function formatMint(mint) {
 // Format signature
 function formatSignature(sig) {
   return sig.slice(0, 8) + '...';
+}
+
+// Copy to clipboard with visual feedback
+function copyToClipboard(text, element) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Show toast notification
+    showCopyToast('CA Copied!');
+
+    // Add visual feedback to clicked element
+    if (element) {
+      element.classList.add('copy-success');
+      setTimeout(() => element.classList.remove('copy-success'), 1500);
+    }
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+  });
+}
+
+// Show copy toast notification
+function showCopyToast(message) {
+  // Remove existing toast
+  const existingToast = document.querySelector('.copy-toast');
+  if (existingToast) existingToast.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'copy-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  // Trigger animation
+  setTimeout(() => toast.classList.add('show'), 10);
+
+  // Remove after animation
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 1500);
 }
 
 // Pause/Resume feed

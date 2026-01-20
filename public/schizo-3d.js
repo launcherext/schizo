@@ -79,9 +79,9 @@ function loadModel() {
         function(gltf) {
             schizoModel = gltf.scene;
 
-            // Scale and position
+            // Scale and position - moved down so it fits in frame
             schizoModel.scale.set(1.8, 1.8, 1.8);
-            schizoModel.position.set(0, 0, 0);
+            schizoModel.position.set(0, -0.3, 0);
 
             scene.add(schizoModel);
             console.log('Schizo 3D model loaded');
@@ -119,7 +119,7 @@ function animate() {
     if (schizoModel) {
         const time = Date.now() * 0.001;
         schizoModel.rotation.y = Math.sin(time * 0.5) * 0.15;
-        schizoModel.position.y = Math.sin(time * 0.8) * 0.05;
+        schizoModel.position.y = -0.3 + Math.sin(time * 0.8) * 0.03;
     }
 
     // Render

@@ -1476,3 +1476,61 @@ td a:hover {
         margin: 0 auto;
     }
 }
+
+/* ============================================
+   CLICK TO COPY CA STYLES
+   ============================================ */
+
+.clickable-ca {
+    cursor: pointer;
+    color: rgba(140, 219, 199, 0.7);
+    font-family: monospace;
+    font-size: 0.85em;
+    padding: 2px 6px;
+    background: rgba(140, 219, 199, 0.08);
+    border: 1px solid rgba(140, 219, 199, 0.15);
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    display: inline-block;
+}
+
+.clickable-ca:hover {
+    color: #8cdbc7;
+    background: rgba(140, 219, 199, 0.15);
+    border-color: rgba(140, 219, 199, 0.4);
+    box-shadow: 0 0 10px rgba(140, 219, 199, 0.2);
+}
+
+.clickable-ca.copy-success {
+    color: #4ade80 !important;
+    background: rgba(74, 222, 128, 0.2) !important;
+    border-color: rgba(74, 222, 128, 0.5) !important;
+}
+
+/* Token stream CA styling */
+.token-stream-ca {
+    margin-top: 2px;
+}
+
+/* Copy toast notification */
+.copy-toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(74, 222, 128, 0.95);
+    color: #000;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 0.9em;
+    z-index: 10000;
+    opacity: 0;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 20px rgba(74, 222, 128, 0.4);
+}
+
+.copy-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}

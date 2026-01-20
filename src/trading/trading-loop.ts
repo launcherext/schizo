@@ -10,6 +10,7 @@ import type { TradingEngine } from './trading-engine.js';
 import type { ClaudeClient } from '../personality/claude-client.js';
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
 import { pumpPortalData, type PumpNewTokenEvent } from '../api/pumpportal-data.js';
+import { getBirdeyeClient, type BirdeyeToken } from '../api/birdeye.js';
 import { agentEvents } from '../events/emitter.js';
 import { logger } from '../lib/logger.js';
 
@@ -47,10 +48,13 @@ export class TradingLoop {
   private walletPublicKey?: PublicKey;
   private isRunning: boolean = false;
   private intervalId?: NodeJS.Timeout;
+  private trendingIntervalId?: NodeJS.Timeout; // Separate interval for trending scan
   private seenTokens = new Set<string>(); // Track tokens we've already analyzed
   private tokenMetadataCache = new Map<string, TokenMetadata>(); // Cache enriched data
   private newTokenQueue: PumpNewTokenEvent[] = []; // Queue of new tokens from PumpPortal
+  private trendingTokenQueue: BirdeyeToken[] = []; // Queue of trending tokens from Birdeye
   private isProcessing = false; // Prevent concurrent processing
+  private lastTrendingScan = 0; // Track last trending scan time
 
   constructor(
     config: TradingLoopConfig,
@@ -132,7 +136,193 @@ export class TradingLoop {
       this.emitStatsUpdate().catch(() => {});
     }, this.config.pollIntervalMs);
 
+    // Scan trending tokens every 60 seconds (Birdeye rate limit friendly)
+    const birdeyeClient = getBirdeyeClient();
+    if (birdeyeClient) {
+      logger.info('🦅 Birdeye integration enabled - scanning trending tokens');
+
+      // Initial scan after 5 seconds
+      setTimeout(() => {
+        this.scanTrendingTokens().catch(error => {
+          logger.error({ error }, 'Error in initial trending scan');
+        });
+      }, 5000);
+
+      // Then scan every 60 seconds
+      this.trendingIntervalId = setInterval(() => {
+        this.scanTrendingTokens().catch(error => {
+          logger.error({ error }, 'Error scanning trending tokens');
+        });
+      }, 60000); // Every 60 seconds
+    } else {
+      logger.warn('BIRDEYE_API_KEY not configured - trending token scanning disabled');
+    }
+
     logger.info({ intervalMs: this.config.pollIntervalMs }, 'Trading loop started');
+  }
+
+  /**
+   * Scan trending tokens from Birdeye
+   */
+  private async scanTrendingTokens(): Promise<void> {
+    const birdeyeClient = getBirdeyeClient();
+    if (!birdeyeClient) return;
+
+    logger.debug('Scanning trending tokens from Birdeye...');
+
+    try {
+      // Get trending tokens and top gainers
+      const [trending, gainers] = await Promise.all([
+        birdeyeClient.getTrendingTokens(15),
+        birdeyeClient.getTopGainers(10, '1h'),
+      ]);
+
+      const allTokens = [...trending, ...gainers];
+      let addedCount = 0;
+
+      for (const token of allTokens) {
+        // Skip if already seen
+        if (this.seenTokens.has(token.address)) continue;
+
+        // Quick filter for trending tokens
+        const filterResult = this.passesTrendingFilter(token);
+        if (!filterResult.passes) {
+          logger.debug({
+            address: token.address,
+            symbol: token.symbol,
+            reason: filterResult.reason
+          }, 'Trending token rejected by filter');
+          continue;
+        }
+
+        this.seenTokens.add(token.address);
+        this.trendingTokenQueue.push(token);
+        addedCount++;
+
+        logger.info({
+          address: token.address,
+          symbol: token.symbol,
+          name: token.name,
+          price: token.price,
+          priceChange24h: token.priceChange24h?.toFixed(1) + '%',
+          volume24h: token.volume24h,
+          liquidity: token.liquidity,
+        }, '📈 Trending token from Birdeye!');
+      }
+
+      if (addedCount > 0) {
+        logger.info({ addedCount }, 'Added trending tokens to queue');
+      }
+
+      // Process trending queue
+      await this.processTrendingQueue();
+
+    } catch (error) {
+      logger.error({ error }, 'Failed to scan trending tokens');
+    }
+  }
+
+  /**
+   * Filter for trending tokens (more established, need higher standards)
+   */
+  private passesTrendingFilter(token: BirdeyeToken): { passes: boolean; reason?: string } {
+    // Minimum liquidity for trending tokens ($5k)
+    const MIN_LIQUIDITY = 5000;
+    if (token.liquidity < MIN_LIQUIDITY) {
+      return { passes: false, reason: `Low liquidity: $${token.liquidity.toFixed(0)}` };
+    }
+
+    // Minimum volume ($1k in 24h)
+    const MIN_VOLUME = 1000;
+    if (token.volume24h < MIN_VOLUME) {
+      return { passes: false, reason: `Low volume: $${token.volume24h.toFixed(0)}` };
+    }
+
+    // Skip tokens that dumped hard (down >50% in 24h)
+    if (token.priceChange24h < -50) {
+      return { passes: false, reason: `Dumping: ${token.priceChange24h.toFixed(1)}%` };
+    }
+
+    // Suspicious patterns
+    const suspiciousPatterns = [/test/i, /rug/i, /scam/i, /fake/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        return { passes: false, reason: `Suspicious name: ${token.symbol}` };
+      }
+    }
+
+    return { passes: true };
+  }
+
+  /**
+   * Process trending token queue
+   */
+  private async processTrendingQueue(): Promise<void> {
+    if (this.isProcessing || this.trendingTokenQueue.length === 0) return;
+
+    // Process up to 3 trending tokens per cycle
+    const tokensToProcess = this.trendingTokenQueue.splice(0, 3);
+
+    for (const token of tokensToProcess) {
+      // Convert Birdeye token to analysis format
+      await this.analyzeAndTrade(token.address, undefined, token);
+    }
+  }
+
+  /**
+   * Quick filter to reject obvious rugs before full analysis
+   */
+  private passesQuickFilter(token: PumpNewTokenEvent): { passes: boolean; reason?: string } {
+    // Filter 1: Minimum market cap - need some action (not brand new with zero)
+    const MIN_MARKET_CAP_SOL = 2; // At least 2 SOL market cap (some trading happened)
+    if (!token.marketCapSol || token.marketCapSol < MIN_MARKET_CAP_SOL) {
+      return { passes: false, reason: `Market cap too low: ${(token.marketCapSol || 0).toFixed(2)} SOL (need >${MIN_MARKET_CAP_SOL})` };
+    }
+
+    // Filter 2: Suspicious names/symbols (common rug patterns)
+    const suspiciousPatterns = [
+      /test/i,
+      /rug/i,
+      /scam/i,
+      /fake/i,
+      /^[a-z]{1,2}$/i, // Very short symbols like "A" or "XY"
+      /\d{5,}/, // Symbols with 5+ consecutive numbers
+      /airdrop/i,
+      /free/i,
+      /presale/i,
+    ];
+
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        return { passes: false, reason: `Suspicious name/symbol: ${token.symbol}` };
+      }
+    }
+
+    return { passes: true };
+  }
+
+  /**
+   * Check if token has valid social links (Twitter, Website)
+   * Returns true if at least one valid social exists
+   */
+  private hasValidSocials(metadata: TokenMetadata | undefined): { valid: boolean; reason?: string } {
+    if (!metadata) {
+      return { valid: false, reason: 'No metadata available' };
+    }
+
+    // Check for social links in metadata
+    // DexScreener provides these when available
+    const hasTwitter = metadata.dexUrl?.includes('twitter') || false;
+    const hasWebsite = metadata.dexUrl?.includes('http') || false;
+
+    // For now, we'll use the presence of a DexScreener listing as a proxy
+    // Real implementation would check actual social links from token metadata
+    if (metadata.ageMinutes && metadata.ageMinutes > 5) {
+      // Token has been around for more than 5 minutes and has DexScreener data
+      return { valid: true };
+    }
+
+    return { valid: false, reason: 'Token too new - waiting for social verification' };
   }
 
   /**
@@ -144,12 +334,23 @@ export class TradingLoop {
 
     this.seenTokens.add(token.mint);
 
+    // Quick filter before adding to queue
+    const filterResult = this.passesQuickFilter(token);
+    if (!filterResult.passes) {
+      logger.debug({
+        mint: token.mint,
+        symbol: token.symbol,
+        reason: filterResult.reason,
+      }, 'Token rejected by quick filter');
+      return;
+    }
+
     logger.info({
       mint: token.mint,
       symbol: token.symbol,
       name: token.name,
       marketCapSol: token.marketCapSol,
-    }, '🆕 New token from PumpPortal!');
+    }, '🆕 New token from PumpPortal passed filters!');
 
     // Add to queue for processing
     this.newTokenQueue.push(token);
@@ -198,6 +399,11 @@ export class TradingLoop {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = undefined;
+    }
+
+    if (this.trendingIntervalId) {
+      clearInterval(this.trendingIntervalId);
+      this.trendingIntervalId = undefined;
     }
 
     // Disconnect from PumpPortal
@@ -267,9 +473,11 @@ export class TradingLoop {
         try {
           const lamports = await this.connection.getBalance(this.walletPublicKey);
           balance = lamports / LAMPORTS_PER_SOL;
-        } catch {
-          // Ignore balance fetch errors
+        } catch (err) {
+          logger.debug({ error: err }, 'Failed to fetch wallet balance');
         }
+      } else {
+        logger.debug('No wallet configured - balance will show as 0');
       }
 
       agentEvents.emit({
@@ -429,8 +637,9 @@ export class TradingLoop {
 
   /**
    * Analyze a token and execute trade if approved
+   * Accepts data from PumpPortal (new tokens) or Birdeye (trending tokens)
    */
-  private async analyzeAndTrade(mint: string, pumpToken?: PumpNewTokenEvent): Promise<void> {
+  private async analyzeAndTrade(mint: string, pumpToken?: PumpNewTokenEvent, birdeyeToken?: BirdeyeToken): Promise<void> {
     // Try to get enriched metadata from DexScreener
     let metadata = this.tokenMetadataCache.get(mint);
     if (!metadata) {
@@ -444,10 +653,11 @@ export class TradingLoop {
       }
     }
 
-    // Use PumpPortal data as fallback if DexScreener doesn't have it yet
-    const symbol = metadata?.symbol || pumpToken?.symbol || mint.slice(0, 6);
-    const name = metadata?.name || pumpToken?.name || 'Unknown';
-    const marketCapSol = pumpToken?.marketCapSol || 0;
+    // Use PumpPortal or Birdeye data as fallback
+    const symbol = metadata?.symbol || pumpToken?.symbol || birdeyeToken?.symbol || mint.slice(0, 6);
+    const name = metadata?.name || pumpToken?.name || birdeyeToken?.name || 'Unknown';
+    const marketCapSol = pumpToken?.marketCapSol || (birdeyeToken?.marketCap ? birdeyeToken.marketCap / 170 : 0);
+    const isTrending = !!birdeyeToken;
 
     logger.info({
       mint,
@@ -455,11 +665,12 @@ export class TradingLoop {
       name,
       hasDexData: !!metadata,
       marketCapSol,
-    }, 'Analyzing token...');
+      source: isTrending ? 'BIRDEYE_TRENDING' : (pumpToken ? 'PUMPPORTAL_NEW' : 'DEXSCREENER'),
+    }, isTrending ? '📈 Analyzing TRENDING token...' : '🆕 Analyzing NEW token...');
 
     // Emit TOKEN_DISCOVERED with best available data
-    // Use PumpPortal image if DexScreener doesn't have one
-    const imageUrl = metadata?.imageUrl || pumpToken?.imageUrl;
+    // Use PumpPortal image or Birdeye logo
+    const imageUrl = metadata?.imageUrl || pumpToken?.imageUrl || birdeyeToken?.logoURI;
 
     agentEvents.emit({
       type: 'TOKEN_DISCOVERED',
@@ -468,18 +679,18 @@ export class TradingLoop {
         mint,
         name,
         symbol,
-        priceUsd: metadata?.priceUsd || 0,
+        priceUsd: metadata?.priceUsd || birdeyeToken?.price || 0,
         priceChange5m: metadata?.priceChange5m || 0,
-        priceChange1h: metadata?.priceChange1h || 0,
-        volume1h: metadata?.volume1h || 0,
-        liquidity: metadata?.liquidity || (marketCapSol * 170), // Rough estimate if no data
-        marketCap: metadata?.marketCap || (marketCapSol * 170), // SOL price ~$170
+        priceChange1h: metadata?.priceChange1h || birdeyeToken?.priceChange1h || 0,
+        volume1h: metadata?.volume1h || birdeyeToken?.volume24h || 0,
+        liquidity: metadata?.liquidity || birdeyeToken?.liquidity || (marketCapSol * 170),
+        marketCap: metadata?.marketCap || birdeyeToken?.marketCap || (marketCapSol * 170),
         buys5m: metadata?.buys5m || 0,
         sells5m: metadata?.sells5m || 0,
         ageMinutes: metadata?.ageMinutes || 0,
         dexUrl: metadata?.dexUrl || `https://dexscreener.com/solana/${mint}`,
         imageUrl,
-        marketCapSol, // Include raw SOL market cap for PumpPortal tokens
+        marketCapSol,
       },
     });
 
@@ -491,6 +702,32 @@ export class TradingLoop {
     });
 
     try {
+      // PRE-CHECK: Minimum activity check - don't buy zero-action tokens
+      // Skip for trending tokens (already vetted by Birdeye)
+      if (!isTrending) {
+        const MIN_AGE_MINUTES = 5; // Token must be at least 5 mins old
+        const MIN_VOLUME_USD = 100; // Must have at least $100 volume
+        const MIN_TRANSACTIONS = 10; // Must have at least 10 transactions
+
+        const tokenAge = metadata?.ageMinutes || 0;
+        const volume = metadata?.volume1h || 0;
+        const totalTxns = (metadata?.buys5m || 0) + (metadata?.sells5m || 0);
+
+        if (tokenAge < MIN_AGE_MINUTES) {
+          logger.info({ mint, symbol, tokenAge }, 'REJECTED: Token too new - need activity history');
+          return;
+        }
+
+        if (volume < MIN_VOLUME_USD && totalTxns < MIN_TRANSACTIONS) {
+          logger.info({ mint, symbol, volume, totalTxns }, 'REJECTED: Zero/low activity - no trading history');
+          return;
+        }
+
+        logger.info({ mint, symbol, tokenAge, volume, totalTxns }, 'Token passed activity checks');
+      } else {
+        logger.info({ mint, symbol, volume24h: birdeyeToken?.volume24h, liquidity: birdeyeToken?.liquidity }, 'Trending token - skipping new token activity checks');
+      }
+
       // Step 1: Safety analysis
       const safetyResult = await this.tokenSafety.analyze(mint);
       

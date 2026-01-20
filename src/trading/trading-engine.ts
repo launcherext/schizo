@@ -124,7 +124,7 @@ export class TradingEngine {
 
   /**
    * Check holder concentration for a token
-   * Rejects if top 10 holders own >70% or any single holder owns >30%
+   * STRICT: Rejects if top 10 holders own >20% or any single holder owns >10%
    */
   private async checkHolderConcentration(mint: string): Promise<HolderConcentrationResult> {
     try {
@@ -133,10 +133,20 @@ export class TradingEngine {
 
       if (holders.length === 0) {
         return {
-          top10Percent: 0,
-          topHolderPercent: 0,
-          isConcentrated: false,
-          reason: 'No holder data available',
+          top10Percent: 100,
+          topHolderPercent: 100,
+          isConcentrated: true,
+          reason: 'No holder data available - rejecting',
+        };
+      }
+
+      // Need minimum holder count (no single-holder tokens)
+      if (holdersResponse.totalHolders < 10) {
+        return {
+          top10Percent: 100,
+          topHolderPercent: holders[0]?.percentage || 100,
+          isConcentrated: true,
+          reason: `Only ${holdersResponse.totalHolders} holders - need at least 10`,
         };
       }
 
@@ -145,20 +155,21 @@ export class TradingEngine {
       const top10Percent = top10.reduce((sum, h) => sum + h.percentage, 0);
       const topHolderPercent = holders[0]?.percentage || 0;
 
-      // Check concentration thresholds
-      const isConcentrated = top10Percent > 70 || topHolderPercent > 30;
+      // STRICT thresholds: top 10 < 20%, single holder < 10%
+      const isConcentrated = top10Percent > 20 || topHolderPercent > 10;
       let reason: string | undefined;
 
-      if (topHolderPercent > 30) {
-        reason = `Single holder owns ${topHolderPercent.toFixed(1)}% (>30%)`;
-      } else if (top10Percent > 70) {
-        reason = `Top 10 holders own ${top10Percent.toFixed(1)}% (>70%)`;
+      if (topHolderPercent > 10) {
+        reason = `Single holder owns ${topHolderPercent.toFixed(1)}% (>10% limit)`;
+      } else if (top10Percent > 20) {
+        reason = `Top 10 holders own ${top10Percent.toFixed(1)}% (>20% limit)`;
       }
 
       logger.debug({
         mint,
         top10Percent: top10Percent.toFixed(1),
         topHolderPercent: topHolderPercent.toFixed(1),
+        totalHolders: holdersResponse.totalHolders,
         isConcentrated,
       }, 'Holder concentration check');
 
@@ -171,10 +182,10 @@ export class TradingEngine {
     } catch (error) {
       logger.warn({ mint, error }, 'Failed to check holder concentration');
       return {
-        top10Percent: 0,
-        topHolderPercent: 0,
-        isConcentrated: false,
-        reason: 'Failed to fetch holder data',
+        top10Percent: 100,
+        topHolderPercent: 100,
+        isConcentrated: true,
+        reason: 'Failed to fetch holder data - rejecting for safety',
       };
     }
   }
@@ -274,21 +285,31 @@ export class TradingEngine {
     }
     reasons.push(`Holder distribution OK (top holder: ${concentration.topHolderPercent.toFixed(1)}%, top 10: ${concentration.top10Percent.toFixed(1)}%)`);
 
-    // Step 3: Check smart money participation
+    // Step 3: Check smart money participation - REQUIRED for entry
     const smartMoneyResult = await this.countSmartMoney(mint);
     const smartMoneyCount = smartMoneyResult.count;
 
-    // POSITIVE SIGNALS: Increase position size based on smart money
+    // STRICT: Must have at least 1 smart money wallet to buy
+    if (smartMoneyCount === 0) {
+      reasons.push('REJECTED: No smart money detected - need at least 1 whale/profitable wallet');
+      return {
+        shouldTrade: false,
+        positionSizeSol: 0,
+        reasons,
+        safetyAnalysis,
+        smartMoneyCount: 0,
+      };
+    }
+
+    // Scale position based on smart money count
     if (smartMoneyCount >= 5) {
       positionSize *= 1.5;
-      reasons.push(`Strong smart money signal (${smartMoneyCount} wallets) - increased position size by 50%`);
+      reasons.push(`Strong smart money signal (${smartMoneyCount} wallets) - increased position 50%`);
     } else if (smartMoneyCount >= 3) {
       positionSize *= 1.25;
-      reasons.push(`Moderate smart money signal (${smartMoneyCount} wallets) - increased position size by 25%`);
-    } else if (smartMoneyCount >= 1) {
-      reasons.push(`Some smart money interest (${smartMoneyCount} wallet(s))`);
+      reasons.push(`Good smart money signal (${smartMoneyCount} wallets) - increased position 25%`);
     } else {
-      reasons.push('No smart money detected in holders');
+      reasons.push(`Smart money present (${smartMoneyCount} wallet(s)) - entry approved`);
     }
 
     // Cap at maximum position size

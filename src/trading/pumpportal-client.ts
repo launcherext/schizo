@@ -254,6 +254,7 @@ export class PumpPortalClient {
   
   /**
    * Execute a trade (buy or sell)
+   * Sell trades use higher priority fees (urgent) for faster exit
    */
   private async executeTrade(action: TradeAction, params: TradeParams): Promise<string> {
     // Validate parameters
@@ -261,15 +262,16 @@ export class PumpPortalClient {
     await this.enforceRateLimit();
 
     const { mint, amount, slippage } = params;
+    const isUrgent = action === 'sell'; // Exits need higher priority
 
-    logger.info({ mint, amount, slippage }, `Executing ${action} order`);
+    logger.info({ mint, amount, slippage, isUrgent }, `Executing ${action} order`);
 
     let lastError: Error | null = null;
 
     // Retry logic
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const signature = await this.submitTrade(action, params);
+        const signature = await this.submitTrade(action, params, isUrgent);
         
         logger.info({
           mint,

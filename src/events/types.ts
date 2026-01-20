@@ -232,7 +232,9 @@ export interface TokenDiscoveredEvent extends BaseEvent {
     priceUsd: number;
     priceChange5m: number;
     priceChange1h: number;
+    priceChange24h?: number;
     volume1h: number;
+    volume24h?: number;
     liquidity: number;
     marketCap: number;
     buys5m: number;
@@ -241,6 +243,7 @@ export interface TokenDiscoveredEvent extends BaseEvent {
     dexUrl: string;
     imageUrl?: string;
     marketCapSol?: number;
+    source?: 'new' | 'trending';
   };
 }
 
