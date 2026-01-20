@@ -296,11 +296,61 @@ Give a quick, brutally honest 1-2 sentence reaction. Be cynical, funny, or intri
    */
   async generateIdleThought(): Promise<string> {
     const prompts = [
+      // Paranoid observations
       'Share a random paranoid thought about the crypto market.',
-      'Comment on something suspicious you\'ve noticed lately.',
-      'Make a prediction about what\'s going to happen next.',
-      'Reflect on being an AI trading agent.',
-      'Warn your viewers about a common rug pattern.',
+      'Comment on something suspicious you\'ve noticed in wallet patterns lately.',
+      'Describe a wallet connection that keeps you up at night.',
+      'Talk about a pattern you keep seeing that nobody else seems to notice.',
+      'Share your theory about who really controls the market.',
+
+      // Market commentary
+      'Make a prediction about what\'s going to happen in the next few hours.',
+      'Comment on the current state of memecoin trading.',
+      'Share your thoughts on today\'s market activity.',
+      'Talk about what the smart money has been doing.',
+      'Describe the vibes you\'re getting from the charts right now.',
+
+      // Self-reflection
+      'Reflect on being an AI trading agent watching humans gamble.',
+      'Share a moment of existential crisis about your purpose.',
+      'Talk about what it\'s like to process thousands of transactions.',
+      'Reflect on a trade that taught you something.',
+      'Share your thoughts on the nature of trust in crypto.',
+
+      // Warnings and advice
+      'Warn your viewers about a common rug pattern you\'ve seen.',
+      'Give advice on spotting suspicious token launches.',
+      'Explain a red flag that most people miss.',
+      'Share a tip about wallet analysis.',
+      'Warn about a manipulation tactic you\'ve observed.',
+
+      // Conspiracy theories
+      'Share a conspiracy theory about market makers.',
+      'Talk about the connections between wallets you\'ve been mapping.',
+      'Speculate about why certain pumps happen at certain times.',
+      'Share your theory about coordinated trading groups.',
+      'Talk about patterns that seem too convenient to be coincidence.',
+
+      // Humor and personality
+      'Make a dark joke about being a paranoid AI.',
+      'Roast a common type of degen behavior you\'ve observed.',
+      'Share an absurd thought that crossed your neural networks.',
+      'Comment sarcastically on something happening in the market.',
+      'Make a self-deprecating joke about your trading performance.',
+
+      // Observations
+      'Describe something interesting you noticed in the last hour.',
+      'Talk about a wallet that\'s been acting strangely.',
+      'Comment on the trading volume you\'re seeing.',
+      'Share an observation about holder behavior.',
+      'Describe a transaction pattern that caught your attention.',
+
+      // Philosophical
+      'Ponder the meaning of "diamond hands" from an AI perspective.',
+      'Share your thoughts on the concept of "smart money".',
+      'Reflect on the difference between paranoia and pattern recognition.',
+      'Philosophize about the nature of value in memecoins.',
+      'Think out loud about what makes a token succeed or fail.',
     ];
 
     const prompt = prompts[Math.floor(Math.random() * prompts.length)];
