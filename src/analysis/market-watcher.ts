@@ -72,7 +72,7 @@ export const DEFAULT_WATCHER_CONFIG: MarketWatcherConfig = {
   learningInterval: 300000, // 5 minutes
   maxObservations: 1000,
   minPatternsForLearning: 10,
-  voiceEnabled: true,
+  voiceEnabled: false, // Disabled - index.ts handles voice via event handlers
   commentaryEnabled: true,
 };
 

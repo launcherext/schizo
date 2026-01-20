@@ -34,16 +34,74 @@ export class PumpPortalClient {
   private connection: Connection;
   private lastRequestTime = 0;
   private readonly MIN_REQUEST_DELAY_MS = 100; // Rate limiting: 100ms between requests
+  private cachedPriorityFee: number = 0.0005; // Default 0.0005 SOL
+  private lastPriorityFeeCheck: number = 0;
+  private readonly PRIORITY_FEE_CACHE_MS = 30000; // Cache for 30 seconds
 
   constructor(config: PumpPortalConfig, wallet: Keypair) {
     this.config = config;
     this.wallet = wallet;
     this.connection = new Connection(config.rpcUrl, 'confirmed');
-    
+
     logger.info({
       baseUrl: config.baseUrl,
       wallet: wallet.publicKey.toBase58(),
     }, 'PumpPortal client initialized');
+  }
+
+  /**
+   * Get dynamic priority fee based on recent network activity
+   * Uses getRecentPrioritizationFees to estimate appropriate fee
+   */
+  private async getDynamicPriorityFee(isUrgent: boolean = false): Promise<number> {
+    const now = Date.now();
+
+    // Return cached value if fresh
+    if (now - this.lastPriorityFeeCheck < this.PRIORITY_FEE_CACHE_MS) {
+      const fee = isUrgent ? this.cachedPriorityFee * 2 : this.cachedPriorityFee;
+      return Math.min(fee, 0.01); // Cap at 0.01 SOL max
+    }
+
+    try {
+      // Get recent priority fees from the network
+      const recentFees = await this.connection.getRecentPrioritizationFees();
+
+      if (recentFees.length === 0) {
+        return this.cachedPriorityFee;
+      }
+
+      // Calculate median of non-zero fees
+      const nonZeroFees = recentFees
+        .map(f => f.prioritizationFee)
+        .filter(f => f > 0)
+        .sort((a, b) => a - b);
+
+      if (nonZeroFees.length === 0) {
+        // Network is quiet, use minimum fee
+        this.cachedPriorityFee = 0.0001; // 0.0001 SOL (100 lamports per CU)
+      } else {
+        // Use 75th percentile for reliability
+        const p75Index = Math.floor(nonZeroFees.length * 0.75);
+        const p75Fee = nonZeroFees[p75Index] || nonZeroFees[nonZeroFees.length - 1];
+
+        // Convert from microlamports per CU to SOL (assuming ~200k CU per tx)
+        // microlamports per CU * 200000 CU / 1e12 = SOL
+        this.cachedPriorityFee = Math.max(0.0001, Math.min(0.005, (p75Fee * 200000) / 1e12));
+      }
+
+      this.lastPriorityFeeCheck = now;
+
+      logger.debug({
+        priorityFee: this.cachedPriorityFee,
+        sampleSize: recentFees.length,
+      }, 'Dynamic priority fee calculated');
+
+      const fee = isUrgent ? this.cachedPriorityFee * 2 : this.cachedPriorityFee;
+      return Math.min(fee, 0.01); // Cap at 0.01 SOL max
+    } catch (error) {
+      logger.warn({ error }, 'Failed to get dynamic priority fee, using cached value');
+      return this.cachedPriorityFee;
+    }
   }
 
   /**
@@ -259,17 +317,20 @@ export class PumpPortalClient {
   /**
    * Submit trade to PumpPortal API (Local Trading)
    */
-  private async submitTrade(action: TradeAction, params: TradeParams): Promise<string> {
+  private async submitTrade(action: TradeAction, params: TradeParams, isUrgent: boolean = false): Promise<string> {
     const { mint, amount, slippage } = params;
 
     const url = `${this.config.baseUrl}/trade-local`;
-    
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
     if (this.config.apiKey) {
       headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
+
+    // Get dynamic priority fee based on network conditions
+    const priorityFee = await this.getDynamicPriorityFee(isUrgent);
 
     const payload = {
       publicKey: this.wallet.publicKey.toBase58(),
@@ -278,9 +339,11 @@ export class PumpPortalClient {
       amount,
       denominatedInSol: 'true',
       slippage,
-      priorityFee: 0.005,
+      priorityFee,
       pool: 'pump',
     };
+
+    logger.debug({ priorityFee, isUrgent }, 'Using dynamic priority fee');
 
     logger.debug({ payload }, 'Requesting transaction from PumpPortal');
 

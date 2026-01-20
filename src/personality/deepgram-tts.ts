@@ -152,12 +152,37 @@ export class VoiceNarrator {
   private speakQueue: string[] = [];
   private enabled = true;
   private processingPromise: Promise<void> | null = null;
+  private recentSpoken: Map<string, number> = new Map(); // text hash -> timestamp
+  private readonly DEDUPE_WINDOW_MS = 30000; // 30 seconds deduplication window
 
   constructor(tts: DeepgramTTS, wss?: any) {
     this.tts = tts;
     this.wss = wss;
 
-    logger.info('Voice narrator initialized');
+    // Cleanup old entries periodically
+    setInterval(() => this.cleanupRecentSpoken(), 60000);
+
+    logger.info('Voice narrator initialized with deduplication');
+  }
+
+  /**
+   * Simple hash for deduplication
+   */
+  private hashText(text: string): string {
+    // Use first 50 chars + length as a simple hash
+    return `${text.slice(0, 50).toLowerCase()}_${text.length}`;
+  }
+
+  /**
+   * Cleanup old entries from deduplication map
+   */
+  private cleanupRecentSpoken(): void {
+    const now = Date.now();
+    for (const [hash, timestamp] of this.recentSpoken) {
+      if (now - timestamp > this.DEDUPE_WINDOW_MS * 2) {
+        this.recentSpoken.delete(hash);
+      }
+    }
   }
 
   /**
@@ -200,6 +225,23 @@ export class VoiceNarrator {
     if (!cleanedText) {
       logger.debug('Text empty after cleaning, skipping');
       return;
+    }
+
+    // Check for duplicate/similar text recently spoken
+    const hash = this.hashText(cleanedText);
+    const lastSpoken = this.recentSpoken.get(hash);
+    if (lastSpoken && Date.now() - lastSpoken < this.DEDUPE_WINDOW_MS) {
+      logger.debug({ text: cleanedText.slice(0, 30) }, 'Skipping duplicate speech');
+      return;
+    }
+
+    // Mark as spoken (even before actual speech to prevent queue duplicates)
+    this.recentSpoken.set(hash, Date.now());
+
+    // Limit queue size to prevent buildup
+    if (this.speakQueue.length >= 3) {
+      logger.warn({ queueLength: this.speakQueue.length }, 'Speech queue full, dropping oldest');
+      this.speakQueue.shift();
     }
 
     this.speakQueue.push(cleanedText);

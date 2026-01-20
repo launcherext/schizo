@@ -219,13 +219,56 @@ function closeChart() {
   iframe.src = '';
 }
 
-// Play voice audio from base64
+// Audio queue to prevent overlapping speech
+let audioQueue = [];
+let isPlayingAudio = false;
+let currentAudio = null;
+
+// Play voice audio from base64 - queued to prevent overlap
 function playVoiceAudio(data) {
+  audioQueue.push(data);
+  processAudioQueue();
+}
+
+function processAudioQueue() {
+  if (isPlayingAudio || audioQueue.length === 0) return;
+
+  isPlayingAudio = true;
+  const data = audioQueue.shift();
+
   try {
-    const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
-    audio.play().catch(err => console.log('Audio autoplay blocked:', err));
+    // Stop any currently playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    currentAudio = new Audio(`data:audio/mp3;base64,${data.audio}`);
+
+    currentAudio.onended = () => {
+      isPlayingAudio = false;
+      currentAudio = null;
+      // Small delay between speeches
+      setTimeout(processAudioQueue, 300);
+    };
+
+    currentAudio.onerror = () => {
+      console.error('Audio playback error');
+      isPlayingAudio = false;
+      currentAudio = null;
+      processAudioQueue();
+    };
+
+    currentAudio.play().catch(err => {
+      console.log('Audio autoplay blocked:', err);
+      isPlayingAudio = false;
+      currentAudio = null;
+      processAudioQueue();
+    });
   } catch (error) {
     console.error('Error playing audio:', error);
+    isPlayingAudio = false;
+    processAudioQueue();
   }
 }
 
@@ -392,41 +435,6 @@ chatInput.addEventListener('keypress', (e) => {
 
 // Connect on page load
 connect();
-
-// ============================================
-// SCHIZO 3D CHARACTER TOGGLE
-// ============================================
-let schizoVisible = false;
-
-function toggleSchizo() {
-    const container = document.getElementById('schizo-3d-container');
-    const btn = document.getElementById('schizo-toggle-btn');
-
-    if (!container) return;
-
-    schizoVisible = !schizoVisible;
-
-    if (schizoVisible) {
-        container.classList.remove('schizo-hidden');
-        container.classList.add('schizo-visible');
-        btn.classList.add('active');
-        btn.querySelector('.schizo-btn-text').textContent = 'Close Schizo';
-
-        // Dispatch event for 3D module to initialize
-        window.dispatchEvent(new CustomEvent('schizo-open'));
-    } else {
-        container.classList.remove('schizo-visible');
-        container.classList.add('schizo-hidden');
-        btn.classList.remove('active');
-        btn.querySelector('.schizo-btn-text').textContent = 'Open Schizo';
-
-        // Dispatch event for 3D module
-        window.dispatchEvent(new CustomEvent('schizo-close'));
-    }
-}
-
-// Check if Schizo is visible (for 3D module)
-window.isSchizoVisible = () => schizoVisible;
 
 // $SCHIZO Token Card - Update function for when token goes live
 function updateSchizoTokenCard(data) {

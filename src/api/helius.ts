@@ -72,6 +72,25 @@ interface GetTransactionsOptions {
 }
 
 /**
+ * Token holder information
+ */
+interface TokenHolder {
+  owner: string;
+  amount: number;
+  uiAmount: number;
+  percentage: number;
+}
+
+/**
+ * Token holders response
+ */
+interface TokenHoldersResponse {
+  holders: TokenHolder[];
+  totalHolders: number;
+  totalSupply: number;
+}
+
+/**
  * Rate-limited, cached Helius API client with resilience patterns.
  *
  * @example
@@ -395,6 +414,107 @@ class HeliusClient {
   }
 
   /**
+   * Get token holders using Helius DAS API.
+   *
+   * @param mintAddress - Token mint address
+   * @param limit - Maximum holders to return (default 20)
+   * @returns Top token holders with ownership percentages
+   */
+  async getTokenHolders(
+    mintAddress: string,
+    limit: number = 20
+  ): Promise<TokenHoldersResponse> {
+    const body = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTokenAccounts',
+      params: {
+        mint: mintAddress,
+        limit,
+        options: {
+          showZeroBalance: false,
+        },
+      },
+    };
+
+    return this.enhancedLimiter.schedule(async () => {
+      const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
+
+      const response = await pRetry(
+        async () => {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+
+          if (res.status === 429) {
+            throw new Error('Rate limited (429)');
+          }
+
+          if (!res.ok) {
+            throw new AbortError(`HTTP error (${res.status})`);
+          }
+
+          const json = (await res.json()) as {
+            result?: {
+              token_accounts?: Array<{
+                owner: string;
+                amount: string;
+              }>;
+              total?: number;
+            };
+            error?: { message: string };
+          };
+
+          if (json.error) {
+            throw new AbortError(`API error: ${json.error.message}`);
+          }
+
+          return json.result;
+        },
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 10000,
+          factor: 2,
+        }
+      );
+
+      const accounts = response?.token_accounts || [];
+      const totalHolders = response?.total || accounts.length;
+
+      // Calculate total supply from holder amounts
+      let totalSupply = 0;
+      for (const account of accounts) {
+        totalSupply += parseFloat(account.amount);
+      }
+
+      // Map to TokenHolder with percentages
+      const holders: TokenHolder[] = accounts.map(account => {
+        const amount = parseFloat(account.amount);
+        return {
+          owner: account.owner,
+          amount,
+          uiAmount: amount / 1e6, // Assuming 6 decimals (common for pump.fun)
+          percentage: totalSupply > 0 ? (amount / totalSupply) * 100 : 0,
+        };
+      });
+
+      // Sort by amount descending
+      holders.sort((a, b) => b.amount - a.amount);
+
+      logger.debug({ mintAddress, holderCount: holders.length }, 'Fetched token holders');
+
+      return {
+        holders,
+        totalHolders,
+        totalSupply,
+      };
+    });
+  }
+
+  /**
    * Get circuit breaker status.
    */
   getCircuitBreakerStatus(): {
@@ -432,4 +552,6 @@ export {
   TransactionResult,
   TransactionsResponse,
   GetTransactionsOptions,
+  TokenHolder,
+  TokenHoldersResponse,
 };

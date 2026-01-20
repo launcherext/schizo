@@ -2,7 +2,7 @@
  * Trading Engine - Decision logic and risk management
  */
 
-import type { Keypair } from '@solana/web3.js';
+import { Connection, type Keypair } from '@solana/web3.js';
 import type { DatabaseWithRepositories } from '../db/database-with-repos.js';
 import { PumpPortalClient } from './pumpportal-client.js';
 import { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
@@ -12,6 +12,8 @@ import { logger } from '../lib/logger.js';
 import type { ClaudeClient } from '../personality/claude-client.js';
 import type { AnalysisContext } from '../personality/prompts.js';
 import { agentEvents } from '../events/emitter.js';
+import { TransactionParser } from './transaction-parser.js';
+import type { HeliusClient } from '../api/helius.js';
 
 /**
  * Trading configuration
@@ -73,6 +75,16 @@ export interface TradingStats {
  * Integrates Phase 2 analysis modules to make intelligent trading decisions
  * with position sizing and risk management.
  */
+/**
+ * Holder concentration result
+ */
+interface HolderConcentrationResult {
+  top10Percent: number;
+  topHolderPercent: number;
+  isConcentrated: boolean;
+  reason?: string;
+}
+
 export class TradingEngine {
   private config: TradingConfig;
   private pumpPortal: PumpPortalClient;
@@ -80,6 +92,10 @@ export class TradingEngine {
   private smartMoney: SmartMoneyTracker;
   private db: DatabaseWithRepositories;
   private claude?: ClaudeClient; // Optional for Phase 4
+  private connection: Connection;
+  private txParser: TransactionParser;
+  private walletAddress: string;
+  private helius: HeliusClient;
 
   constructor(
     config: TradingConfig,
@@ -87,6 +103,9 @@ export class TradingEngine {
     tokenSafety: TokenSafetyAnalyzer,
     smartMoney: SmartMoneyTracker,
     db: DatabaseWithRepositories,
+    connection: Connection,
+    walletAddress: string,
+    helius: HeliusClient,
     claude?: ClaudeClient
   ) {
     this.config = config;
@@ -94,16 +113,119 @@ export class TradingEngine {
     this.tokenSafety = tokenSafety;
     this.smartMoney = smartMoney;
     this.db = db;
+    this.connection = connection;
+    this.walletAddress = walletAddress;
+    this.helius = helius;
+    this.txParser = new TransactionParser(connection);
     this.claude = claude;
 
     logger.info({ config, hasPersonality: !!claude }, 'Trading Engine initialized');
   }
 
   /**
-   * Evaluate if we should trade a token
+   * Check holder concentration for a token
+   * Rejects if top 10 holders own >70% or any single holder owns >30%
    */
-  async evaluateToken(mint: string): Promise<TradeDecision> {
-    logger.info({ mint }, 'Evaluating token for trading');
+  private async checkHolderConcentration(mint: string): Promise<HolderConcentrationResult> {
+    try {
+      const holdersResponse = await this.helius.getTokenHolders(mint, 20);
+      const holders = holdersResponse.holders;
+
+      if (holders.length === 0) {
+        return {
+          top10Percent: 0,
+          topHolderPercent: 0,
+          isConcentrated: false,
+          reason: 'No holder data available',
+        };
+      }
+
+      // Calculate top 10 holder concentration
+      const top10 = holders.slice(0, 10);
+      const top10Percent = top10.reduce((sum, h) => sum + h.percentage, 0);
+      const topHolderPercent = holders[0]?.percentage || 0;
+
+      // Check concentration thresholds
+      const isConcentrated = top10Percent > 70 || topHolderPercent > 30;
+      let reason: string | undefined;
+
+      if (topHolderPercent > 30) {
+        reason = `Single holder owns ${topHolderPercent.toFixed(1)}% (>30%)`;
+      } else if (top10Percent > 70) {
+        reason = `Top 10 holders own ${top10Percent.toFixed(1)}% (>70%)`;
+      }
+
+      logger.debug({
+        mint,
+        top10Percent: top10Percent.toFixed(1),
+        topHolderPercent: topHolderPercent.toFixed(1),
+        isConcentrated,
+      }, 'Holder concentration check');
+
+      return {
+        top10Percent,
+        topHolderPercent,
+        isConcentrated,
+        reason,
+      };
+    } catch (error) {
+      logger.warn({ mint, error }, 'Failed to check holder concentration');
+      return {
+        top10Percent: 0,
+        topHolderPercent: 0,
+        isConcentrated: false,
+        reason: 'Failed to fetch holder data',
+      };
+    }
+  }
+
+  /**
+   * Count smart money wallets among token holders
+   */
+  private async countSmartMoney(mint: string): Promise<{ count: number; wallets: string[] }> {
+    try {
+      const holdersResponse = await this.helius.getTokenHolders(mint, 50);
+      const holders = holdersResponse.holders;
+
+      const smartMoneyWallets: string[] = [];
+
+      // Check each holder against smart money database
+      // Process in batches to avoid overwhelming the API
+      for (const holder of holders) {
+        try {
+          const isSmartMoney = await this.smartMoney.isSmartMoney(holder.owner);
+          if (isSmartMoney) {
+            smartMoneyWallets.push(holder.owner);
+          }
+        } catch (error) {
+          // Skip individual failures
+          logger.debug({ wallet: holder.owner, error }, 'Failed to classify wallet');
+        }
+      }
+
+      logger.info({
+        mint,
+        smartMoneyCount: smartMoneyWallets.length,
+        totalHolders: holders.length,
+      }, 'Smart money detection complete');
+
+      return {
+        count: smartMoneyWallets.length,
+        wallets: smartMoneyWallets,
+      };
+    } catch (error) {
+      logger.warn({ mint, error }, 'Failed to count smart money');
+      return { count: 0, wallets: [] };
+    }
+  }
+
+  /**
+   * Evaluate if we should trade a token
+   * @param mint - Token mint address
+   * @param tokenMetadata - Optional metadata (liquidity, etc.) to avoid extra API calls
+   */
+  async evaluateToken(mint: string, tokenMetadata?: { liquidity?: number; marketCapSol?: number }): Promise<TradeDecision> {
+    logger.info({ mint, hasMetadata: !!tokenMetadata }, 'Evaluating token for trading');
 
     const reasons: string[] = [];
     let positionSize = this.config.basePositionSol;
@@ -138,21 +260,35 @@ export class TradingEngine {
       reasons.push(`Token has ${safetyAnalysis.risks.length} risk(s) - reduced position size by 50%`);
     }
 
-    // Step 2: Check smart money participation
-    // Smart money detection requires token holder addresses which need additional API calls.
-    // The SmartMoneyTracker is initialized but holder data integration is pending.
-    // When holder data is available, call: this.smartMoney.classify(holderAddress)
-    const smartMoneyCount = 0;
-    reasons.push('Smart money: holder data not yet integrated');
+    // Step 2: Check holder concentration (reject if too concentrated)
+    const concentration = await this.checkHolderConcentration(mint);
+    if (concentration.isConcentrated) {
+      reasons.push(`REJECTED: ${concentration.reason}`);
+      return {
+        shouldTrade: false,
+        positionSizeSol: 0,
+        reasons,
+        safetyAnalysis,
+        smartMoneyCount: 0,
+      };
+    }
+    reasons.push(`Holder distribution OK (top holder: ${concentration.topHolderPercent.toFixed(1)}%, top 10: ${concentration.top10Percent.toFixed(1)}%)`);
 
-    // POSITIVE SIGNALS: Increase position size
+    // Step 3: Check smart money participation
+    const smartMoneyResult = await this.countSmartMoney(mint);
+    const smartMoneyCount = smartMoneyResult.count;
+
+    // POSITIVE SIGNALS: Increase position size based on smart money
     if (smartMoneyCount >= 5) {
       positionSize *= 1.5;
       reasons.push(`Strong smart money signal (${smartMoneyCount} wallets) - increased position size by 50%`);
     } else if (smartMoneyCount >= 3) {
-      reasons.push(`Moderate smart money signal (${smartMoneyCount} wallets)`);
+      positionSize *= 1.25;
+      reasons.push(`Moderate smart money signal (${smartMoneyCount} wallets) - increased position size by 25%`);
+    } else if (smartMoneyCount >= 1) {
+      reasons.push(`Some smart money interest (${smartMoneyCount} wallet(s))`);
     } else {
-      reasons.push(`Weak smart money signal (${smartMoneyCount} wallets)`);
+      reasons.push('No smart money detected in holders');
     }
 
     // Cap at maximum position size
@@ -161,10 +297,11 @@ export class TradingEngine {
       positionSize = this.config.maxPositionSol;
     }
 
-    // Check minimum liquidity
-    const tokenInfo = await this.pumpPortal.getTokenInfo(mint);
-    if (tokenInfo.liquidity < this.config.minLiquiditySol) {
-      reasons.push(`Insufficient liquidity (${tokenInfo.liquidity} SOL < ${this.config.minLiquiditySol} SOL minimum)`);
+    // Check minimum liquidity (use passed metadata or estimate from market cap)
+    const liquidity = tokenMetadata?.liquidity || (tokenMetadata?.marketCapSol ? tokenMetadata.marketCapSol * 170 : 0);
+
+    if (liquidity > 0 && liquidity < this.config.minLiquiditySol) {
+      reasons.push(`Insufficient liquidity (~${(liquidity / 170).toFixed(1)} SOL < ${this.config.minLiquiditySol} SOL minimum)`);
       return {
         shouldTrade: false,
         positionSizeSol: 0,
@@ -174,7 +311,11 @@ export class TradingEngine {
       };
     }
 
-    reasons.push(`Liquidity check passed (${tokenInfo.liquidity} SOL)`);
+    if (liquidity > 0) {
+      reasons.push(`Liquidity check passed (~${(liquidity / 170).toFixed(1)} SOL)`);
+    } else {
+      reasons.push('Liquidity unknown - proceeding with caution');
+    }
     reasons.push(`Final position size: ${positionSize} SOL`);
 
     // Generate AI reasoning if Claude client available
@@ -245,22 +386,41 @@ export class TradingEngine {
         slippage: this.config.slippageTolerance,
       });
 
-      // Record trade in database
+      // Parse the confirmed transaction to get actual amounts
+      const parsedTx = await this.txParser.waitAndParse(
+        signature,
+        this.walletAddress,
+        mint,
+        'buy',
+        30000 // 30 second timeout
+      );
+
+      // Record trade in database with ACTUAL amounts from parsed transaction
       await this.db.trades.insert({
         signature,
         timestamp: Date.now(),
         type: 'BUY',
         tokenMint: mint,
-        amountTokens: 0, // Will be updated when we parse transaction
-        amountSol: decision.positionSizeSol,
-        pricePerToken: 0, // Will be updated when we parse transaction
+        amountTokens: parsedTx.tokenAmount,
+        amountSol: parsedTx.solAmount || decision.positionSizeSol,
+        pricePerToken: parsedTx.pricePerToken,
+        metadata: {
+          requestedSol: decision.positionSizeSol,
+          actualSol: parsedTx.solAmount,
+          fee: parsedTx.fee,
+          parseSuccess: parsedTx.success,
+        },
       });
 
       logger.info({
         mint,
         signature,
-        amount: decision.positionSizeSol,
-      }, 'Buy trade executed successfully');
+        requestedSol: decision.positionSizeSol,
+        actualSol: parsedTx.solAmount,
+        tokensReceived: parsedTx.tokenAmount,
+        pricePerToken: parsedTx.pricePerToken,
+        fee: parsedTx.fee,
+      }, 'Buy trade executed and parsed successfully');
 
       return signature;
     } catch (error) {
@@ -290,22 +450,42 @@ export class TradingEngine {
         slippage: this.config.slippageTolerance,
       });
 
-      // Record trade in database
+      // Parse the confirmed transaction to get actual amounts
+      const parsedTx = await this.txParser.waitAndParse(
+        signature,
+        this.walletAddress,
+        mint,
+        'sell',
+        30000 // 30 second timeout
+      );
+
+      // Record trade in database with ACTUAL amounts from parsed transaction
       await this.db.trades.insert({
         signature,
         timestamp: Date.now(),
         type: 'SELL',
         tokenMint: mint,
-        amountTokens: amount,
-        amountSol: 0, // Will be updated when we parse transaction
-        pricePerToken: 0, // Will be updated when we parse transaction
+        amountTokens: parsedTx.tokenAmount || amount,
+        amountSol: parsedTx.solAmount,
+        pricePerToken: parsedTx.pricePerToken,
+        metadata: {
+          requestedTokens: amount,
+          actualTokens: parsedTx.tokenAmount,
+          solReceived: parsedTx.solAmount,
+          fee: parsedTx.fee,
+          parseSuccess: parsedTx.success,
+        },
       });
 
       logger.info({
         mint,
         signature,
-        amount,
-      }, 'Sell trade executed successfully');
+        requestedTokens: amount,
+        actualTokens: parsedTx.tokenAmount,
+        solReceived: parsedTx.solAmount,
+        pricePerToken: parsedTx.pricePerToken,
+        fee: parsedTx.fee,
+      }, 'Sell trade executed and parsed successfully');
 
       return signature;
     } catch (error) {

@@ -533,7 +533,12 @@ export class TradingLoop {
         return;
       }
 
-      const decision = await this.tradingEngine.evaluateToken(mint);
+      // Pass metadata to avoid extra API calls
+      const tokenMeta = {
+        liquidity: metadata?.liquidity,
+        marketCapSol: pumpToken?.marketCapSol || marketCapSol,
+      };
+      const decision = await this.tradingEngine.evaluateToken(mint, tokenMeta);
 
       // Emit decision event with AI reasoning
       agentEvents.emit({

@@ -31,6 +31,24 @@ body::before {
     z-index: -1;
 }
 
+/* Scanlines Overlay */
+.scanlines {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom,
+            rgba(255, 255, 255, 0),
+            rgba(255, 255, 255, 0) 50%,
+            rgba(0, 0, 0, 0.2) 50%,
+            rgba(0, 0, 0, 0.2));
+    background-size: 100% 4px;
+    z-index: 1000;
+    pointer-events: none;
+    opacity: 0.15;
+}
+
 /* Glass Panel Base */
 .glass {
     background: rgba(13, 25, 25, 0.6);
@@ -45,11 +63,42 @@ body::before {
 
 /* Header */
 header {
-    text-align: center;
     margin-bottom: 40px;
     padding-bottom: 30px;
     border-bottom: 1px solid rgba(140, 219, 199, 0.2);
     position: relative;
+}
+
+.header-grid {
+    display: grid;
+    grid-template-columns: 350px 1fr 350px;
+    gap: 20px;
+    align-items: center;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.header-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    z-index: 2;
+}
+
+.header-left,
+.header-right {
+    display: flex;
+    align-items: center;
+}
+
+.header-left {
+    justify-content: flex-start;
+}
+
+.header-right {
+    justify-content: flex-end;
 }
 
 .header-logo {
@@ -57,22 +106,107 @@ header {
     height: 120px;
     margin-bottom: 15px;
     filter: drop-shadow(0 0 20px rgba(140, 219, 199, 0.3));
-    transition: transform 0.3s ease, filter 0.3s ease;
+    transition: transform 0.1s ease;
+    /* Faster transition for eye tracking */
 }
 
-.header-logo:hover {
-    transform: scale(1.05);
-    filter: drop-shadow(0 0 30px rgba(140, 219, 199, 0.5));
+/* Glitch Effect */
+@keyframes glitch-anim-1 {
+    0% {
+        clip-path: inset(20% 0 80% 0);
+        transform: translate(-2px, 1px);
+    }
+
+    20% {
+        clip-path: inset(60% 0 10% 0);
+        transform: translate(2px, -1px);
+    }
+
+    40% {
+        clip-path: inset(40% 0 50% 0);
+        transform: translate(-2px, 2px);
+    }
+
+    60% {
+        clip-path: inset(80% 0 5% 0);
+        transform: translate(2px, -2px);
+    }
+
+    80% {
+        clip-path: inset(10% 0 60% 0);
+        transform: translate(-1px, 1px);
+    }
+
+    100% {
+        clip-path: inset(30% 0 30% 0);
+        transform: translate(1px, -1px);
+    }
 }
 
-h1 {
+@keyframes glitch-anim-2 {
+    0% {
+        clip-path: inset(10% 0 60% 0);
+        transform: translate(2px, -1px);
+    }
+
+    20% {
+        clip-path: inset(80% 0 5% 0);
+        transform: translate(-2px, 2px);
+    }
+
+    40% {
+        clip-path: inset(30% 0 20% 0);
+        transform: translate(2px, 1px);
+    }
+
+    60% {
+        clip-path: inset(15% 0 80% 0);
+        transform: translate(-1px, -2px);
+    }
+
+    80% {
+        clip-path: inset(55% 0 10% 0);
+        transform: translate(1px, 2px);
+    }
+
+    100% {
+        clip-path: inset(40% 0 30% 0);
+        transform: translate(-2px, 1px);
+    }
+}
+
+.glitch {
     font-size: 3.5em;
     color: #8cdbc7;
-    text-shadow:
-        0 0 20px rgba(140, 219, 199, 0.4),
-        0 0 40px rgba(140, 219, 199, 0.2);
-    margin-bottom: 8px;
+    position: relative;
     letter-spacing: 4px;
+    margin-bottom: 8px;
+}
+
+.glitch::before,
+.glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #0d1a1a;
+    /* Match background to hide original somewhat */
+}
+
+.glitch::before {
+    left: 2px;
+    text-shadow: -1px 0 #ff00c1;
+    clip-path: inset(0 0 0 0);
+    animation: glitch-anim-1 2s infinite linear alternate-reverse;
+}
+
+.glitch::after {
+    left: -2px;
+    text-shadow: -1px 0 #00fff9;
+    clip-path: inset(0 0 0 0);
+    animation: glitch-anim-2 3s infinite linear alternate-reverse;
 }
 
 .tagline {
@@ -82,18 +216,80 @@ h1 {
     text-transform: uppercase;
 }
 
+/* Terminal Window */
+#terminal-window {
+    width: 100%;
+    height: 220px;
+    background: rgba(10, 10, 10, 0.9);
+    border: 1px solid #333;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(5px);
+}
+
+.terminal-header {
+    background: #1a1a1a;
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #333;
+}
+
+.terminal-title {
+    color: #8cdbc7;
+    font-size: 0.75em;
+    opacity: 0.7;
+}
+
+.terminal-controls {
+    display: flex;
+    gap: 6px;
+}
+
+.control {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #333;
+}
+
+#terminal-content {
+    padding: 12px;
+    color: #4ade80;
+    font-size: 0.8em;
+    line-height: 1.4;
+    flex: 1;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    font-family: 'Consolas', 'Monaco', monospace;
+    text-shadow: 0 0 5px rgba(74, 222, 128, 0.4);
+}
+
+.terminal-line {
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+
 /* $SCHIZO Token Card */
 #schizo-token-card {
-    position: absolute;
-    top: -15px;
-    right: -20px;
+    position: relative;
+    /* Reset from absolute */
+    top: auto;
+    right: auto;
     background: rgba(13, 25, 25, 0.6);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(140, 219, 199, 0.2);
     border-radius: 16px;
     padding: 16px 20px;
-    min-width: 280px;
+    width: 320px;
     box-shadow:
         0 4px 20px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 rgba(140, 219, 199, 0.1);
@@ -175,52 +371,100 @@ h1 {
     color: #8cdbc7;
 }
 
-.token-card-footer {
+.token-card-actions {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 10px;
-    border-top: 1px solid rgba(140, 219, 199, 0.1);
+    gap: 10px;
+    margin-bottom: 15px;
 }
 
-.token-card-ca {
-    font-size: 0.75em;
-    color: rgba(140, 219, 199, 0.5);
-    font-family: monospace;
-    cursor: pointer;
-    transition: color 0.2s;
+.btn-primary {
+    flex: 2;
+    background: #4ade80;
+    /* Neon Green */
+    color: #000;
+    text-align: center;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 900;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-size: 1.1em;
+    transition: all 0.2s;
+    box-shadow: 0 0 15px rgba(74, 222, 128, 0.3);
+    border: 1px solid #22c55e;
 }
 
-.token-card-ca:hover {
-    color: #8cdbc7;
+.btn-primary:hover {
+    background: #22c55e;
+    transform: translateY(-2px);
+    box-shadow: 0 0 25px rgba(74, 222, 128, 0.5);
 }
 
-.token-card-links {
+.secondary-actions {
     display: flex;
     gap: 8px;
+    flex: 1;
 }
 
-.token-link {
+.btn-icon {
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 8px;
     background: rgba(140, 219, 199, 0.1);
     border: 1px solid rgba(140, 219, 199, 0.2);
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 0.65em;
-    font-weight: bold;
+    border-radius: 8px;
     color: rgba(140, 219, 199, 0.7);
-    letter-spacing: 0.5px;
     transition: all 0.2s;
+    text-decoration: none;
 }
 
-.token-link:hover {
+.btn-icon:hover {
     background: rgba(140, 219, 199, 0.2);
-    border-color: rgba(140, 219, 199, 0.4);
     color: #8cdbc7;
-    transform: translateY(-1px);
+    border-color: rgba(140, 219, 199, 0.4);
+}
+
+.token-card-footer {
+    border-top: 1px solid rgba(140, 219, 199, 0.1);
+    padding-top: 12px;
+}
+
+.ca-input-container {
+    position: relative;
+    width: 100%;
+}
+
+#schizo-ca-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(140, 219, 199, 0.2);
+    color: rgba(140, 219, 199, 0.7);
+    padding: 10px;
+    font-family: monospace;
+    font-size: 0.9em;
+    border-radius: 6px;
+    outline: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+#schizo-ca-input:hover,
+#schizo-ca-input:focus {
+    border-color: rgba(140, 219, 199, 0.5);
+    color: #8cdbc7;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.copy-hint {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.6em;
+    color: rgba(140, 219, 199, 0.4);
+    pointer-events: none;
 }
 
 h2 {
@@ -495,6 +739,7 @@ button:active {
         opacity: 0;
         transform: translateX(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -586,9 +831,13 @@ button:active {
 }
 
 @keyframes typingDot {
-    0%, 80%, 100% {
+
+    0%,
+    80%,
+    100% {
         opacity: 0;
     }
+
     40% {
         opacity: 1;
     }
@@ -780,15 +1029,24 @@ td a:hover {
         margin-top: 20px;
     }
 
-    #main-panels {
-        flex-direction: column;
+    .header-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
     }
 
-    #token-stream-section,
-    #feed-container,
-    #chat-container {
-        min-width: unset;
-        flex: 1 1 100%;
+    .header-left,
+    .header-center,
+    .header-right {
+        justify-content: center;
+    }
+
+    #schizo-token-card {
+        width: 100%;
+        max-width: 400px;
+    }
+
+    #terminal-window {
+        max-width: 400px;
     }
 
     #token-stream-box,
@@ -1053,6 +1311,7 @@ td a:hover {
         background: rgba(140, 219, 199, 0.3);
         border-color: rgba(140, 219, 199, 0.6);
     }
+
     100% {
         background: rgba(10, 20, 20, 0.6);
         border-color: rgba(140, 219, 199, 0.15);
@@ -1174,6 +1433,7 @@ td a:hover {
         opacity: 0;
         transform: translateX(-50%) translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: translateX(-50%) translateY(0);
@@ -1184,181 +1444,35 @@ td a:hover {
    SCHIZO 3D CHARACTER STYLES
    ============================================ */
 
-/* Toggle Button - Fixed at bottom */
-#schizo-toggle-btn {
-    position: fixed;
-    bottom: 30px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 28px;
-    background: linear-gradient(135deg, rgba(140, 219, 199, 0.2) 0%, rgba(140, 219, 199, 0.1) 100%);
-    border: 2px solid rgba(140, 219, 199, 0.4);
-    border-radius: 50px;
-    color: #8cdbc7;
-    font-size: 1em;
-    font-weight: bold;
-    cursor: pointer;
-    z-index: 900;
-    box-shadow:
-        0 4px 20px rgba(0, 0, 0, 0.3),
-        0 0 30px rgba(140, 219, 199, 0.2);
-    transition: all 0.3s ease;
-    animation: schizoButtonPulse 2s infinite;
-}
-
-#schizo-toggle-btn:hover {
-    background: linear-gradient(135deg, rgba(140, 219, 199, 0.3) 0%, rgba(140, 219, 199, 0.2) 100%);
-    border-color: rgba(140, 219, 199, 0.6);
-    box-shadow:
-        0 6px 30px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(140, 219, 199, 0.3);
-    transform: translateX(-50%) translateY(-2px);
-}
-
-#schizo-toggle-btn.active {
-    background: linear-gradient(135deg, rgba(255, 107, 107, 0.2) 0%, rgba(255, 107, 107, 0.1) 100%);
-    border-color: rgba(255, 107, 107, 0.5);
-}
-
-#schizo-toggle-btn.active .schizo-btn-text {
-    color: #ff6b6b;
-}
-
-.schizo-btn-icon {
-    font-size: 1.3em;
-}
-
-@keyframes schizoButtonPulse {
-    0%, 100% {
-        box-shadow:
-            0 4px 20px rgba(0, 0, 0, 0.3),
-            0 0 30px rgba(140, 219, 199, 0.2);
-    }
-    50% {
-        box-shadow:
-            0 4px 20px rgba(0, 0, 0, 0.3),
-            0 0 50px rgba(140, 219, 199, 0.4);
-    }
-}
-
-/* 3D Container */
+/* 3D Container - In header left area */
 #schizo-3d-container {
-    position: fixed;
-    bottom: 100px;
-    right: 30px;
-    width: 350px;
-    height: 450px;
-    background: rgba(13, 25, 25, 0.95);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(140, 219, 199, 0.3);
-    border-radius: 20px;
-    z-index: 950;
-    box-shadow:
-        0 10px 50px rgba(0, 0, 0, 0.5),
-        0 0 30px rgba(140, 219, 199, 0.1);
+    width: 100%;
+    height: 250px;
+    background: transparent;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-#schizo-3d-container.schizo-hidden {
-    opacity: 0;
-    transform: scale(0.8) translateY(50px);
-    pointer-events: none;
-}
-
-#schizo-3d-container.schizo-visible {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-    pointer-events: all;
-}
-
-#schizo-3d-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px 20px;
-    background: rgba(140, 219, 199, 0.1);
-    border-bottom: 1px solid rgba(140, 219, 199, 0.2);
-    color: #8cdbc7;
-    font-weight: bold;
-    font-size: 1.1em;
-    letter-spacing: 1px;
-}
-
-.schizo-close-btn {
-    width: 30px;
-    height: 30px;
-    min-width: unset;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 107, 107, 0.2);
-    border: 1px solid rgba(255, 107, 107, 0.3);
-    border-radius: 50%;
-    color: #ff6b6b;
-    font-size: 1em;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.schizo-close-btn:hover {
-    background: rgba(255, 107, 107, 0.4);
-    border-color: rgba(255, 107, 107, 0.6);
-    transform: scale(1.1);
+    overflow: visible;
 }
 
 #schizo-3d-canvas {
     flex: 1;
-    background: radial-gradient(circle at center, rgba(20, 40, 40, 1) 0%, rgba(10, 20, 20, 1) 100%);
+    background: transparent;
     position: relative;
+    border-radius: 12px;
+    overflow: hidden;
 }
 
 #schizo-3d-canvas canvas {
     width: 100% !important;
     height: 100% !important;
-}
-
-#schizo-status {
-    padding: 12px 20px;
-    background: rgba(0, 0, 0, 0.3);
-    border-top: 1px solid rgba(140, 219, 199, 0.1);
-    color: rgba(140, 219, 199, 0.7);
-    font-size: 0.85em;
-    text-align: center;
-    font-style: italic;
-}
-
-#schizo-status.talking {
-    color: #8cdbc7;
-    font-style: normal;
-    font-weight: bold;
-    animation: statusPulse 0.5s infinite alternate;
-}
-
-@keyframes statusPulse {
-    from { opacity: 0.7; }
-    to { opacity: 1; }
+    background: transparent !important;
 }
 
 /* Responsive */
-@media (max-width: 500px) {
+@media (max-width: 900px) {
     #schizo-3d-container {
-        width: calc(100% - 40px);
-        right: 20px;
-        bottom: 90px;
-        height: 400px;
-    }
-
-    #schizo-toggle-btn {
-        bottom: 20px;
-        padding: 12px 20px;
-        font-size: 0.9em;
+        height: 200px;
+        max-width: 300px;
+        margin: 0 auto;
     }
 }

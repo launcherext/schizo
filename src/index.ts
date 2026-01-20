@@ -163,7 +163,7 @@ async function main(): Promise<void> {
     let tradingEngine: TradingEngine | undefined;
     let tradingLoop: TradingLoop | undefined;
 
-    if (pumpPortal) {
+    if (pumpPortal && wallet) {
       tradingEngine = new TradingEngine(
         {
           basePositionSol: parseFloat(process.env.BASE_POSITION_SOL || '0.1'),
@@ -181,9 +181,12 @@ async function main(): Promise<void> {
         tokenSafety,
         smartMoney,
         dbWithRepos,
+        connection,
+        wallet.publicKey.toBase58(),
+        helius,
         claude
       );
-      log.info('Trading Engine initialized');
+      log.info('Trading Engine initialized with smart money detection & transaction parsing');
     } else {
       log.warn('Trading Engine not available - wallet not configured');
     }

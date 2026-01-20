@@ -11,42 +11,61 @@
 
 <body>
     <header>
-        <img src="Untitled design (44).png" alt="$SCHIZO Logo" class="header-logo">
-        <h1>$SCHIZO</h1>
-        <p class="tagline">Paranoid AI Trading Agent</p>
+        <div class="scanlines"></div>
+        <div class="header-grid">
+            <!-- Left: 3D Character -->
+            <div class="header-left">
+                <div id="schizo-3d-container">
+                    <div id="schizo-3d-canvas"></div>
+                </div>
+            </div>
 
-        <div id="schizo-token-card">
-            <div class="token-card-header">
-                <img src="Untitled design (44).png" alt="$SCHIZO" class="token-card-img">
-                <div class="token-card-title">
-                    <span class="token-card-name">$SCHIZO</span>
-                    <span class="token-card-status">Coming Soon</span>
+            <!-- Center: Logo & Title -->
+            <div class="header-center">
+                <div class="logo-container">
+                    <img src="Untitled design (44).png" alt="$SCHIZO Logo" class="header-logo" id="hero-logo">
                 </div>
+                <h1 class="glitch" data-text="$SCHIZO">$SCHIZO</h1>
+                <p class="tagline">Paranoid AI Trading Agent</p>
             </div>
-            <div class="token-card-stats">
-                <div class="token-card-stat">
-                    <span class="stat-label">Price</span>
-                    <span class="stat-value" id="schizo-price">--</span>
-                </div>
-                <div class="token-card-stat">
-                    <span class="stat-label">Market Cap</span>
-                    <span class="stat-value" id="schizo-mcap">--</span>
-                </div>
-                <div class="token-card-stat">
-                    <span class="stat-label">Holders</span>
-                    <span class="stat-value" id="schizo-holders">--</span>
-                </div>
-                <div class="token-card-stat">
-                    <span class="stat-label">24h Vol</span>
-                    <span class="stat-value" id="schizo-volume">--</span>
-                </div>
-            </div>
-            <div class="token-card-footer">
-                <span class="token-card-ca" id="schizo-ca">CA: TBA</span>
-                <div class="token-card-links">
-                    <a href="#" class="token-link" title="DexScreener">DEX</a>
-                    <a href="#" class="token-link" title="PumpPortal">PUMP</a>
-                    <a href="#" class="token-link" title="Twitter">X</a>
+
+            <!-- Right: Token Card -->
+            <div class="header-right">
+                <div id="schizo-token-card">
+                    <div class="token-card-header">
+                        <img src="Untitled design (44).png" alt="$SCHIZO" class="token-card-img">
+                        <div class="token-card-title">
+                            <span class="token-card-name">$SCHIZO</span>
+                            <span class="token-card-status">Coming Soon</span>
+                        </div>
+                    </div>
+                    <div class="token-card-stats">
+                        <div class="token-card-stat">
+                            <span class="stat-label">Price</span>
+                            <span class="stat-value" id="schizo-price">--</span>
+                        </div>
+                        <div class="token-card-stat">
+                            <span class="stat-label">M.Cap</span>
+                            <span class="stat-value" id="schizo-mcap">--</span>
+                        </div>
+                    </div>
+                    <div class="token-card-actions">
+                        <a href="#" class="btn-primary" title="Buy on PUMP/DEX">BUY $SCHIZO</a>
+                        <div class="secondary-actions">
+                            <a href="#" class="btn-icon" title="Twitter"><svg width="18" height="18" viewBox="0 0 24 24"
+                                    fill="currentColor">
+                                    <path
+                                        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                                </svg></a>
+
+                        </div>
+                    </div>
+                    <div class="token-card-footer">
+                        <div class="ca-input-container">
+                            <input type="text" id="schizo-ca-input" value="CA: TBA" readonly>
+                            <span class="copy-hint">CLICK TO COPY</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -146,21 +165,6 @@
     <script src="app.js"></script>
     <script type="module" src="schizo-3d.js"></script>
 
-    <!-- Schizo 3D Character Toggle Button -->
-    <button id="schizo-toggle-btn" onclick="toggleSchizo()">
-        <span class="schizo-btn-icon">🤖</span>
-        <span class="schizo-btn-text">Open Schizo</span>
-    </button>
-
-    <!-- Schizo 3D Character Container -->
-    <div id="schizo-3d-container" class="schizo-hidden">
-        <div id="schizo-3d-header">
-            <span>$SCHIZO</span>
-            <button onclick="toggleSchizo()" class="schizo-close-btn">✕</button>
-        </div>
-        <div id="schizo-3d-canvas"></div>
-        <div id="schizo-status">Waiting...</div>
-    </div>
 </body>
 
 </html>
