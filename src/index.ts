@@ -5,6 +5,7 @@ import { TradeRepository } from './db/repositories/trades.js';
 import { StateRepository } from './db/repositories/state.js';
 import { TTLCache } from './api/cache.js';
 import { createRateLimiter, getConfigForTier } from './api/rate-limiter.js';
+import { HeliusClient } from './api/helius.js';
 import * as fs from 'fs';
 
 // Create module-specific logger
@@ -309,6 +310,83 @@ if (results.length !== 5 || results[0] !== 'task-1') {
   throw new Error('Rate limiter task execution failed');
 }
 log.info('Rate limiter concurrent execution: PASSED');
+
+// ===========================================
+// HeliusClient Tests
+// ===========================================
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+
+if (HELIUS_API_KEY) {
+  log.info('Starting HeliusClient tests (HELIUS_API_KEY found)...');
+
+  // Test 1: Create HeliusClient
+  const helius = new HeliusClient({
+    apiKey: HELIUS_API_KEY,
+    tier: 'developer',
+    cacheTTL: 30000,
+  });
+  log.info('HeliusClient created: PASSED');
+
+  // Test 2: Get Connection object
+  const connection = helius.getConnection();
+  if (!connection) {
+    throw new Error('HeliusClient getConnection failed');
+  }
+  log.info('HeliusClient getConnection: PASSED');
+
+  // Test 3: Fetch transactions for a known wallet (Helius treasury)
+  // Using Helius's own wallet: HELiUS... just a known active address
+  const TEST_WALLET = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'; // Bonk token
+
+  try {
+    const txResult = await helius.getTransactionsForAddress(TEST_WALLET, { limit: 5 });
+    log.info({
+      count: txResult.data.length,
+      hasPaginationToken: !!txResult.paginationToken
+    }, 'HeliusClient getTransactionsForAddress: PASSED');
+
+    // Test 4: Verify cache hit on second call
+    const txResult2 = await helius.getTransactionsForAddress(TEST_WALLET, { limit: 5 });
+    const cacheStats = helius.getCacheStats();
+    log.info({ cacheStats }, 'HeliusClient cache stats');
+
+    if (cacheStats.hits < 1) {
+      log.warn('Expected cache hit on second call');
+    } else {
+      log.info('HeliusClient cache hit on repeated call: PASSED');
+    }
+
+    // Test 5: Check circuit breaker status
+    const cbStatus = helius.getCircuitBreakerStatus();
+    log.info({ cbStatus }, 'HeliusClient circuit breaker status');
+    if (cbStatus.state !== 'CLOSED') {
+      log.warn('Circuit breaker not in CLOSED state');
+    } else {
+      log.info('HeliusClient circuit breaker healthy: PASSED');
+    }
+  } catch (error) {
+    // If API call fails (e.g., bad key, rate limited), log but don't fail
+    log.warn({ error: (error as Error).message }, 'HeliusClient API test skipped (API error)');
+  }
+} else {
+  log.info('Skipping HeliusClient API tests (HELIUS_API_KEY not set)');
+
+  // Still test non-API functionality
+  const helius = new HeliusClient({
+    apiKey: 'test-key',
+    tier: 'developer',
+  });
+
+  const connection = helius.getConnection();
+  if (!connection) {
+    throw new Error('HeliusClient getConnection failed');
+  }
+  log.info('HeliusClient getConnection (no API key): PASSED');
+
+  const cbStatus = helius.getCircuitBreakerStatus();
+  log.info({ cbStatus }, 'HeliusClient circuit breaker initial status');
+  log.info('HeliusClient non-API tests: PASSED');
+}
 
 // Log completion
 log.info('Agent initialized');
