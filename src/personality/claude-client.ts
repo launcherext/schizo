@@ -32,11 +32,23 @@ export const DEFAULT_CLAUDE_CONFIG: Omit<ClaudeConfig, 'apiKey'> = {
 };
 
 /**
+ * Chat message for history tracking
+ */
+interface ChatHistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+/**
  * Claude API client for personality generation
  */
 export class ClaudeClient {
   private anthropic: Anthropic;
   private config: ClaudeConfig;
+  private chatHistory: ChatHistoryEntry[] = [];
+  private readonly MAX_HISTORY_ENTRIES = 10; // Keep last 10 messages for context
+  private readonly HISTORY_EXPIRY_MS = 5 * 60 * 1000; // Expire history after 5 minutes of silence
 
   constructor(config: ClaudeConfig) {
     this.config = config;
@@ -45,6 +57,43 @@ export class ClaudeClient {
     });
 
     logger.info({ model: config.model }, 'Claude client initialized');
+  }
+
+  /**
+   * Add a message to chat history
+   */
+  private addToHistory(role: 'user' | 'assistant', content: string): void {
+    const now = Date.now();
+
+    // Expire old messages
+    this.chatHistory = this.chatHistory.filter(
+      entry => now - entry.timestamp < this.HISTORY_EXPIRY_MS
+    );
+
+    // Add new entry
+    this.chatHistory.push({ role, content, timestamp: now });
+
+    // Keep only last N entries
+    if (this.chatHistory.length > this.MAX_HISTORY_ENTRIES) {
+      this.chatHistory = this.chatHistory.slice(-this.MAX_HISTORY_ENTRIES);
+    }
+  }
+
+  /**
+   * Get recent chat history as messages array for Claude
+   */
+  private getRecentHistory(): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const now = Date.now();
+
+    // Filter to non-expired messages
+    const recent = this.chatHistory.filter(
+      entry => now - entry.timestamp < this.HISTORY_EXPIRY_MS
+    );
+
+    return recent.map(entry => ({
+      role: entry.role,
+      content: entry.content,
+    }));
   }
 
   /**
@@ -141,28 +190,44 @@ export class ClaudeClient {
 
   /**
    * Respond to a chat message from a viewer
+   * Includes recent conversation history for context
    */
   async respondToChat(message: string, username?: string): Promise<string> {
-    const userContext = username ? `[Chat from @${username}]: ${message}` : `[Chat]: ${message}`;
+    const userContext = username ? `[@${username}]: ${message}` : message;
 
-    logger.debug({ username, message: message.slice(0, 50) }, 'Generating chat response');
+    logger.debug({ username, message: message.slice(0, 50), historyLength: this.chatHistory.length }, 'Generating chat response');
 
     try {
+      // Build messages array with history for context
+      const history = this.getRecentHistory();
+      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+        ...history,
+        { role: 'user', content: userContext },
+      ];
+
+      // Enhanced system prompt for better question handling
+      const enhancedPrompt = `${SCHIZO_CHAT_PROMPT}
+
+IMPORTANT: You are in a live chat. Pay close attention to what the user is asking and respond DIRECTLY to their question or statement. If they ask a specific question, answer it. If they're asking for your opinion, give it. Don't give generic responses - engage with the actual content of what they're saying.
+
+If this is a follow-up question, use the conversation history to understand the context.`;
+
       const response = await this.anthropic.messages.create({
         model: this.config.model,
         max_tokens: this.config.maxTokens,
-        system: SCHIZO_CHAT_PROMPT,
-        messages: [{
-          role: 'user',
-          content: userContext,
-        }],
+        system: enhancedPrompt,
+        messages,
       });
 
       const reply = response.content[0].type === 'text'
         ? response.content[0].text
         : '';
 
-      logger.info({ username, reply: reply.slice(0, 100) }, 'Chat response generated');
+      // Add both the user message and response to history
+      this.addToHistory('user', userContext);
+      this.addToHistory('assistant', reply);
+
+      logger.info({ username, reply: reply.slice(0, 100), historyLength: this.chatHistory.length }, 'Chat response generated');
 
       return reply;
     } catch (error) {
