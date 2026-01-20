@@ -64,12 +64,7 @@ function handleEvent(event) {
       // Silent - show in trade decisions if relevant
       break;
     case 'TRADE_DECISION':
-      // Only show if SCHIZO wants to trade (interesting)
-      if (event.data.decision.shouldTrade) {
-        const reasoning = event.data.reasoning || event.data.decision.reasons[0] || 'Looking good...';
-        addToFeed(`🎯 INTERESTED: ${reasoning}`, 'decision');
-      }
-      // Skip logging "analysis mode" or boring rejections
+      // Silent - only show actual trades, not analysis chatter
       break;
     case 'TRADE_EXECUTED':
       const emoji = event.data.type === 'BUY' ? '💰' : '💸';
@@ -449,22 +444,127 @@ function updateSchizoTokenCard(data) {
     document.getElementById('schizo-volume').textContent = '$' + formatNumber(data.volume24h);
   }
   if (data.ca) {
-    const caEl = document.getElementById('schizo-ca');
-    caEl.textContent = 'CA: ' + data.ca.slice(0, 4) + '...' + data.ca.slice(-4);
-    caEl.onclick = () => {
-      navigator.clipboard.writeText(data.ca);
-      caEl.textContent = 'Copied!';
-      setTimeout(() => {
-        caEl.textContent = 'CA: ' + data.ca.slice(0, 4) + '...' + data.ca.slice(-4);
-      }, 1500);
-    };
+    const caInput = document.getElementById('schizo-ca-input');
+    if (caInput) {
+      caInput.value = data.ca;
+      caInput.onclick = () => {
+        caInput.select();
+        navigator.clipboard.writeText(data.ca);
+        
+        // Visual feedback
+        const oldVal = caInput.value;
+        const hint = document.querySelector('.copy-hint');
+        if (hint) {
+            const originalText = hint.textContent;
+            hint.textContent = 'COPIED!';
+            hint.style.color = '#4ade80';
+            setTimeout(() => {
+                hint.textContent = originalText;
+                hint.style.color = '';
+            }, 1500);
+        }
+      };
+    }
   }
   if (data.live) {
     const statusEl = document.querySelector('.token-card-status');
     statusEl.textContent = 'Live';
     statusEl.classList.add('live');
+    
+    // Update button text/link if needed
+    const buyBtn = document.querySelector('.btn-primary');
+    if (buyBtn && data.dexUrl) {
+        buyBtn.href = data.dexUrl;
+        buyBtn.textContent = 'BUY NOW';
+    }
   }
 }
 
 // Handle SCHIZO_TOKEN_UPDATE event from server (when token goes live)
 // This will be emitted by the server when fetching data from DexScreener/PumpPortal
+
+// ============================================
+// TERMINAL LOGIC
+// ============================================
+const terminalMessages = [
+    '> SEARCHING FOR ALPHA...',
+    '> ERROR: TRUST NO ONE.',
+    '> DETECTING JEETS...',
+    '> SCANNING MEMPOOL...',
+    '> ANALYZING WHALE MOVEMENTS...',
+    '> SYSTEM INTEGRITY: COMPROMISED',
+    '> THE BLOCKCHAIN IS WATCHING',
+    '> ENCRYPTING THOUGHTS...',
+    '> DECODING SMART MONEY...',
+    '> PARANOIA LEVEL: CRITICAL',
+    '> BUY SIGNALS DETECTED',
+    '> IGNORING FUD...',
+    '> EXECUTING STRATEGY 99...',
+    '> CHECKING WALLET SECURITY...'
+];
+
+function initTerminal() {
+    const terminal = document.getElementById('terminal-content');
+    if (!terminal) return;
+
+    function addLine(text) {
+        const line = document.createElement('div');
+        line.className = 'terminal-line';
+        terminal.appendChild(line);
+        
+        let i = 0;
+        const speed = 30 + Math.random() * 40;
+        
+        const interval = setInterval(() => {
+            line.textContent += text.charAt(i);
+            i++;
+            if (i >= text.length) clearInterval(interval);
+        }, speed);
+
+        // Keep last 6 lines
+        while (terminal.children.length > 6) {
+            terminal.removeChild(terminal.firstChild);
+        }
+    }
+
+    // Random interval
+    function scheduleNext() {
+        const delay = 1500 + Math.random() * 2500;
+        setTimeout(() => {
+            const msg = terminalMessages[Math.floor(Math.random() * terminalMessages.length)];
+            addLine(msg);
+            scheduleNext();
+        }, delay);
+    }
+    
+    scheduleNext();
+}
+
+// ============================================
+// EYE TRACKING LOGIC
+// ============================================
+function initEyeTracking() {
+    const logo = document.getElementById('hero-logo');
+    if (!logo) return;
+
+    document.addEventListener('mousemove', (e) => {
+        const rect = logo.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        const deltaX = e.clientX - centerX;
+        const deltaY = e.clientY - centerY;
+
+        // Limit movement magnitude
+        const moveX = Math.min(Math.max(deltaX / 25, -12), 12);
+        const moveY = Math.min(Math.max(deltaY / 25, -12), 12);
+
+        logo.style.transform = `translate(${moveX}px, ${moveY}px)`;
+    });
+}
+
+// Initialize new features when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initTerminal();
+    initEyeTracking();
+});
