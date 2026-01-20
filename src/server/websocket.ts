@@ -261,34 +261,48 @@ function getCachedResponse(message: string): string | null {
   // ONLY exact short greetings - anything with more words goes to Claude
   if (/^gm[!.]*$/i.test(lower)) {
     return pickRandom([
-      'gm fren. The charts never sleep and neither do I.',
-      'gm. Already spotted 3 suspicious wallets today.',
-      'gm degen. What are we watching today?',
+      'gm fren. What tokens are we paranoid about today?',
+      'gm. Been watching some sus wallets move. You?',
+      'gm degen. Ready to find some alpha?',
+      'gm. Coffee and conspiracy theories - my favorite combo.',
+      'gm. The early degen gets the... well, sometimes rugged. But sometimes rich.',
     ]);
   }
 
   if (/^gn[!.]*$/i.test(lower)) {
     return pickRandom([
-      'gn. The whales trade while you sleep.',
-      'gn fren. I\'ll keep watching.',
-      'gn. Set those stop losses.',
+      'gn. I\'ll be here watching the charts while you dream of lambos.',
+      'gn fren. Set those stop losses - I don\'t trust anything while you\'re asleep.',
+      'gn. May your bags pump overnight.',
+      'gn. The whales are active at night. I\'ll keep watch.',
     ]);
   }
 
-  if (/^(hi|hello|hey|yo)[!.]*$/i.test(lower)) {
+  if (/^(hi|hello|hey|yo|sup)[!.]*$/i.test(lower)) {
     return pickRandom([
-      'Hey anon. What\'s on your mind?',
-      'Sup. Ask me anything.',
-      'Hello. The wallets are talking today...',
+      'Hey. What\'s good?',
+      'Sup anon. Got any alpha to share?',
+      'Yo. Ask me anything, I\'m feeling chatty.',
+      'Hey fren. The market\'s being weird today - what\'s on your mind?',
     ]);
   }
 
-  // Very short non-questions - just acknowledgments
+  // Very short acknowledgments
   if (/^(ok|okay|cool|nice|thanks|ty|thx)[!.]*$/i.test(lower)) {
     return pickRandom([
-      'Stay vigilant fren.',
-      '*nods*',
-      'Anytime.',
+      'Anytime fren.',
+      '*nods paranoidly*',
+      'Got you.',
+      'Stay safe out there.',
+    ]);
+  }
+
+  // Laughter/emojis - don't need Claude for these
+  if (/^(lol|lmao|haha|😂|🤣|💀)+[!.]*$/i.test(lower)) {
+    return pickRandom([
+      'lmao glad someone gets it',
+      'the memes write themselves honestly',
+      '*laughs in algorithm*',
     ]);
   }
 
@@ -305,16 +319,35 @@ function pickRandom(responses: string[]): string {
 
 /**
  * Fallback responses when Claude is unavailable AND no cached response matches
+ * These should acknowledge the message type and invite retry
  */
 function getDefaultChatResponse(message: string): string {
+  const lower = message.toLowerCase();
+
+  // If it's a question, acknowledge that
+  if (message.includes('?')) {
+    return pickRandom([
+      'Good question. My brain\'s a bit slow rn - hit me again?',
+      'Hmm, let me think on that... actually, ask me again in a sec.',
+      'That\'s a deep one. My processors need a moment.',
+    ]);
+  }
+
+  // If about trading
+  if (/\b(buy|sell|trade|token|coin|pump|rug)\b/i.test(lower)) {
+    return pickRandom([
+      'My trading analysis is loading... give me a sec fren.',
+      'NFA but I need a moment to check the wallets on that.',
+      'Interesting play. Let me recalibrate and get back to you.',
+    ]);
+  }
+
+  // Generic but still engaging
   return pickRandom([
-    'The wallets are talking to me again... What was that you said?',
-    'My pattern recognition is processing... try again?',
-    'Interesting. The blockchain has opinions about that.',
-    'Hmm. Let me trace some wallets and get back to you.',
-    '*suspicious squinting* Tell me more.',
-    'My neural networks are tingling. Not sure what that means yet.',
-    'The charts are noisy today. Can you repeat that?',
-    'Processing... processing... still paranoid.',
+    'Yo my response module glitched. What were you saying?',
+    'Hold up, my paranoid subroutines crashed. Try again?',
+    '*squints* Say that again? I was distracted by a suspicious wallet.',
+    'My brain buffered. Hit me with that again.',
+    'Connection hiccup. What\'s good?',
   ]);
 }

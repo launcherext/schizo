@@ -340,6 +340,7 @@ export class ClaudeClient {
 
   /**
    * Generate quick commentary on a new token (for stream)
+   * Uses varied prompts and real data to avoid repetition
    */
   async generateTokenCommentary(token: {
     symbol: string;
@@ -348,23 +349,53 @@ export class ClaudeClient {
     liquidity?: number;
     priceChange5m?: number;
   }): Promise<string> {
-    const context = `New token just dropped on pump.fun:
-- Symbol: ${token.symbol}
-- Name: ${token.name}
-- Market Cap: ${token.marketCapSol?.toFixed(2) || '?'} SOL
-- Liquidity: ${token.liquidity ? '$' + token.liquidity.toLocaleString() : '?'}
-- 5m Change: ${token.priceChange5m?.toFixed(1) || '?'}%
+    // Different angles to approach the commentary - pick randomly
+    const angles = [
+      // Name-focused
+      `React to this token name: "${token.name}" (${token.symbol}). Is it clever, stupid, or suspicious? One sentence.`,
 
-Give a quick, brutally honest 1-2 sentence reaction. Be cynical, funny, or intrigued depending on what you see. Examples of tone:
-- "ehh looks like garbage, hard pass"
-- "interesting name... but those numbers look sus"
-- "oh this could actually run, watching closely"
-- "another dog coin? really? we're still doing this?"`;
+      // Numbers-focused
+      `Token ${token.symbol} has ${token.marketCapSol?.toFixed(1) || '?'} SOL mcap and ${token.priceChange5m?.toFixed(0) || '0'}% 5min change. Quick take on these numbers.`,
+
+      // Suspicious/investigative
+      `New token "${token.symbol}" just appeared. First impression - rug or legit? Be specific about why.`,
+
+      // Casual/quick
+      `${token.symbol} just dropped. One quick thought - no generic responses.`,
+
+      // Comparative
+      `${token.name} (${token.symbol}) - ${token.marketCapSol?.toFixed(1) || '?'} SOL mcap. Compare it to something funny or make a prediction.`,
+
+      // Cynical
+      `Another pump.fun token: ${token.symbol}. Roast it or hype it, your choice. Be specific to this token.`,
+
+      // Market context
+      `${token.symbol} with ${token.liquidity ? '$' + Math.round(token.liquidity).toLocaleString() : 'unknown'} liquidity. What does this liquidity level tell you?`,
+
+      // FOMO/anti-FOMO
+      `${token.symbol} is ${(token.priceChange5m || 0) > 0 ? 'pumping' : 'dumping'} (${token.priceChange5m?.toFixed(1) || '0'}%). Chase or fade?`,
+    ];
+
+    const angle = angles[Math.floor(Math.random() * angles.length)];
+
+    const context = `You're live streaming. A new token just appeared:
+- ${token.symbol} (${token.name})
+- Mcap: ${token.marketCapSol?.toFixed(2) || '?'} SOL (~$${token.marketCapSol ? Math.round(token.marketCapSol * 170).toLocaleString() : '?'})
+- Liquidity: ${token.liquidity ? '$' + Math.round(token.liquidity).toLocaleString() : 'unknown'}
+- 5m change: ${token.priceChange5m?.toFixed(1) || '0'}%
+
+${angle}
+
+RULES:
+- ONE sentence only, max 15 words
+- Reference the ACTUAL data (name, symbol, numbers)
+- No generic "watching this one" or "interesting" responses
+- Be specific to THIS token`;
 
     try {
       const response = await this.anthropic.messages.create({
         model: this.config.model,
-        max_tokens: 80,
+        max_tokens: 60,
         system: SCHIZO_SYSTEM_PROMPT,
         messages: [{
           role: 'user',
@@ -374,7 +405,7 @@ Give a quick, brutally honest 1-2 sentence reaction. Be cynical, funny, or intri
 
       return response.content[0].type === 'text'
         ? response.content[0].text
-        : 'Hmm... let me think about this one.';
+        : this.generateFallbackTokenCommentary(token);
     } catch (error) {
       logger.error({ error, symbol: token.symbol }, 'Failed to generate token commentary');
       return this.generateFallbackTokenCommentary(token);
@@ -382,15 +413,44 @@ Give a quick, brutally honest 1-2 sentence reaction. Be cynical, funny, or intri
   }
 
   /**
-   * Fallback token commentary
+   * Fallback token commentary - uses actual token data for variety
    */
-  private generateFallbackTokenCommentary(token: { symbol: string; name: string }): string {
+  private generateFallbackTokenCommentary(token: {
+    symbol: string;
+    name: string;
+    marketCapSol?: number;
+    priceChange5m?: number;
+  }): string {
+    const mcap = token.marketCapSol?.toFixed(1) || '?';
+    const change = token.priceChange5m?.toFixed(0) || '0';
+    const isUp = (token.priceChange5m || 0) > 0;
+
     const fallbacks = [
-      `${token.symbol}... another one for the watchlist.`,
-      `Hmm, ${token.name}. The name's either genius or desperate.`,
-      `New token alert. Let me check if this is a honeypot...`,
-      `${token.symbol}? My neural networks are... uncertain.`,
+      // Name-based
+      `${token.name}? That name is either genius or a cry for help.`,
+      `${token.symbol}... creative. Let's see if the chart matches the energy.`,
+      `Who names these things? ${token.name}. Anyway, ${mcap} SOL mcap.`,
+
+      // Numbers-based
+      `${mcap} SOL mcap on ${token.symbol}. ${isUp ? 'Pumping' : 'Dumping'} ${change}% already.`,
+      `${token.symbol} at ${mcap} SOL. That's either early or exit liquidity.`,
+      `${change}% in 5 minutes? ${token.symbol} is ${isUp ? 'cooking' : 'cooked'}.`,
+
+      // Skeptical
+      `${token.symbol} just dropped. Checking if this is another honeypot...`,
+      `New token alert: ${token.symbol}. The dev wallet is probably loading up right now.`,
+      `${token.name}. Seen this pattern before. Usually ends in tears.`,
+
+      // Curious
+      `${token.symbol} caught my attention. ${mcap} SOL and ${isUp ? 'green' : 'red'}. Hmm.`,
+      `Interesting... ${token.name} at ${mcap} SOL. My paranoia says wait.`,
+
+      // Quick dismissal
+      `${token.symbol}. Nope. Next.`,
+      `${token.name}? Hard pass. Moving on.`,
+      `Another one. ${token.symbol}. The machine never stops.`,
     ];
+
     return fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
 
