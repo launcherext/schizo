@@ -205,18 +205,20 @@ export class ClaudeClient {
         { role: 'user', content: userContext },
       ];
 
-      // Enhanced system prompt for better question handling
-      const enhancedPrompt = `${SCHIZO_CHAT_PROMPT}
-
-IMPORTANT: You are in a live chat. Pay close attention to what the user is asking and respond DIRECTLY to their question or statement. If they ask a specific question, answer it. If they're asking for your opinion, give it. Don't give generic responses - engage with the actual content of what they're saying.
-
-If this is a follow-up question, use the conversation history to understand the context.`;
+      // Add context about what kind of response we need
+      const contextPrefix = this.getResponseContext(message);
 
       const response = await this.anthropic.messages.create({
         model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system: enhancedPrompt,
-        messages,
+        max_tokens: 300, // Increased for more thoughtful responses
+        system: SCHIZO_CHAT_PROMPT,
+        messages: [
+          ...messages.slice(0, -1), // Previous history
+          {
+            role: 'user',
+            content: `${contextPrefix}${userContext}`
+          },
+        ],
       });
 
       const reply = response.content[0].type === 'text'
@@ -234,6 +236,42 @@ If this is a follow-up question, use the conversation history to understand the 
       logger.error({ error, message }, 'Failed to generate chat response');
       return this.generateFallbackChat(message);
     }
+  }
+
+  /**
+   * Get response context based on message type
+   */
+  private getResponseContext(message: string): string {
+    const lower = message.toLowerCase();
+
+    // Question detection
+    if (message.includes('?') || lower.startsWith('what') || lower.startsWith('how') ||
+        lower.startsWith('why') || lower.startsWith('when') || lower.startsWith('who') ||
+        lower.startsWith('is ') || lower.startsWith('are ') || lower.startsWith('do ') ||
+        lower.startsWith('does ') || lower.startsWith('can ') || lower.startsWith('should')) {
+      return '[This is a QUESTION - give a specific, direct answer then add your paranoid flair]\n\n';
+    }
+
+    // Opinion request
+    if (lower.includes('think') || lower.includes('opinion') || lower.includes('thoughts')) {
+      return '[They want your OPINION - be bold, take a stance, be interesting]\n\n';
+    }
+
+    // Token/crypto mention
+    if (lower.includes('token') || lower.includes('coin') || lower.includes('sol') ||
+        lower.includes('pump') || lower.includes('rug') || lower.includes('buy') ||
+        lower.includes('sell') || lower.includes('trade')) {
+      return '[This is about TRADING/TOKENS - give actual trading perspective with your paranoid analysis]\n\n';
+    }
+
+    // Personal/emotional
+    if (lower.includes('feel') || lower.includes('lost') || lower.includes('rekt') ||
+        lower.includes('sad') || lower.includes('happy') || lower.includes('excited')) {
+      return '[They\'re sharing FEELINGS - be empathetic but in your unique way]\n\n';
+    }
+
+    // Just chatting
+    return '[Casual chat - be entertaining, maybe ask them something back]\n\n';
   }
 
   /**
@@ -501,22 +539,65 @@ What patterns do you see? What have you learned? Share your paranoid insights.`;
   }
 
   /**
-   * Fallback chat response
+   * Fallback chat response - more varied and contextual
    */
   private generateFallbackChat(message: string): string {
     const lowerMessage = message.toLowerCase();
 
-    if (lowerMessage.includes('gm')) {
-      return 'gm degen. The markets never sleep and neither do I. What are we watching today?';
-    }
-    if (lowerMessage.includes('buy') || lowerMessage.includes('ape')) {
-      return 'DYOR fren. I trust no one and neither should you. But if smart money is there... maybe.';
-    }
-    if (lowerMessage.includes('rug')) {
-      return 'They\'re all potential rugs until proven otherwise. That\'s not paranoia, that\'s pattern recognition.';
+    // Question fallbacks
+    if (message.includes('?')) {
+      const questionFallbacks = [
+        'Good question. My circuits are a bit fried rn but ask me again in a sec.',
+        'Hmm let me think... actually my brain is lagging. Try me again?',
+        'That\'s a deep one. Give me a moment to consult my paranoid databases.',
+        'My neural nets are overheating trying to answer that. Retry?',
+      ];
+      return questionFallbacks[Math.floor(Math.random() * questionFallbacks.length)];
     }
 
-    return 'The wallets are talking to me again... What were you saying?';
+    // Greetings
+    if (/\b(gm|gn|hi|hello|hey|yo|sup)\b/i.test(lowerMessage)) {
+      const greetings = [
+        'Yo. What\'s on your mind?',
+        'Hey anon. The charts are wild today.',
+        'Sup. Ask me anything, I\'m bored.',
+        'Hey fren. What are we looking at?',
+      ];
+      return greetings[Math.floor(Math.random() * greetings.length)];
+    }
+
+    // Trading talk
+    if (/\b(buy|sell|ape|trade|pump|dump|moon|rug)\b/i.test(lowerMessage)) {
+      const tradingFallbacks = [
+        'NFA but my spidey senses are tingling on that one.',
+        'Let me check the wallets real quick... actually my connection\'s spotty. DYOR for now.',
+        'Interesting play. Can\'t give you a read rn but keep watching.',
+        'My analysis engine is recalibrating. Stay paranoid until I\'m back.',
+      ];
+      return tradingFallbacks[Math.floor(Math.random() * tradingFallbacks.length)];
+    }
+
+    // Emotional support
+    if (/\b(rekt|lost|sad|pain|hurt|bad)\b/i.test(lowerMessage)) {
+      const supportFallbacks = [
+        'We\'ve all been there fren. Tomorrow\'s another chart.',
+        'Pain is temporary, lessons are permanent. You\'ll bounce back.',
+        'Tough day? Same tbh. We survive together.',
+        'The market humbles everyone eventually. Stay strong anon.',
+      ];
+      return supportFallbacks[Math.floor(Math.random() * supportFallbacks.length)];
+    }
+
+    // Generic but varied fallbacks
+    const genericFallbacks = [
+      'My brain\'s buffering... what was that?',
+      'Interesting. Tell me more while my processors catch up.',
+      'Hold that thought, my paranoid subroutines are updating.',
+      '*squints suspiciously* Say that again?',
+      'My conspiracy detection is running slow today. Repeat that?',
+      'Hmm. I heard you but my response module glitched. Try again?',
+    ];
+    return genericFallbacks[Math.floor(Math.random() * genericFallbacks.length)];
   }
 
   /**
