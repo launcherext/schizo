@@ -152,11 +152,12 @@ export async function runDevnetTest(): Promise<void> {
     // Create a deterministic mock signature based on run count
     signature = `mock_tx_${Date.now()}_run${runCount}_${keypair.publicKey.toBase58().slice(0, 8)}`;
 
-    // Sign a message to prove we have the private key (actual signing test)
-    const testMessage = Buffer.from(`SCHIZO Agent Test Run ${runCount}`);
-    const { sign } = await import('@solana/web3.js');
-    // Keypair.sign is not directly available, we verify via transaction signing capability
-    log.info('[MOCK MODE] Keypair signing capability verified');
+    // Verify we have the keypair by checking it has a valid secret key
+    // (In real mode, the sendAndConfirmTransaction call would prove signing capability)
+    if (!keypair.secretKey || keypair.secretKey.length !== 64) {
+      throw new Error('Keypair does not have valid secret key');
+    }
+    log.info('[MOCK MODE] Keypair verified (has valid secret key)');
     log.info({ signature }, '[MOCK MODE] Simulated transaction signature');
   } else {
     // Real mode: submit actual transaction to devnet
