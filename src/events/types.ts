@@ -33,7 +33,8 @@ export type AgentEvent =
   | ChatResponseEvent
   | VoiceAudioEvent
   | TokenDiscoveredEvent
-  | TokenCommentaryEvent;
+  | TokenCommentaryEvent
+  | AnalysisThoughtEvent;
 
 /**
  * Analysis started for a token
@@ -256,5 +257,25 @@ export interface TokenCommentaryEvent extends BaseEvent {
     mint: string;
     symbol: string;
     commentary: string;
+  };
+}
+
+/**
+ * SCHIZO's live analysis thoughts (spoken out loud)
+ */
+export interface AnalysisThoughtEvent extends BaseEvent {
+  type: 'ANALYSIS_THOUGHT';
+  data: {
+    mint: string;
+    symbol: string;
+    stage: 'scanning' | 'safety' | 'smart_money' | 'decision';
+    thought: string;
+    details?: {
+      isSafe?: boolean;
+      risks?: string[];
+      smartMoneyCount?: number;
+      shouldTrade?: boolean;
+      reasons?: string[];
+    };
   };
 }

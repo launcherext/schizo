@@ -55,20 +55,38 @@ function handleEvent(event) {
       addToFeed('🟢 Connected to agent', 'system');
       break;
     case 'ANALYSIS_START':
-      // Silent - too spammy
+      // Silent - the ANALYSIS_THOUGHT events show the live analysis
+      break;
+    case 'ANALYSIS_THOUGHT':
+      // SCHIZO's live analysis thoughts - show in feed!
+      const stageEmojis = {
+        scanning: '🔍',
+        safety: '🛡️',
+        smart_money: '🐋',
+        decision: '🎯'
+      };
+      const stageLabels = {
+        scanning: 'SCANNING',
+        safety: 'SAFETY',
+        smart_money: 'WHALES',
+        decision: 'VERDICT'
+      };
+      const emoji = stageEmojis[event.data.stage] || '🤔';
+      const label = stageLabels[event.data.stage] || 'ANALYSIS';
+      addToFeed(`${emoji} [${label}] ${event.data.symbol}: "${event.data.thought}"`, `analysis-${event.data.stage}`, event.data.mint);
       break;
     case 'SAFETY_CHECK':
-      // Silent - only show interesting decisions
+      // Silent - ANALYSIS_THOUGHT handles the voiced commentary
       break;
     case 'SMART_MONEY_CHECK':
-      // Silent - show in trade decisions if relevant
+      // Silent - ANALYSIS_THOUGHT handles the voiced commentary
       break;
     case 'TRADE_DECISION':
-      // Silent - only show actual trades, not analysis chatter
+      // Silent - ANALYSIS_THOUGHT handles the voiced commentary
       break;
     case 'TRADE_EXECUTED':
-      const emoji = event.data.type === 'BUY' ? '💰' : '💸';
-      addToFeed(`${emoji} ${event.data.type}: ${event.data.amount.toFixed(2)} SOL - ${formatMint(event.data.mint)}`, 'trade', event.data.mint);
+      const tradeEmoji = event.data.type === 'BUY' ? '💰' : '💸';
+      addToFeed(`${tradeEmoji} ${event.data.type}: ${event.data.amount.toFixed(2)} SOL - ${formatMint(event.data.mint)}`, 'trade', event.data.mint);
       addToTradesTable(event.data);
       break;
     case 'BUYBACK_TRIGGERED':

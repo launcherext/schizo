@@ -269,13 +269,18 @@ async function main(): Promise<void> {
       marketWatcher.start();
       log.info('🧠 Market Watcher started - Learning patterns...');
 
-      // Voice announcements for trade events
+      // Voice announcements for analysis and trade events
       if (narrator) {
         agentEvents.onAny(async (event) => {
           try {
             let speech: string | null = null;
 
-            if (event.type === 'TRADE_EXECUTED') {
+            // ANALYSIS_THOUGHT events - SCHIZO thinking out loud during analysis
+            if (event.type === 'ANALYSIS_THOUGHT') {
+              speech = event.data.thought;
+            }
+            // Trade executed events
+            else if (event.type === 'TRADE_EXECUTED') {
               const { type, amount, mint } = event.data;
               const shortMint = mint.slice(0, 6);
               if (claude) {

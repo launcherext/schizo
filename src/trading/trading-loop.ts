@@ -657,6 +657,7 @@ export class TradingLoop {
     const symbol = metadata?.symbol || pumpToken?.symbol || birdeyeToken?.symbol || mint.slice(0, 6);
     const name = metadata?.name || pumpToken?.name || birdeyeToken?.name || 'Unknown';
     const marketCapSol = pumpToken?.marketCapSol || (birdeyeToken?.marketCap ? birdeyeToken.marketCap / 170 : 0);
+    const liquidity = metadata?.liquidity || birdeyeToken?.liquidity || (marketCapSol * 170);
     const isTrending = !!birdeyeToken;
 
     logger.info({
@@ -683,7 +684,7 @@ export class TradingLoop {
         priceChange5m: metadata?.priceChange5m || 0,
         priceChange1h: metadata?.priceChange1h || birdeyeToken?.priceChange1h || 0,
         volume1h: metadata?.volume1h || birdeyeToken?.volume24h || 0,
-        liquidity: metadata?.liquidity || birdeyeToken?.liquidity || (marketCapSol * 170),
+        liquidity,
         marketCap: metadata?.marketCap || birdeyeToken?.marketCap || (marketCapSol * 170),
         buys5m: metadata?.buys5m || 0,
         sells5m: metadata?.sells5m || 0,
@@ -700,6 +701,30 @@ export class TradingLoop {
       timestamp: Date.now(),
       data: { mint },
     });
+
+    // Emit SCANNING thought - SCHIZO notices the token
+    if (this.claude) {
+      try {
+        const scanThought = await this.claude.generateAnalysisThought('scanning', {
+          symbol,
+          name,
+          marketCapSol,
+          liquidity,
+        });
+        agentEvents.emit({
+          type: 'ANALYSIS_THOUGHT',
+          timestamp: Date.now(),
+          data: {
+            mint,
+            symbol,
+            stage: 'scanning',
+            thought: scanThought,
+          },
+        });
+      } catch (err) {
+        logger.debug({ err }, 'Failed to generate scanning thought');
+      }
+    }
 
     try {
       // PRE-CHECK: Minimum activity check - don't buy zero-action tokens
@@ -730,12 +755,40 @@ export class TradingLoop {
 
       // Step 1: Safety analysis
       const safetyResult = await this.tokenSafety.analyze(mint);
-      
+
       agentEvents.emit({
         type: 'SAFETY_CHECK',
         timestamp: Date.now(),
         data: { mint, result: safetyResult },
       });
+
+      // Emit SAFETY thought - SCHIZO reacts to safety check
+      if (this.claude) {
+        try {
+          const safetyThought = await this.claude.generateAnalysisThought('safety', {
+            symbol,
+            name,
+            isSafe: safetyResult.isSafe,
+            risks: safetyResult.risks, // TokenRisk is already a string literal type
+          });
+          agentEvents.emit({
+            type: 'ANALYSIS_THOUGHT',
+            timestamp: Date.now(),
+            data: {
+              mint,
+              symbol,
+              stage: 'safety',
+              thought: safetyThought,
+              details: {
+                isSafe: safetyResult.isSafe,
+                risks: safetyResult.risks,
+              },
+            },
+          });
+        } catch (err) {
+          logger.debug({ err }, 'Failed to generate safety thought');
+        }
+      }
 
       // Step 2: Smart money check
       // Note: Full smart money detection requires fetching top token holders,
@@ -748,6 +801,32 @@ export class TradingLoop {
         timestamp: Date.now(),
         data: { mint, count: smartMoneyCount },
       });
+
+      // Emit SMART_MONEY thought - SCHIZO comments on whale activity
+      if (this.claude) {
+        try {
+          const smartMoneyThought = await this.claude.generateAnalysisThought('smart_money', {
+            symbol,
+            name,
+            smartMoneyCount,
+          });
+          agentEvents.emit({
+            type: 'ANALYSIS_THOUGHT',
+            timestamp: Date.now(),
+            data: {
+              mint,
+              symbol,
+              stage: 'smart_money',
+              thought: smartMoneyThought,
+              details: {
+                smartMoneyCount,
+              },
+            },
+          });
+        } catch (err) {
+          logger.debug({ err }, 'Failed to generate smart money thought');
+        }
+      }
 
       // Step 3: Get trading decision from Trading Engine (if available)
       if (!this.tradingEngine) {
@@ -787,6 +866,34 @@ export class TradingLoop {
           reasoning: decision.reasoning,
         },
       });
+
+      // Emit DECISION thought - SCHIZO announces his verdict
+      if (this.claude) {
+        try {
+          const decisionThought = await this.claude.generateAnalysisThought('decision', {
+            symbol,
+            name,
+            shouldTrade: decision.shouldTrade,
+            reasons: decision.reasons,
+          });
+          agentEvents.emit({
+            type: 'ANALYSIS_THOUGHT',
+            timestamp: Date.now(),
+            data: {
+              mint,
+              symbol,
+              stage: 'decision',
+              thought: decisionThought,
+              details: {
+                shouldTrade: decision.shouldTrade,
+                reasons: decision.reasons,
+              },
+            },
+          });
+        } catch (err) {
+          logger.debug({ err }, 'Failed to generate decision thought');
+        }
+      }
 
       // Step 4: Execute trade if approved
       if (decision.shouldTrade) {

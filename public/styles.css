@@ -734,6 +734,37 @@ button:active {
     text-shadow: 0 0 8px rgba(140, 219, 199, 0.4);
 }
 
+/* Live Analysis Thoughts */
+.event.analysis-scanning {
+    color: #b8a9ff;
+    border-left-color: rgba(184, 169, 255, 0.6);
+    background: rgba(184, 169, 255, 0.06);
+    font-style: italic;
+}
+
+.event.analysis-safety {
+    color: #ffb86b;
+    border-left-color: rgba(255, 184, 107, 0.6);
+    background: rgba(255, 184, 107, 0.06);
+    font-style: italic;
+}
+
+.event.analysis-smart_money {
+    color: #6bcfff;
+    border-left-color: rgba(107, 207, 255, 0.6);
+    background: rgba(107, 207, 255, 0.06);
+    font-style: italic;
+}
+
+.event.analysis-decision {
+    color: #8cdbc7;
+    font-weight: bold;
+    border-left-color: #8cdbc7;
+    background: rgba(140, 219, 199, 0.1);
+    text-shadow: 0 0 5px rgba(140, 219, 199, 0.3);
+    font-style: normal;
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;

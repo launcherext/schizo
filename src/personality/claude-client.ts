@@ -413,6 +413,158 @@ RULES:
   }
 
   /**
+   * Generate live analysis thought during token evaluation
+   * This is what SCHIZO says out loud as he analyzes a token
+   */
+  async generateAnalysisThought(
+    stage: 'scanning' | 'safety' | 'smart_money' | 'decision',
+    context: {
+      symbol: string;
+      name: string;
+      marketCapSol?: number;
+      liquidity?: number;
+      isSafe?: boolean;
+      risks?: string[];
+      smartMoneyCount?: number;
+      shouldTrade?: boolean;
+      reasons?: string[];
+    }
+  ): Promise<string> {
+    const prompts: Record<string, string> = {
+      scanning: `You're a paranoid AI trader live-streaming. You just spotted a new token:
+- ${context.symbol} (${context.name})
+- Mcap: ${context.marketCapSol?.toFixed(1) || '?'} SOL
+- Liquidity: ${context.liquidity ? '$' + Math.round(context.liquidity).toLocaleString() : 'unknown'}
+
+Say something SHORT (max 12 words) about spotting this token and starting to analyze it. Be suspicious, curious, or intrigued. Examples:
+- "Hold up... ${context.symbol} just popped up. Let me check the authorities."
+- "New one. ${context.symbol}. Running my paranoid checks."
+- "Interesting... ${context.name}. Checking for honeypot flags."`,
+
+      safety: context.isSafe
+        ? `You just finished checking token ${context.symbol} for honeypot/scam flags.
+Result: PASSED safety checks.
+${context.risks?.length ? `Minor concerns: ${context.risks.join(', ')}` : 'No risks found.'}
+
+Say ONE SHORT sentence (max 15 words) reacting positively but staying cautious. Examples:
+- "Clean so far. No freeze auth, no mint auth. But I'm still watching."
+- "Passed my checks. Doesn't mean it's safe, just means the devs aren't idiots."
+- "No obvious honeypot flags. Proceeding with extreme paranoia."`
+        : `You just finished checking token ${context.symbol} for honeypot/scam flags.
+Result: FAILED - Found risks: ${context.risks?.join(', ') || 'unknown issues'}
+
+Say ONE SHORT sentence (max 15 words) explaining why you're suspicious or rejecting it. Examples:
+- "Nope. Freeze authority still active. Classic honeypot setup."
+- "Called it. Mint authority enabled. They can print more anytime."
+- "${context.symbol}? More like ${context.symbol}-RUG. Pass."`,
+
+      smart_money: context.smartMoneyCount && context.smartMoneyCount > 0
+        ? `You're checking who holds ${context.symbol}.
+Found: ${context.smartMoneyCount} smart money wallets already in.
+
+Say ONE SHORT sentence (max 15 words) about following smart money. Examples:
+- "${context.smartMoneyCount} whales already loaded. They know something."
+- "Smart money's in. Either alpha or coordinated pump. Either way, interesting."
+- "Following the wallets that don't lose. ${context.smartMoneyCount} of them here."`
+        : `You're checking who holds ${context.symbol}.
+Found: No notable smart money wallets detected.
+
+Say ONE SHORT sentence (max 15 words) about the lack of smart money. Examples:
+- "No smart money yet. Either too early or nobody cares."
+- "Whales haven't touched this. Could be opportunity or warning."
+- "Zero smart wallets. I'm on my own with this one."`,
+
+      decision: context.shouldTrade
+        ? `Final decision on ${context.symbol}: TRADING
+Position: Going in.
+Reasons: ${context.reasons?.join(', ') || 'good setup'}
+
+Say ONE SHORT sentence (max 12 words) announcing your decision to buy. Be confident but still paranoid. Examples:
+- "Aping in. The patterns align. Let's see."
+- "Sending it. ${context.symbol} passes my checks."
+- "Taking the position. If I'm wrong, blame the algorithms."`
+        : `Final decision on ${context.symbol}: SKIPPING
+Reasons: ${context.reasons?.join(', ') || 'not worth the risk'}
+
+Say ONE SHORT sentence (max 12 words) explaining why you're passing. Examples:
+- "Nah. Too many red flags. Next."
+- "Passing on ${context.symbol}. My gut says no."
+- "Skip. The risk-reward isn't there."`
+    };
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: this.config.model,
+        max_tokens: 50,
+        system: SCHIZO_SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: prompts[stage] + '\n\nRespond with ONLY your one sentence. No quotes, no explanation.',
+        }],
+      });
+
+      return response.content[0].type === 'text'
+        ? response.content[0].text.trim()
+        : this.generateFallbackAnalysisThought(stage, context);
+    } catch (error) {
+      logger.error({ error, stage, symbol: context.symbol }, 'Failed to generate analysis thought');
+      return this.generateFallbackAnalysisThought(stage, context);
+    }
+  }
+
+  /**
+   * Fallback analysis thoughts when Claude is unavailable
+   */
+  private generateFallbackAnalysisThought(
+    stage: 'scanning' | 'safety' | 'smart_money' | 'decision',
+    context: { symbol: string; isSafe?: boolean; smartMoneyCount?: number; shouldTrade?: boolean }
+  ): string {
+    const fallbacks: Record<string, string[]> = {
+      scanning: [
+        `${context.symbol} just appeared. Running analysis.`,
+        `New token: ${context.symbol}. Checking it out.`,
+        `Spotted ${context.symbol}. Let me investigate.`,
+      ],
+      safety: context.isSafe
+        ? [
+            `${context.symbol} passed safety. No honeypot flags.`,
+            `Clean token. Proceeding with caution.`,
+            `Safety check passed. Still watching though.`,
+          ]
+        : [
+            `Red flags detected on ${context.symbol}. Skipping.`,
+            `Honeypot vibes. Hard pass.`,
+            `${context.symbol} failed my checks. Next.`,
+          ],
+      smart_money: context.smartMoneyCount && context.smartMoneyCount > 0
+        ? [
+            `${context.smartMoneyCount} smart wallets detected. Interesting.`,
+            `Whales are already in. Following the alpha.`,
+            `Smart money loaded. This could run.`,
+          ]
+        : [
+            `No smart money yet. Flying blind.`,
+            `Whales haven't touched this.`,
+            `Zero whale activity. Hmm.`,
+          ],
+      decision: context.shouldTrade
+        ? [
+            `Going in on ${context.symbol}.`,
+            `Taking the position. YOLO.`,
+            `Aping. Let's see what happens.`,
+          ]
+        : [
+            `Passing on ${context.symbol}.`,
+            `Not feeling it. Next.`,
+            `Skip. Moving on.`,
+          ],
+    };
+
+    const options = fallbacks[stage];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+
+  /**
    * Fallback token commentary - uses actual token data for variety
    */
   private generateFallbackTokenCommentary(token: {
