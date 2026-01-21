@@ -1014,7 +1014,14 @@ export class TradingLoop {
 
         logger.info({ mint, positionSize: decision.positionSizeSol }, 'Executing trade...');
 
-        const signature = await this.tradingEngine.executeBuy(mint);
+        // If entertainment mode approved, bypass the trading engine's re-evaluation
+        const isEntertainmentApproved = !!(entertainmentDecision && entertainmentDecision.shouldTrade);
+        const signature = await this.tradingEngine.executeBuy(
+          mint,
+          undefined,                        // tokenMetadata - will fetch fresh if needed
+          isEntertainmentApproved,          // skipEvaluation - bypass re-evaluation
+          isEntertainmentApproved ? decision.positionSizeSol : undefined  // overridePositionSol
+        );
 
         if (signature) {
           agentEvents.emit({

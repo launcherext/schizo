@@ -72,12 +72,12 @@ export const DEFAULT_ENTERTAINMENT_CONFIG: EntertainmentConfig = {
   baseRiskThreshold: 0.6,
   minRiskThreshold: 0.4,
 
-  // 8% chance of random degen ape
-  degenChance: 0.08,
+  // 15% chance of random degen ape (30% in MANIC mood)
+  degenChance: 0.15,
 
-  // Rate limiting: 5 min cooldown, 6 trades/hour max
-  cooldownMs: 5 * 60 * 1000,          // 5 minutes
-  maxTradesPerHour: 6,
+  // Rate limiting: 2 min cooldown, 12 trades/hour max
+  cooldownMs: 2 * 60 * 1000,          // 2 minutes
+  maxTradesPerHour: 12,
 
   // Hype detection thresholds
   minVolumeForHype: 10000,            // $10k volume
@@ -164,12 +164,30 @@ export class EntertainmentMode {
 
     // Check for degen moment (random ape)
     const isDegenMoment = this.checkDegenMoment();
+
+    // Check for risky auth (mint/freeze authority)
+    const hasRiskyAuth = context.hasMinAuthorities || context.hasFreezeAuth;
+
     if (isDegenMoment) {
-      const position = this.calculatePosition(timePressure, moodEffects, true);
+      let position = this.calculatePosition(timePressure, moodEffects, true);
+      let reason = 'DEGEN MOMENT - random ape activated';
+
+      // If risky auth exists, apply 60% position reduction but still trade
+      if (hasRiskyAuth) {
+        position *= 0.4; // 60% reduction for risky auth
+        reason = 'DEGEN MOMENT - random ape (risky auth, position reduced 60%)';
+        logger.info({
+          mint: context.mint,
+          hasMinAuthorities: context.hasMinAuthorities,
+          hasFreezeAuth: context.hasFreezeAuth,
+          reducedPosition: position
+        }, 'Degen trade with risky auth - position reduced');
+      }
+
       return {
         shouldTrade: true,
         positionSizeSol: position,
-        reason: 'DEGEN MOMENT - random ape activated',
+        reason,
         isDegenMoment: true,
         isHypeTrade: false,
         timePressure,
@@ -177,12 +195,13 @@ export class EntertainmentMode {
       };
     }
 
-    // Check for critical risks (even in entertainment mode, we avoid honeypots)
-    if (context.hasMinAuthorities || context.hasFreezeAuth) {
+    // For non-degen trades, risky auth blocks the trade
+    // (Standard trades should still have safety standards)
+    if (hasRiskyAuth) {
       return {
         shouldTrade: false,
         positionSizeSol: 0,
-        reason: 'Critical risk (mint/freeze authority) - even degens have limits',
+        reason: 'Critical risk (mint/freeze authority) - waiting for degen moment',
         isDegenMoment: false,
         isHypeTrade: false,
         timePressure,

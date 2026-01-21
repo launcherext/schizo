@@ -436,9 +436,18 @@ export class TradingEngine {
 
   /**
    * Execute a buy trade with risk management
+   * @param mint - Token mint address
+   * @param tokenMetadata - Optional metadata (liquidity, marketCapSol)
+   * @param skipEvaluation - Skip re-evaluation when entertainment mode pre-approved
+   * @param overridePositionSol - Override position size (from entertainment mode)
    */
-  async executeBuy(mint: string, tokenMetadata?: { liquidity?: number; marketCapSol?: number }): Promise<string | null> {
-    logger.info({ mint }, 'Executing buy trade');
+  async executeBuy(
+    mint: string,
+    tokenMetadata?: { liquidity?: number; marketCapSol?: number },
+    skipEvaluation?: boolean,
+    overridePositionSol?: number
+  ): Promise<string | null> {
+    logger.info({ mint, skipEvaluation }, 'Executing buy trade');
 
     // Check if trading is allowed
     const canTrade = await this.canTrade();
@@ -447,26 +456,35 @@ export class TradingEngine {
       return null;
     }
 
-    // Evaluate token
-    const decision = await this.evaluateToken(mint, tokenMetadata);
-    
-    logger.info({
-      mint,
-      shouldTrade: decision.shouldTrade,
-      positionSize: decision.positionSizeSol,
-      reasons: decision.reasons,
-    }, 'Trade decision');
+    let positionSizeSol = overridePositionSol || this.config.basePositionSol;
 
-    if (!decision.shouldTrade) {
-      logger.warn({ mint, reasons: decision.reasons }, `⛔ Trade rejected: ${decision.reasons.join(', ')}`);
-      return null;
+    // Skip evaluation if entertainment mode pre-approved
+    if (!skipEvaluation) {
+      // Evaluate token
+      const decision = await this.evaluateToken(mint, tokenMetadata);
+
+      logger.info({
+        mint,
+        shouldTrade: decision.shouldTrade,
+        positionSize: decision.positionSizeSol,
+        reasons: decision.reasons,
+      }, 'Trade decision');
+
+      if (!decision.shouldTrade) {
+        logger.warn({ mint, reasons: decision.reasons }, `⛔ Trade rejected: ${decision.reasons.join(', ')}`);
+        return null;
+      }
+
+      positionSizeSol = decision.positionSizeSol;
+    } else {
+      logger.info({ mint, positionSizeSol }, '🎰 Entertainment mode bypass - skipping re-evaluation');
     }
 
     // Execute trade via PumpPortal
     try {
       const signature = await this.pumpPortal.buy({
         mint,
-        amount: decision.positionSizeSol,
+        amount: positionSizeSol,
         slippage: this.config.slippageTolerance,
       });
 
@@ -486,10 +504,10 @@ export class TradingEngine {
         type: 'BUY',
         tokenMint: mint,
         amountTokens: parsedTx.tokenAmount,
-        amountSol: parsedTx.solAmount || decision.positionSizeSol,
+        amountSol: parsedTx.solAmount || positionSizeSol,
         pricePerToken: parsedTx.pricePerToken,
         metadata: {
-          requestedSol: decision.positionSizeSol,
+          requestedSol: positionSizeSol,
           actualSol: parsedTx.solAmount,
           fee: parsedTx.fee,
           parseSuccess: parsedTx.success,
@@ -499,7 +517,7 @@ export class TradingEngine {
       logger.info({
         mint,
         signature,
-        requestedSol: decision.positionSizeSol,
+        requestedSol: positionSizeSol,
         actualSol: parsedTx.solAmount,
         tokensReceived: parsedTx.tokenAmount,
         pricePerToken: parsedTx.pricePerToken,
