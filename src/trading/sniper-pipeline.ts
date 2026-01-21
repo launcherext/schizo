@@ -206,8 +206,6 @@ export class SniperPipeline {
     const { token } = queued;
 
       // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
-      // SILENCED for verbosity
-      /*
       agentEvents.emit({
         type: 'ANALYSIS_THOUGHT',
         timestamp: Date.now(),
@@ -220,7 +218,6 @@ export class SniperPipeline {
           thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
         }
       });
-      */
 
     logger.info({ mint: token.mint, symbol: token.symbol }, '🔍 Validating token via DexScreener...');
 
@@ -306,8 +303,6 @@ export class SniperPipeline {
 
     } else {
       // Validation failed - emit rejection
-      // SILENCED for verbosity
-      /*
       agentEvents.emit({
         type: 'ANALYSIS_THOUGHT',
         timestamp: Date.now(),
@@ -319,7 +314,6 @@ export class SniperPipeline {
           details: { shouldTrade: false, reasons: [result.reason || 'Unknown'] }
         }
       });
-      */
 
       logger.debug({
         mint: token.mint,
