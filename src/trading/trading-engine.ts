@@ -15,6 +15,7 @@ import { agentEvents } from '../events/emitter.js';
 import { TransactionParser } from './transaction-parser.js';
 import type { HeliusClient } from '../api/helius.js';
 import { ScoringEngine, type TokenScore } from './scoring-engine.js';
+import type { RiskProfile } from './types.js';
 
 /**
  * Known LP pool program addresses to exclude from holder concentration
@@ -30,6 +31,7 @@ const LP_PROGRAM_ADDRESSES = new Set([
  * Trading configuration
  */
 export interface TradingConfig {
+  riskProfile: RiskProfile; // Added Risk Profile
   basePositionSol: number; // Base position size in SOL
   maxPositionSol: number; // Maximum position size in SOL
   maxOpenPositions: number; // Maximum concurrent open positions
@@ -275,11 +277,36 @@ export class TradingEngine {
 
     // RED FLAGS: Do not trade
     // Check if token has critical risks
-    const hasHoneypotRisk = safetyAnalysis.risks.some(r => 
-      r === 'MINT_AUTHORITY_ACTIVE' || r === 'FREEZE_AUTHORITY_ACTIVE'
-    );
+    const hasMintAuth = safetyAnalysis.risks.includes('MINT_AUTHORITY_ACTIVE');
+    const hasFreezeAuth = safetyAnalysis.risks.includes('FREEZE_AUTHORITY_ACTIVE');
+    const hasRiskyAuth = hasMintAuth || hasFreezeAuth;
     
-    if (!safetyAnalysis.isSafe || hasHoneypotRisk) {
+    // RISK DIAL LOGIC: Soft vs Hard Fails
+    let allowRiskyTrade = false;
+    
+    if (hasRiskyAuth) {
+        if (this.config.riskProfile === 'AGGRESSIVE') {
+            // Check mitigating factors for Aggressive profile
+            // 1. Liquidity > $5k (approx 30 SOL)
+            // 2. Buy Pressure exists
+            // We need metadata for this. If not passed, we skip the risk allowance.
+            
+            const liquidity = tokenMetadata?.liquidity || 0;
+            // Calculate pseudo buy pressure if we have the data, otherwise assume neutral
+            // Since we don't have buys/sells passed here explicitly in all cases, we might need to rely on what we have.
+            // If tokenMetadata is from ValidationResult, we might want to extend it to carry buy/sell counts or pressure.
+            // For now, let's trust liquidity as the main gate + a penalty.
+            
+            if (liquidity > 5000) {
+                 allowRiskyTrade = true;
+                 positionSize *= 0.4; // 60% penalty for risky auth
+                 reasons.push(`AGGRESSIVE MODE: Allowed risky auth (Mint/Freeze) due to liquidity > $5k. Position slashed 60%.`);
+            }
+        }
+    }
+    
+    // If it has risky auth and we didn't explicitly allow it, REJECT
+    if (hasRiskyAuth && !allowRiskyTrade) {
       reasons.push('Token has critical safety risks: ' + safetyAnalysis.risks.join(', '));
       return {
         shouldTrade: false,
@@ -289,15 +316,30 @@ export class TradingEngine {
         smartMoneyCount: 0,
       };
     }
-
-    // Note: For now, we'll use simplified risk assessment
-    // In a real implementation, we'd fetch holder distribution data
-    // and calculate concentration from on-chain data
     
-    // YELLOW FLAGS: Reduce position size if token has any risks
+    // Other critical risks (Token 2022 extensions) are still hard fails for now
+    // unless we want to relax those too. Let's keep Permanent Delegate as a HARD fail.
+    const otherRisks = safetyAnalysis.risks.filter(r => r !== 'MINT_AUTHORITY_ACTIVE' && r !== 'FREEZE_AUTHORITY_ACTIVE');
+    if (otherRisks.length > 0) {
+        // ... (existing rejection for other risks)
+         reasons.push('Token has critical safety risks: ' + otherRisks.join(', '));
+         return {
+            shouldTrade: false,
+            positionSizeSol: 0,
+            reasons,
+            safetyAnalysis,
+            smartMoneyCount: 0,
+         };
+    }
+
+    // YELLOW FLAGS: Reduce position size if token has any risks (that we allowed)
     if (safetyAnalysis.risks.length > 0) {
-      positionSize *= 0.5;
-      reasons.push(`Token has ${safetyAnalysis.risks.length} risk(s) - reduced position size by 50%`);
+      if (!allowRiskyTrade) {
+          // If we are here, it means we have only minor risks (like Mutable Metadata)
+           positionSize *= 0.8; // 20% penalty
+           reasons.push(`Token has ${safetyAnalysis.risks.length} risk(s) - reduced position size by 20%`);
+      }
+      // If allowRiskyTrade is true, we already slashed by 60%, so no double penalty needed
     }
 
     // Step 2: Check holder concentration (reject if too concentrated)
@@ -1057,4 +1099,3 @@ export class TradingEngine {
     return exitSignatures;
   }
 }
-

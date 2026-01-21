@@ -38,3 +38,8 @@ export interface TradeResult {
  * Trade action type
  */
 export type TradeAction = 'buy' | 'sell';
+
+/**
+ * Risk Profile definition
+ */
+export type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';

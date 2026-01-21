@@ -4,15 +4,18 @@ import { TokenValidator, type ValidatorConfig } from './token-validator.js';
 import type { TradingEngine } from './trading-engine.js';
 import { agentEvents } from '../events/emitter.js';
 import { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
+import type { RiskProfile } from './types.js';
 
 export interface SniperPipelineConfig {
-  validationDelayMs: number;
+  riskProfile: RiskProfile;
+  validationDelayMs: number; // Will be auto-set by risk profile if default
   maxQueueSize: number;
   enableTrading: boolean;
 }
 
 const DEFAULT_CONFIG: SniperPipelineConfig = {
-  validationDelayMs: 300000, // 5 minutes default
+  riskProfile: 'BALANCED',
+  validationDelayMs: 0, // 0 = Auto-calculate based on risk
   maxQueueSize: 1000,
   enableTrading: false,
 };
@@ -47,7 +50,24 @@ export class SniperPipeline {
     tokenSafety?: TokenSafetyAnalyzer
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.validator = new TokenValidator(validatorConfig);
+    
+    // Auto-set delay based on risk profile if not explicitly set
+    if (this.config.validationDelayMs === 0) {
+        if (this.config.riskProfile === 'AGGRESSIVE') {
+            this.config.validationDelayMs = 30000; // 30 seconds
+        } else if (this.config.riskProfile === 'CONSERVATIVE') {
+            this.config.validationDelayMs = 300000; // 5 minutes
+        } else {
+            this.config.validationDelayMs = 120000; // 2 minutes (Balanced)
+        }
+    }
+    
+    // Pass risk profile to validator
+    this.validator = new TokenValidator({
+        ...validatorConfig,
+        riskProfile: this.config.riskProfile
+    });
+    
     this.tradingEngine = tradingEngine;
     this.tokenSafety = tokenSafety;
 

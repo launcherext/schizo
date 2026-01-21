@@ -21,6 +21,7 @@ import { PumpPortalClient } from './trading/pumpportal-client.js';
 import { SniperPipeline } from './trading/sniper-pipeline.js';
 import { agentEvents } from './events/emitter.js';
 import { detectSillyName } from './personality/name-analyzer.js';
+import type { RiskProfile } from './trading/types.js';
 
 const log = createLogger('main');
 let db: ReturnType<typeof createDatabase> | null = null;
@@ -161,6 +162,14 @@ async function main(): Promise<void> {
       log.warn('Wallet not configured - Trading Engine disabled');
     }
 
+
+
+// ... (Rest of imports)
+
+    // Load Risk Profile
+    const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;
+    log.info({ riskProfile }, 'Loading Risk Profile');
+
     // Initialize Trading Engine (if we have PumpPortal)
     let tradingEngine: TradingEngine | undefined;
     let tradingLoop: TradingLoop | undefined;
@@ -168,6 +177,7 @@ async function main(): Promise<void> {
     if (pumpPortal && wallet) {
       tradingEngine = new TradingEngine(
         {
+          riskProfile, // Pass risk profile
           basePositionSol: parseFloat(process.env.BASE_POSITION_SOL || '0.1'),
           maxPositionSol: parseFloat(process.env.MAX_POSITION_SOL || '1.0'),
           maxOpenPositions: parseInt(process.env.MAX_OPEN_POSITIONS || '5'),
@@ -197,24 +207,26 @@ async function main(): Promise<void> {
     let sniperPipeline: SniperPipeline | undefined;
     
     if (tradingEngine || process.env.TRADING_ENABLED === 'false') {
-        const validationDelay = parseInt(process.env.VALIDATION_DELAY_MS || '300000');
-        log.info({ delayMs: validationDelay }, 'Initializing Sniper Pipeline...');
+        const validationDelay = parseInt(process.env.VALIDATION_DELAY_MS || '0'); // Default to 0 (auto-risk)
+        log.info({ delayMs: validationDelay, riskProfile }, 'Initializing Sniper Pipeline...');
         
         sniperPipeline = new SniperPipeline(
             {
+                riskProfile,
                 validationDelayMs: validationDelay,
                 enableTrading: process.env.TRADING_ENABLED === 'true',
             },
             {
-                minLiquidityUsd: parseFloat(process.env.MIN_LIQUIDITY_USD || '5000'),
-                minVolume1hUsd: parseFloat(process.env.MIN_VOLUME_1H_USD || '5000'),
+                // Let Validator use defaults from Risk Profile
+                minLiquidityUsd: process.env.MIN_LIQUIDITY_USD ? parseFloat(process.env.MIN_LIQUIDITY_USD) : undefined,
+                minVolume1hUsd: process.env.MIN_VOLUME_1H_USD ? parseFloat(process.env.MIN_VOLUME_1H_USD) : undefined,
             },
             tradingEngine,
             tokenSafety
         );
         
         await sniperPipeline.start();
-        log.info('🎯 Sniper Pipeline started - Listening for new tokens w/ 5m delay');
+        log.info('🎯 Sniper Pipeline started - Listening for new tokens w/ dynamic delay');
     }
 
     // Initialize Trading Loop (Handles Position Management + Trending Toknes)

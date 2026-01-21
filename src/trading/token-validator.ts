@@ -1,5 +1,6 @@
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
 import { createLogger } from '../lib/logger.js';
+import type { RiskProfile } from './types.js';
 
 const logger = createLogger('token-validator');
 
@@ -11,17 +12,15 @@ export interface ValidationResult {
 }
 
 export interface ValidatorConfig {
-  minLiquidityUsd: number;
-  minVolume1hUsd: number;
+  riskProfile: RiskProfile;
+  minLiquidityUsd?: number; // Overrides risk profile if set
+  minVolume1hUsd?: number;  // Overrides risk profile if set
   requireSocials: boolean;
-  minAgeMinutes: number;
 }
 
 const DEFAULT_CONFIG: ValidatorConfig = {
-  minLiquidityUsd: 5000,
-  minVolume1hUsd: 5000,
-  requireSocials: false, // Optional, but recommended for high quality
-  minAgeMinutes: 5,
+  riskProfile: 'BALANCED',
+  requireSocials: false, 
 };
 
 /**
@@ -52,40 +51,94 @@ export class TokenValidator {
         };
       }
 
+      // 1. RISK DIAL SETTINGS
+      const profile = this.config.riskProfile;
+      
+      const liquidityThresholds = {
+        CONSERVATIVE: 15000,
+        BALANCED: 5000,
+        AGGRESSIVE: 1500,
+      };
+      
+      const maxAgeMinutes = {
+        CONSERVATIVE: 15,
+        BALANCED: 8,
+        AGGRESSIVE: 3,
+      };
+
+      const minBuyPressure = {
+        CONSERVATIVE: 1.8,
+        BALANCED: 1.3,
+        AGGRESSIVE: 1.05
+      };
+
+      // Determine active thresholds
+      const minLiquidity = this.config.minLiquidityUsd || liquidityThresholds[profile];
+      const maxAge = maxAgeMinutes[profile];
+      const pressureThreshold = minBuyPressure[profile];
+      const minVolume = this.config.minVolume1hUsd || minLiquidity; // Volume should match liquidity roughly
+
       // Check 1: Liquidity
-      if (metadata.liquidity < this.config.minLiquidityUsd) {
+      if (metadata.liquidity < minLiquidity) {
         return {
           mint,
           passes: false,
-          reason: `Low liquidity: $${metadata.liquidity.toFixed(0)} < $${this.config.minLiquidityUsd}`,
+          reason: `Low liquidity: $${metadata.liquidity.toFixed(0)} < $${minLiquidity} (${profile})`,
           metadata,
         };
       }
 
-      // Check 2: Volume
-      // We look at 1h volume, or 5m volume projected to 1h if very new
+      // Check 2: Age (Sniping Window)
+      // IF we are AGGRESSIVE, we want FRESH tokens (age < maxAge). 
+      // Existing logic (minAge) was to avoid scams. New logic (maxAge) is to catch pumps.
+      // BUT, we should probably support both flows.
+      // For this specific 'Sniper' flow, passing a token means it is READY to buy.
+      
+      // If we are 'sniping', we want tokens that are YOUNG enough to be early, 
+      // but OLD enough to have some data. 
+      // Actually, the new prompt says: "If ageMinutes <= maxAgeMinutes -> allow".
+      // This implies we ONLY want young tokens for this strategy.
+      if (metadata.ageMinutes && metadata.ageMinutes > maxAge) {
+         // Optionally, we could allow older tokens if they have massive volume?
+         // For now, stick to the prompt: strict age window for 'Sniping'
+         return {
+            mint,
+            passes: false,
+            reason: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
+            metadata
+         };
+      }
+
+      // Check 3: Buy Pressure (New)
+      // buyPressure = buys5m / Math.max(1, sells5m)
+      const buys = metadata.buys5m || 0;
+      const sells = metadata.sells5m || 0;
+      const buyPressure = buys / Math.max(1, sells);
+      
+      if (buyPressure < pressureThreshold) {
+          return {
+              mint,
+              passes: false,
+              reason: `Weak buy pressure: ${buyPressure.toFixed(2)} < ${pressureThreshold} (${profile})`,
+              metadata
+          }
+      }
+
+      // Check 4: Volume
       const volumeScore = metadata.volume1h > 0 
         ? metadata.volume1h 
-        : (metadata.volume24h > 0 ? metadata.volume24h : metadata.buys5m * 100); // Rough proxy if volume data laggy
+        : (metadata.volume24h > 0 ? metadata.volume24h : metadata.buys5m * 100); 
 
-      if (volumeScore < this.config.minVolume1hUsd) {
+      if (volumeScore < minVolume) {
         return {
           mint,
           passes: false,
-          reason: `Low volume: $${volumeScore.toFixed(0)} < $${this.config.minVolume1hUsd}`,
+          reason: `Low volume: $${volumeScore.toFixed(0)} < $${minVolume}`,
           metadata,
         };
       }
 
-      // Check 3: Socials (if required)
-      if (this.config.requireSocials) {
-        const hasTwitter = metadata.dexUrl?.includes('twitter') || false; // Proxy check
-        // Note: Real social check would parse the 'info' field from DexPair if we exposed it
-        // For now, we trust the "Graduation" implication of liquidity > $5k
-      }
-
-      // Check 4: Suspicious Patterns via DexScreener data
-      // (e.g. if price dropped 99% in last hour - rug check)
+      // Check 5: Suspicious Patterns (Rug Check)
       if (metadata.priceChange1h < -90) {
         return {
           mint,
