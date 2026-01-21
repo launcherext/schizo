@@ -10,6 +10,7 @@
 
 import { createLogger } from '../lib/logger.js';
 import { agentEvents } from '../events/emitter.js';
+import { dexscreener } from '../api/dexscreener.js';
 import type { TradingEngine } from '../trading/trading-engine.js';
 import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
 import type { ClaudeClient } from '../personality/claude-client.js';
@@ -19,10 +20,19 @@ import type {
   ShillQueueConfig,
   ShillRequest,
   ShillAnalysisResult,
-  DEFAULT_SHILL_QUEUE_CONFIG,
 } from './types.js';
 
 const logger = createLogger('shill-queue');
+
+/**
+ * Token info fetched from DexScreener
+ */
+interface TokenInfo {
+  symbol: string;
+  name: string;
+  marketCapSol?: number;
+  liquidity?: number;
+}
 
 /**
  * ShillQueue - Processes viewer shill requests
@@ -129,6 +139,35 @@ export class ShillQueue {
   }
 
   /**
+   * Fetch token info from DexScreener
+   */
+  private async fetchTokenInfo(mint: string): Promise<TokenInfo> {
+    try {
+      const tokenData = await dexscreener.getTokenMetadata(mint);
+      if (tokenData) {
+        // Convert SOL price to market cap in SOL (approximate)
+        const solPrice = 170; // Approximate SOL price in USD
+        const marketCapSol = tokenData.marketCap ? tokenData.marketCap / solPrice : undefined;
+
+        return {
+          symbol: tokenData.symbol,
+          name: tokenData.name,
+          marketCapSol,
+          liquidity: tokenData.liquidity,
+        };
+      }
+    } catch (error) {
+      logger.warn({ error, mint }, 'Failed to fetch token info from DexScreener');
+    }
+
+    // Return defaults if fetch fails
+    return {
+      symbol: mint.slice(0, 6),
+      name: 'Unknown',
+    };
+  }
+
+  /**
    * Process a single shill request
    */
   private async processShill(request: ShillRequest): Promise<ShillAnalysisResult> {
@@ -162,21 +201,24 @@ export class ShillQueue {
       await this.narrator.say(announcement);
     }
 
-    // 3. Run safety analysis
-    logger.info({ ca: request.contractAddress }, 'Running safety analysis on shilled token');
-
-    let safetyResult;
-    try {
-      safetyResult = await Promise.race([
+    // 3. Fetch token info (parallel with safety analysis)
+    const [safetyResult, tokenInfo] = await Promise.all([
+      // Safety analysis with timeout
+      Promise.race([
         this.tokenSafety.analyze(request.contractAddress),
         new Promise<null>((_, reject) =>
           setTimeout(() => reject(new Error('Analysis timeout')), this.config.processingTimeoutMs)
         ),
-      ]);
-    } catch (error) {
-      logger.error({ error, ca: request.contractAddress }, 'Safety analysis failed/timeout');
+      ]).catch(error => {
+        logger.error({ error, ca: request.contractAddress }, 'Safety analysis failed/timeout');
+        return null;
+      }),
+      // Token info fetch
+      this.fetchTokenInfo(request.contractAddress),
+    ]);
 
-      // Treat timeout/error as unsafe
+    // Handle analysis timeout/error
+    if (!safetyResult) {
       const roast = 'This token is taking too long to analyze. Probably hiding something. Hard pass.';
 
       agentEvents.emit({
@@ -200,34 +242,7 @@ export class ShillQueue {
         request,
         isSafe: false,
         risks: ['Analysis timeout'],
-        roastMessage: roast,
-      };
-    }
-
-    if (!safetyResult) {
-      const roast = `Couldn't find any info on ${shortCA}. Probably a ghost token. Next!`;
-
-      agentEvents.emit({
-        type: 'SHILL_ROAST',
-        timestamp: Date.now(),
-        data: {
-          reasoning: 'Token not found',
-          logs: ['No data returned from safety analysis'],
-          senderWallet: request.senderWallet,
-          contractAddress: request.contractAddress,
-          roastMessage: roast,
-          risks: ['Token not found'],
-        },
-      });
-
-      if (this.narrator) {
-        await this.narrator.say(roast);
-      }
-
-      return {
-        request,
-        isSafe: false,
-        risks: ['Token not found'],
+        tokenInfo,
         roastMessage: roast,
       };
     }
@@ -246,9 +261,9 @@ export class ShillQueue {
         type: 'SHILL_ROAST',
         timestamp: Date.now(),
         data: {
-          reasoning: `Token ${safetyResult.symbol || shortCA} failed safety checks`,
+          reasoning: `Token ${tokenInfo.symbol} failed safety checks`,
           logs: safetyResult.risks,
-          tokenSymbol: safetyResult.symbol,
+          tokenSymbol: tokenInfo.symbol,
           senderWallet: request.senderWallet,
           contractAddress: request.contractAddress,
           roastMessage: roast,
@@ -264,12 +279,7 @@ export class ShillQueue {
         request,
         isSafe: false,
         risks: safetyResult.risks,
-        tokenInfo: {
-          symbol: safetyResult.symbol || 'UNKNOWN',
-          name: safetyResult.name || 'Unknown',
-          marketCapSol: safetyResult.marketCapSol,
-          liquidity: safetyResult.liquidity,
-        },
+        tokenInfo,
         roastMessage: roast,
       };
     }
@@ -277,14 +287,14 @@ export class ShillQueue {
     // 5. Token passed! Execute lotto buy
     logger.info({
       ca: shortCA,
-      symbol: safetyResult.symbol,
+      symbol: tokenInfo.symbol,
     }, 'Shilled token PASSED safety check - executing lotto buy');
 
     let buySignature: string | null = null;
 
     if (this.tradingEngine) {
       try {
-        const successMsg = `${safetyResult.symbol || shortCA} passed my paranoid checks. Aping in with a lotto position.`;
+        const successMsg = `${tokenInfo.symbol} passed my paranoid checks. Aping in with a lotto position.`;
 
         if (this.narrator) {
           await this.narrator.say(successMsg);
@@ -293,10 +303,10 @@ export class ShillQueue {
         buySignature = await this.tradingEngine.executeBuy(
           request.contractAddress,
           {
-            symbol: safetyResult.symbol,
-            name: safetyResult.name,
-            marketCapSol: safetyResult.marketCapSol,
-            liquidity: safetyResult.liquidity,
+            symbol: tokenInfo.symbol,
+            name: tokenInfo.name,
+            marketCapSol: tokenInfo.marketCapSol,
+            liquidity: tokenInfo.liquidity,
           },
           true, // Skip evaluation (we already did safety)
           this.config.lottoPositionSol // Override position size to lotto size
@@ -307,9 +317,9 @@ export class ShillQueue {
             type: 'SHILL_BUY',
             timestamp: Date.now(),
             data: {
-              reasoning: `Viewer shill ${safetyResult.symbol || shortCA} passed safety - bought ${this.config.lottoPositionSol} SOL`,
+              reasoning: `Viewer shill ${tokenInfo.symbol} passed safety - bought ${this.config.lottoPositionSol} SOL`,
               logs: [`Buy signature: ${buySignature}`],
-              tokenSymbol: safetyResult.symbol,
+              tokenSymbol: tokenInfo.symbol,
               senderWallet: request.senderWallet,
               contractAddress: request.contractAddress,
               buySignature,
@@ -317,7 +327,7 @@ export class ShillQueue {
             },
           });
 
-          const confirmMsg = `Bought! ${this.config.lottoPositionSol} SOL on ${safetyResult.symbol || shortCA}. Thanks for the tip, ${shortSender}.`;
+          const confirmMsg = `Bought! ${this.config.lottoPositionSol} SOL on ${tokenInfo.symbol}. Thanks for the tip, ${shortSender}.`;
           if (this.narrator) {
             await this.narrator.say(confirmMsg);
           }
@@ -331,7 +341,7 @@ export class ShillQueue {
         }
       }
     } else {
-      const noTradeMsg = `${safetyResult.symbol || shortCA} looks clean, but trading is disabled. Nice find though, ${shortSender}.`;
+      const noTradeMsg = `${tokenInfo.symbol} looks clean, but trading is disabled. Nice find though, ${shortSender}.`;
       if (this.narrator) {
         await this.narrator.say(noTradeMsg);
       }
@@ -348,12 +358,7 @@ export class ShillQueue {
       request,
       isSafe: true,
       risks: [],
-      tokenInfo: {
-        symbol: safetyResult.symbol || 'UNKNOWN',
-        name: safetyResult.name || 'Unknown',
-        marketCapSol: safetyResult.marketCapSol,
-        liquidity: safetyResult.liquidity,
-      },
+      tokenInfo,
       buySignature: buySignature || undefined,
       positionSizeSol: buySignature ? this.config.lottoPositionSol : undefined,
     };

@@ -776,6 +776,28 @@ export class TradingEngine {
   async executeSell(mint: string, amount: number): Promise<string | null> {
     logger.info({ mint, amount }, 'Executing sell trade');
 
+    // Get actual wallet balance - use this instead of DB amount to prevent "insufficient balance" errors
+    let actualAmount = amount;
+    try {
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+        new PublicKey(this.walletAddress),
+        { mint: new PublicKey(mint) }
+      );
+      if (tokenAccounts.value.length > 0) {
+        const info = tokenAccounts.value[0].account.data.parsed.info;
+        actualAmount = parseFloat(info.tokenAmount.uiAmountString);
+        if (actualAmount !== amount) {
+          logger.warn({ mint, dbAmount: amount, walletAmount: actualAmount }, 'Wallet balance differs from DB - using actual wallet balance');
+        }
+      }
+      if (actualAmount <= 0) {
+        logger.warn({ mint }, 'No tokens in wallet to sell');
+        return null;
+      }
+    } catch (error) {
+      logger.debug({ mint, error }, 'Failed to check wallet balance - using DB amount');
+    }
+
     // Check if trading is allowed
     const canTrade = await this.canTrade();
     if (!canTrade) {
@@ -804,8 +826,8 @@ export class TradingEngine {
       let pricePerToken: number;
 
       if (useJupiter && this.jupiter) {
-        // Use Jupiter for graduated tokens
-        const result = await this.jupiter.sell(mint, amount, 6, {
+        // Use Jupiter for graduated tokens - use actualAmount (wallet balance) not DB amount
+        const result = await this.jupiter.sell(mint, actualAmount, 6, {
           slippageBps: Math.floor(this.config.slippageTolerance * 10000),
         });
         signature = result.signature;
@@ -820,10 +842,10 @@ export class TradingEngine {
           priceImpact: result.priceImpactPct,
         }, 'Jupiter sell executed');
       } else {
-        // Use PumpPortal for bonding curve tokens
+        // Use PumpPortal for bonding curve tokens - use actualAmount (wallet balance) not DB amount
         signature = await this.pumpPortal.sell({
           mint,
-          amount,
+          amount: actualAmount,
           slippage: this.config.slippageTolerance,
         });
 
