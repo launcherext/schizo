@@ -57,6 +57,8 @@ export interface AnalysisStartEvent extends BaseEvent {
   type: 'ANALYSIS_START';
   data: {
     mint: string;
+    symbol?: string;
+    name?: string;
   };
 }
 
