@@ -482,6 +482,15 @@ async function main(): Promise<void> {
         narrator.setWebSocket(wss);
       }
 
+      // Initialize $SCHIZO Token Tracker (live price display on dashboard)
+      let schizoTokenTracker: any = null;
+      if (schizoTokenMint && schizoTokenMint !== 'your-schizo-token-mint-here') {
+        const { createSchizoTokenTracker } = await import('./services/schizo-token-tracker.js');
+        schizoTokenTracker = createSchizoTokenTracker(agentEvents);
+        schizoTokenTracker.start();
+        log.info({ mint: schizoTokenMint }, '💎 $SCHIZO Token Tracker active');
+      }
+
       // Initialize Market Watcher
       marketWatcher = new MarketWatcher(
         {
@@ -498,6 +507,7 @@ async function main(): Promise<void> {
       // Shutdown handlers
       const shutdown = () => {
         log.info('Shutting down...');
+        if (schizoTokenTracker) schizoTokenTracker.stop();
         if (shillWatcher) shillWatcher.stop();
         if (rewardClaimer) rewardClaimer.stop();
         if (commentarySystem) commentarySystem.stop();
@@ -526,6 +536,7 @@ async function main(): Promise<void> {
       log.info(`  ${narrator ? '✅' : '⚠️'} Voice: Deepgram TTS ${narrator ? '(ACTIVE)' : '(DISABLED)'}`);
       log.info(`  ${entertainmentEnabled ? '✅' : '⚠️'} Entertainment Mode ${entertainmentEnabled ? '(ACTIVE - Degen trading)' : '(DISABLED)'}`);
       log.info(`  ${shillWatcher ? '✅' : '⚠️'} Shill Queue ${shillWatcher ? '(ACTIVE - burn $SCHIZO to shill)' : '(DISABLED)'}`);
+      log.info(`  ${schizoTokenTracker ? '✅' : '⚠️'} $SCHIZO Token Tracker ${schizoTokenTracker ? '(ACTIVE - live price on dashboard)' : '(DISABLED - set SCHIZO_TOKEN_MINT)'}`);
       log.info(`  ✅ Market Watcher: Learning from trades`);
       log.info('');
 

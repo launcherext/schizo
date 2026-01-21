@@ -1047,14 +1047,31 @@ export class TradingEngine {
     const schizoMint = process.env.SCHIZO_TOKEN_MINT;
     const executionLogs: string[] = [];
 
-    if (!schizoMint) {
-      logger.warn('SCHIZO_TOKEN_MINT not configured, skipping buyback');
-      executionLogs.push('SCHIZO_TOKEN_MINT not set - buyback skipped');
+    if (!schizoMint || schizoMint.includes('your-') || schizoMint.length < 32) {
+      logger.warn({ schizoMint }, 'SCHIZO_TOKEN_MINT not configured or is placeholder, skipping buyback');
+      executionLogs.push('SCHIZO_TOKEN_MINT not set or placeholder - buyback skipped');
       return null;
     }
 
     // HARDCODED: 10% of profit goes to buyback
-    const buybackAmount = profitSol * BUYBACK_PERCENT_OF_PROFIT;
+    let buybackAmount = profitSol * BUYBACK_PERCENT_OF_PROFIT;
+
+    // Check wallet balance - don't spend more than 50% of available SOL on buyback
+    try {
+      const lamports = await this.connection.getBalance(new PublicKey(this.walletAddress));
+      const balance = lamports / 1e9;
+      const maxBuyback = balance * 0.5; // Max 50% of balance for buyback
+      if (buybackAmount > maxBuyback) {
+        logger.warn({ buybackAmount, balance, maxBuyback }, 'Buyback would exceed 50% of balance, capping');
+        buybackAmount = maxBuyback;
+      }
+      if (buybackAmount < 0.001) {
+        logger.warn({ buybackAmount, balance }, 'Buyback amount too small after balance check');
+        return null;
+      }
+    } catch (error) {
+      logger.warn({ error }, 'Failed to check balance for buyback');
+    }
     const reasoning = `Buyback triggered: ${BUYBACK_PERCENT_OF_PROFIT * 100}% of ${profitSol.toFixed(4)} SOL profit = ${buybackAmount.toFixed(4)} SOL`;
 
     // Skip if buyback amount is too small (< 0.001 SOL = ~$0.17)
