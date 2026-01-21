@@ -515,6 +515,37 @@ class HeliusClient {
   }
 
   /**
+   * Check if a token is a Pump.fun Mayhem Mode token
+   * Mayhem Mode tokens have 2 billion supply (vs 1 billion for regular pump.fun)
+   */
+  async isMayhemModeToken(mintAddress: string): Promise<boolean> {
+    try {
+      const response = await this.getConnection().getTokenSupply(
+        new (await import('@solana/web3.js')).PublicKey(mintAddress)
+      );
+
+      const supply = response.value.uiAmount;
+
+      // Mayhem Mode tokens have exactly 2 billion supply
+      // Regular pump.fun tokens have 1 billion
+      const isMayhem = supply !== null && supply >= 1_999_999_999 && supply <= 2_000_000_001;
+
+      if (isMayhem) {
+        logger.warn({
+          mintAddress,
+          supply,
+        }, '🚫 Mayhem Mode token detected (2B supply)');
+      }
+
+      return isMayhem;
+    } catch (error) {
+      logger.debug({ mintAddress, error }, 'Failed to check token supply for Mayhem Mode');
+      // On error, don't block - could be a valid token with RPC issues
+      return false;
+    }
+  }
+
+  /**
    * Get circuit breaker status.
    */
   getCircuitBreakerStatus(): {

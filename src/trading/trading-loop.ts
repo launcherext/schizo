@@ -132,8 +132,9 @@ export class TradingLoop {
         });
       }
 
-      // Emit stats
+      // Emit stats and positions
       this.emitStatsUpdate().catch(() => {});
+      this.emitPositionsUpdate().catch(() => {});
     }, this.config.pollIntervalMs);
 
     // Scan trending tokens every 60 seconds (Birdeye rate limit friendly)
@@ -529,6 +530,36 @@ export class TradingLoop {
       });
     } catch (error) {
       logger.error({ error }, 'Error emitting stats update');
+    }
+  }
+
+  /**
+   * Emit positions update event for dashboard
+   */
+  private async emitPositionsUpdate(): Promise<void> {
+    if (!this.tradingEngine) return;
+
+    try {
+      const positions = await this.tradingEngine.getOpenPositions();
+
+      agentEvents.emit({
+        type: 'POSITIONS_UPDATE',
+        timestamp: Date.now(),
+        data: {
+          positions: positions.map(p => ({
+            tokenMint: p.tokenMint,
+            tokenSymbol: p.tokenSymbol,
+            entryAmountSol: p.entryAmountSol,
+            entryAmountTokens: p.entryAmountTokens,
+            entryPrice: p.entryPrice,
+            entryTimestamp: p.entryTimestamp,
+            currentPrice: p.currentPrice,
+            unrealizedPnLPercent: p.unrealizedPnLPercent,
+          })),
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Error emitting positions update');
     }
   }
 

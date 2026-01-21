@@ -1,5 +1,8 @@
 /**
  * Claude API client for generating $SCHIZO personality responses
+ *
+ * Supports multiple AI providers: Claude (default), Groq (free), Gemini (free)
+ * Set AI_PROVIDER=groq and GROQ_API_KEY in .env to use free alternatives
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -14,6 +17,7 @@ import {
 } from './prompts.js';
 import type { AnalysisContext } from './prompts.js';
 import type { SillyCategory } from './name-analyzer.js';
+import { AIProviderClient, createAIProvider, type AIProvider } from './ai-provider.js';
 
 /**
  * Claude client configuration
@@ -53,6 +57,7 @@ interface TradingActivity {
 
 /**
  * Claude API client for personality generation
+ * Now supports multiple AI providers: Claude, Groq (free), Gemini (free)
  */
 export class ClaudeClient {
   private anthropic: Anthropic;
@@ -64,13 +69,88 @@ export class ClaudeClient {
   // Track recent trading activity for chat context
   private recentActivity: TradingActivity = { tokensAnalyzed: [], openPositions: 0 };
 
+  // Multi-provider support
+  private aiProvider: AIProviderClient | null = null;
+  private useAlternativeProvider: boolean = false;
+
   constructor(config: ClaudeConfig) {
     this.config = config;
+
+    // Check if we should use an alternative provider (Groq/Gemini)
+    const altProvider = process.env.AI_PROVIDER?.toLowerCase();
+    if (altProvider && altProvider !== 'claude') {
+      this.aiProvider = createAIProvider();
+      if (this.aiProvider) {
+        this.useAlternativeProvider = true;
+        logger.info({
+          provider: altProvider,
+        }, 'Using alternative AI provider (free tier)');
+      }
+    }
+
+    // Initialize Anthropic as fallback or primary
     this.anthropic = new Anthropic({
       apiKey: config.apiKey,
     });
 
-    logger.info({ model: config.model }, 'Claude client initialized');
+    logger.info({
+      model: config.model,
+      alternativeProvider: this.useAlternativeProvider ? altProvider : null
+    }, 'Claude client initialized');
+  }
+
+  /**
+   * Internal method to call AI - uses alternative provider if configured
+   */
+  private async callAI(systemPrompt: string, userMessage: string, maxTokens?: number): Promise<string> {
+    // Use alternative provider if available
+    if (this.useAlternativeProvider && this.aiProvider) {
+      try {
+        return await this.aiProvider.complete(systemPrompt, userMessage);
+      } catch (error) {
+        logger.warn({ error }, 'Alternative provider failed, falling back to Claude');
+        // Fall through to Claude
+      }
+    }
+
+    // Use Claude (Anthropic SDK)
+    const response = await this.anthropic.messages.create({
+      model: this.config.model,
+      max_tokens: maxTokens || this.config.maxTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    return response.content[0].type === 'text' ? response.content[0].text : '';
+  }
+
+  /**
+   * Internal method to call AI with message history
+   */
+  private async callAIWithHistory(
+    systemPrompt: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    maxTokens?: number
+  ): Promise<string> {
+    // Use alternative provider if available
+    if (this.useAlternativeProvider && this.aiProvider) {
+      try {
+        return await this.aiProvider.completeWithHistory(systemPrompt, messages);
+      } catch (error) {
+        logger.warn({ error }, 'Alternative provider failed, falling back to Claude');
+        // Fall through to Claude
+      }
+    }
+
+    // Use Claude (Anthropic SDK)
+    const response = await this.anthropic.messages.create({
+      model: this.config.model,
+      max_tokens: maxTokens || this.config.maxTokens,
+      system: systemPrompt,
+      messages,
+    });
+
+    return response.content[0].type === 'text' ? response.content[0].text : '';
   }
 
   /**
@@ -156,25 +236,13 @@ export class ClaudeClient {
   async generateTradeReasoning(context: AnalysisContext): Promise<string> {
     const userMessage = formatAnalysisContext(context);
 
-    logger.debug({ 
+    logger.debug({
       tokenMint: context.tokenMint,
       shouldTrade: context.decision.shouldTrade,
     }, 'Generating trade reasoning');
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: userMessage,
-        }],
-      });
-
-      const reasoning = response.content[0].type === 'text' 
-        ? response.content[0].text 
-        : '';
+      const reasoning = await this.callAI(SCHIZO_SYSTEM_PROMPT, userMessage);
 
       logger.info({
         tokenMint: context.tokenMint,
@@ -184,8 +252,8 @@ export class ClaudeClient {
       return reasoning;
     } catch (error) {
       logger.error({ error, tokenMint: context.tokenMint }, 'Failed to generate reasoning');
-      
-      // Fallback to basic reasoning if Claude fails
+
+      // Fallback to basic reasoning if AI fails
       return this.generateFallbackReasoning(context);
     }
   }
@@ -199,26 +267,14 @@ export class ClaudeClient {
     logger.debug({ profitSol, buybackAmount }, 'Generating buyback reasoning');
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: userMessage,
-        }],
-      });
-
-      const reasoning = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
+      const reasoning = await this.callAI(SCHIZO_SYSTEM_PROMPT, userMessage);
 
       logger.info({ reasoning: reasoning.slice(0, 100) }, 'Buyback reasoning generated');
 
       return reasoning;
     } catch (error) {
       logger.error({ error }, 'Failed to generate buyback reasoning');
-      
+
       // Fallback
       return `Buying back ${buybackAmount.toFixed(2)} SOL worth of $SCHIZO. The flywheel continues...`;
     }
@@ -254,10 +310,6 @@ export class ClaudeClient {
     try {
       // Build messages array with history for context
       const history = this.getRecentHistory();
-      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-        ...history,
-        { role: 'user', content: userContext },
-      ];
 
       // Add trading context and response type context
       const tradingContext = this.formatTradingContext();
@@ -268,22 +320,13 @@ export class ClaudeClient {
         ? `${tradingContext}\n\n${contextPrefix}${userContext}`
         : `${contextPrefix}${userContext}`;
 
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: 300, // Increased for more thoughtful responses
-        system: SCHIZO_CHAT_PROMPT,
-        messages: [
-          ...messages.slice(0, -1), // Previous history
-          {
-            role: 'user',
-            content: enhancedMessage
-          },
-        ],
-      });
+      // Build full message history
+      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+        ...history,
+        { role: 'user', content: enhancedMessage },
+      ];
 
-      const reply = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
+      const reply = await this.callAIWithHistory(SCHIZO_CHAT_PROMPT, messages, 300);
 
       // Add both the user message and response to history
       this.addToHistory('user', userContext);
@@ -343,19 +386,7 @@ export class ClaudeClient {
     logger.debug({ eventType: marketEvent.type }, 'Generating market commentary');
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system: SCHIZO_COMMENTARY_PROMPT,
-        messages: [{
-          role: 'user',
-          content: eventContext,
-        }],
-      });
-
-      const commentary = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
+      const commentary = await this.callAI(SCHIZO_COMMENTARY_PROMPT, eventContext);
 
       logger.info({ eventType: marketEvent.type, commentary: commentary.slice(0, 100) }, 'Commentary generated');
 
@@ -375,19 +406,7 @@ export class ClaudeClient {
     logger.debug({ observationCount: observations.length }, 'Generating learning observation');
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: 400, // Allow longer reflection
-        system: SCHIZO_LEARNING_PROMPT,
-        messages: [{
-          role: 'user',
-          content: context,
-        }],
-      });
-
-      const insight = response.content[0].type === 'text'
-        ? response.content[0].text
-        : '';
+      const insight = await this.callAI(SCHIZO_LEARNING_PROMPT, context);
 
       logger.info({ insight: insight.slice(0, 100) }, 'Learning observation generated');
 
@@ -453,19 +472,8 @@ RULES:
 - Be specific to THIS token`;
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: 60,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: context,
-        }],
-      });
-
-      return response.content[0].type === 'text'
-        ? response.content[0].text
-        : this.generateFallbackTokenCommentary(token);
+      const commentary = await this.callAI(SCHIZO_SYSTEM_PROMPT, context);
+      return commentary || this.generateFallbackTokenCommentary(token);
     } catch (error) {
       logger.error({ error, symbol: token.symbol }, 'Failed to generate token commentary');
       return this.generateFallbackTokenCommentary(token);
@@ -503,19 +511,8 @@ RULES:
 - No generic responses`;
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: 60,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: context,
-        }],
-      });
-
-      return response.content[0].type === 'text'
-        ? response.content[0].text
-        : this.generateFallbackSillyRoast(token, category);
+      const roast = await this.callAI(SCHIZO_SYSTEM_PROMPT, context);
+      return roast || this.generateFallbackSillyRoast(token, category);
     } catch (error) {
       logger.error({ error, symbol: token.symbol }, 'Failed to generate silly name roast');
       return this.generateFallbackSillyRoast(token, category);
@@ -652,41 +649,27 @@ Say ONE SHORT sentence (max 12 words) explaining why you're passing. Examples:
     };
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: 50,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: prompts[stage] + '\n\nRespond with ONLY your one sentence. No quotes, no explanation.',
-        }],
-      });
-
-      return response.content[0].type === 'text'
-        ? response.content[0].text.trim()
-        : this.generateFallbackAnalysisThought(stage, context);
+      const prompt = prompts[stage] + '\n\nRespond with ONLY your one sentence. No quotes, no explanation.';
+      const thought = await this.callAI(SCHIZO_SYSTEM_PROMPT, prompt);
+      return thought?.trim() || this.generateFallbackAnalysisThought(stage, context);
     } catch (error) {
       // Enhanced error logging to expose actual API failures
-      logger.error({ 
+      logger.error({
         error,
         errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        errorName: error instanceof Error ? error.name : undefined,
-        stage, 
-        symbol: context.symbol 
+        stage,
+        symbol: context.symbol
       }, 'Failed to generate analysis thought');
-      
+
       // Check for specific error types to help with debugging
       if (error instanceof Error) {
         if (error.message.includes('rate_limit') || error.message.includes('429')) {
-          logger.warn('Claude API rate limit hit - using fallback');
+          logger.warn('AI rate limit hit - using fallback');
         } else if (error.message.includes('authentication') || error.message.includes('401')) {
-          logger.error('Claude API authentication failed - check ANTHROPIC_API_KEY');
-        } else if (error.message.includes('network') || error.message.includes('ECONNREFUSED')) {
-          logger.error('Network error connecting to Claude API');
+          logger.error('AI authentication failed - check API key');
         }
       }
-      
+
       return this.generateFallbackAnalysisThought(stage, context);
     }
   }
@@ -850,19 +833,8 @@ Say ONE SHORT sentence (max 12 words) explaining why you're passing. Examples:
     const prompt = prompts[Math.floor(Math.random() * prompts.length)];
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        system: SCHIZO_SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: prompt,
-        }],
-      });
-
-      return response.content[0].type === 'text'
-        ? response.content[0].text
-        : 'The charts are speaking to me again...';
+      const thought = await this.callAI(SCHIZO_SYSTEM_PROMPT, prompt);
+      return thought || 'The charts are speaking to me again...';
     } catch (error) {
       logger.error({ error }, 'Failed to generate idle thought');
       return 'Trust no one. Especially the devs.';

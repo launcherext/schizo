@@ -251,7 +251,66 @@ export class PumpPortalClient {
       throw error;
     }
   }
-  
+
+  /**
+   * Claim Creator Rewards for a specific token (Meteora Dynamic Bonding Curve)
+   * Use this after a token graduates from pump.fun to Meteora/Raydium
+   * @param mint The mint address of the token you created
+   */
+  async claimCreatorRewards(mint: string): Promise<string | null> {
+    await this.enforceRateLimit();
+    logger.info({ mint }, 'Claiming creator rewards via PumpPortal API (Meteora)...');
+
+    try {
+      const url = `${this.config.baseUrl}/trade?api-key=${this.config.apiKey}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'claim',
+          mint: mint,
+          publicKey: this.wallet.publicKey.toBase58(),
+          denominatedInSol: 'true',
+          amount: 100, // Required by schema but ignored for claims
+          slippage: 1, // Required by schema but ignored for claims
+          priorityFee: 0.005,
+          pool: 'meteora', // Target Meteora curve (graduated tokens)
+        }),
+      });
+
+      if (response.status === 200) {
+        const data = await response.arrayBuffer();
+
+        if (data.byteLength === 0) {
+          logger.info({ mint }, 'No rewards to claim (empty response)');
+          return null;
+        }
+
+        const tx = VersionedTransaction.deserialize(new Uint8Array(data));
+        tx.sign([this.wallet]);
+
+        const signature = await this.connection.sendTransaction(tx, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        });
+
+        await this.waitForConfirmation(signature);
+        logger.info({ signature, mint }, 'Creator rewards claimed successfully');
+        return signature;
+      } else {
+        const errorText = await response.text();
+        logger.error({ status: response.status, error: errorText, mint }, 'Failed to claim rewards');
+        return null;
+      }
+    } catch (error) {
+      logger.error({ error, mint }, 'Error claiming creator rewards');
+      return null;
+    }
+  }
+
   /**
    * Execute a trade (buy or sell)
    * Sell trades use higher priority fees (urgent) for faster exit

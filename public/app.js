@@ -57,6 +57,9 @@ function handleEvent(event) {
     case 'ANALYSIS_START':
       // Silent - the ANALYSIS_THOUGHT events show the live analysis
       break;
+    case 'POSITIONS_UPDATE':
+      updateHoldings(event.data.positions);
+      break;
     case 'ANALYSIS_THOUGHT':
       // SCHIZO's live analysis thoughts - show in feed!
       const stageEmojis = {
@@ -681,4 +684,112 @@ function initEyeTracking() {
 document.addEventListener('DOMContentLoaded', () => {
     initTerminal();
     initEyeTracking();
+    initPanelTabs();
 });
+
+// ============================================
+// PANEL TABS LOGIC
+// ============================================
+function initPanelTabs() {
+    const tabs = document.querySelectorAll('.panel-tab');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.tab;
+
+            // Update tab active states
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Update content visibility
+            const tokenStream = document.getElementById('token-stream');
+            const holdingsStream = document.getElementById('holdings-stream');
+
+            if (targetTab === 'analyzing') {
+                tokenStream.classList.add('active');
+                holdingsStream.classList.remove('active');
+            } else if (targetTab === 'holdings') {
+                tokenStream.classList.remove('active');
+                holdingsStream.classList.add('active');
+            }
+        });
+    });
+}
+
+// ============================================
+// HOLDINGS DISPLAY LOGIC
+// ============================================
+let currentHoldings = [];
+
+function updateHoldings(positions) {
+    currentHoldings = positions;
+    const container = document.getElementById('holdings-stream');
+    const countEl = document.getElementById('holdings-count');
+
+    if (!container) return;
+
+    // Update count in tab
+    if (countEl) {
+        countEl.textContent = `(${positions.length})`;
+    }
+
+    // Clear container
+    container.innerHTML = '';
+
+    // Show empty state if no holdings
+    if (positions.length === 0) {
+        container.innerHTML = `
+            <div class="holdings-empty">
+                <div class="holdings-empty-icon">📭</div>
+                <div>No active holdings</div>
+                <div style="font-size: 0.85em; opacity: 0.7;">Positions will appear here when trades are executed</div>
+            </div>
+        `;
+        return;
+    }
+
+    // Render each holding
+    positions.forEach(pos => {
+        const holdingEl = document.createElement('div');
+        holdingEl.className = 'holding-item';
+        holdingEl.onclick = () => openChart(pos.tokenMint);
+
+        const symbol = pos.tokenSymbol || pos.tokenMint.slice(0, 6);
+        const pnlPercent = pos.unrealizedPnLPercent || 0;
+        const pnlClass = pnlPercent >= 0 ? 'profit' : 'loss';
+        const pnlSign = pnlPercent >= 0 ? '+' : '';
+        const entryAge = getTimeAgo(pos.entryTimestamp);
+
+        holdingEl.innerHTML = `
+            <div class="holding-left">
+                <div class="holding-icon">💰</div>
+                <div class="holding-info">
+                    <span class="holding-symbol">${symbol}</span>
+                    <span class="holding-ca">${formatMint(pos.tokenMint)}</span>
+                </div>
+            </div>
+            <div class="holding-right">
+                <span class="holding-value">${pos.entryAmountSol.toFixed(3)} SOL</span>
+                <span class="holding-pnl ${pnlClass}">${pnlSign}${pnlPercent.toFixed(1)}%</span>
+                <span class="holding-entry">Entry: ${entryAge}</span>
+            </div>
+        `;
+
+        container.appendChild(holdingEl);
+    });
+}
+
+// Helper to get time ago string
+function getTimeAgo(timestamp) {
+    const now = Date.now();
+    const diff = now - timestamp;
+
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return 'Just now';
+}

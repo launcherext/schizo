@@ -10,7 +10,14 @@
       "mcp__blender__execute_blender_code",
       "mcp__blender__get_viewport_screenshot",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "WebFetch(domain:docs.coingecko.com)",
+      "WebFetch(domain:www.helius.dev)",
+      "WebFetch(domain:docs.helius.dev)",
+      "WebFetch(domain:hub.jup.ag)",
+      "WebFetch(domain:docs.birdeye.so)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:station.jup.ag)"
     ]
   }
 }

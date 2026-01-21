@@ -449,6 +449,18 @@ export class TradingEngine {
   ): Promise<string | null> {
     logger.info({ mint, skipEvaluation }, 'Executing buy trade');
 
+    // HARD BLOCK: Pump.fun Mayhem Mode tokens (2 billion supply)
+    // These are extremely high-risk tokens - NEVER trade them
+    try {
+      const isMayhem = await this.helius.isMayhemModeToken(mint);
+      if (isMayhem) {
+        logger.warn({ mint }, '🚫 BLOCKED: Pump.fun Mayhem Mode token (2B supply) - absolute no-go');
+        return null;
+      }
+    } catch (error) {
+      logger.debug({ mint, error }, 'Mayhem Mode check failed - proceeding with caution');
+    }
+
     // Check if trading is allowed
     const canTrade = await this.canTrade();
     if (!canTrade) {

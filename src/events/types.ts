@@ -36,7 +36,8 @@ export type AgentEvent =
   | TokenCommentaryEvent
   | AnalysisThoughtEvent
   | CopyTradeSignalEvent
-  | MoodChangeEvent;
+  | MoodChangeEvent
+  | PositionsUpdateEvent;
 
 /**
  * Copy trade signal detected
@@ -319,5 +320,24 @@ export interface MoodChangeEvent extends BaseEvent {
     current: string;
     intensity: number;
     trigger?: string;
+  };
+}
+
+/**
+ * Current positions/holdings update
+ */
+export interface PositionsUpdateEvent extends BaseEvent {
+  type: 'POSITIONS_UPDATE';
+  data: {
+    positions: Array<{
+      tokenMint: string;
+      tokenSymbol?: string;
+      entryAmountSol: number;
+      entryAmountTokens: number;
+      entryPrice: number;
+      entryTimestamp: number;
+      currentPrice?: number;
+      unrealizedPnLPercent?: number;
+    }>;
   };
 }
