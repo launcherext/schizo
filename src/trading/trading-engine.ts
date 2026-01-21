@@ -21,6 +21,7 @@ import type { ClaudeClient } from '../personality/claude-client.js';
 import type { AnalysisContext } from '../personality/prompts.js';
 import { agentEvents } from '../events/emitter.js';
 import { TransactionParser } from './transaction-parser.js';
+import { dexscreener } from '../api/dexscreener.js';
 import type { HeliusClient } from '../api/helius.js';
 import { ScoringEngine, type TokenScore } from './scoring-engine.js';
 import type { RiskProfile } from './types.js';
@@ -1356,9 +1357,20 @@ export class TradingEngine {
 
     for (const position of positions) {
       try {
-        // Get current price from PumpPortal
-        const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
-        const currentPrice = tokenInfo.price;
+        // Get current price - try PumpPortal first, fallback to DexScreener for graduated tokens
+        let currentPrice: number;
+        try {
+          const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
+          currentPrice = tokenInfo.price;
+        } catch {
+          // Token may have graduated - try DexScreener
+          const dexData = await dexscreener.getRawPairs(position.tokenMint);
+          if (dexData && dexData.length > 0) {
+            currentPrice = parseFloat(dexData[0].priceNative || '0');
+          } else {
+            throw new Error('No price data available');
+          }
+        }
 
         // Calculate P&L percentage
         const pnlPercent = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
@@ -1416,9 +1428,24 @@ export class TradingEngine {
 
     for (const position of positions) {
       try {
-        // Get current price from PumpPortal
-        const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
-        const currentPrice = tokenInfo.price;
+        // Get current price - try PumpPortal first, fallback to DexScreener for graduated tokens
+        let currentPrice: number;
+        try {
+          const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
+          currentPrice = tokenInfo.price;
+        } catch {
+          // Token may have graduated to Raydium - use DexScreener
+          logger.debug({ mint: position.tokenMint }, 'PumpPortal failed, trying DexScreener');
+          const dexData = await dexscreener.getRawPairs(position.tokenMint);
+          if (dexData && dexData.length > 0) {
+            // DexScreener returns priceNative which is price in SOL
+            currentPrice = parseFloat(dexData[0].priceNative || '0');
+            logger.info({ mint: position.tokenMint, symbol: position.tokenSymbol, currentPrice }, 'Got price from DexScreener (graduated token)');
+          } else {
+            logger.warn({ mint: position.tokenMint }, 'Could not get price from PumpPortal or DexScreener');
+            continue;
+          }
+        }
 
         // Calculate P&L percentage
         const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;

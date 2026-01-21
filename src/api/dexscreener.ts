@@ -283,6 +283,22 @@ export class DexScreenerClient {
   clearCache(): void {
     this.cache.clear();
   }
+
+  /**
+   * Get raw pair data for a token (includes priceNative in SOL)
+   */
+  async getRawPairs(mint: string): Promise<DexPair[]> {
+    try {
+      const response = await fetch(`${BASE_URL}/tokens/v1/solana/${mint}`);
+      if (!response.ok) {
+        return [];
+      }
+      return (await response.json()) as DexPair[];
+    } catch (error) {
+      logger.error({ mint, error }, 'Error fetching raw pairs');
+      return [];
+    }
+  }
 }
 
 // Singleton instance
