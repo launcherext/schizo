@@ -649,6 +649,16 @@ chatInput.addEventListener('keypress', (e) => {
 // Connect on page load
 connect();
 
+// Fetch $SCHIZO CA on page load
+fetch('/api/schizo-ca')
+  .then(res => res.json())
+  .then(data => {
+    if (data.ca) {
+      updateSchizoTokenCard({ ca: data.ca, live: data.live });
+    }
+  })
+  .catch(err => console.log('CA fetch failed:', err));
+
 // $SCHIZO Token Card - Update function for when token goes live
 function updateSchizoTokenCard(data) {
   if (data.price) {

@@ -105,6 +105,18 @@ export function createWebSocketServer(
     }
 
     // === API ENDPOINTS ===
+    // Get SCHIZO token CA from environment
+    if (pathname === '/api/schizo-ca' && req.method === 'GET') {
+      const ca = process.env.SCHIZO_TOKEN_MINT || '';
+      const isPlaceholder = !ca || ca === 'your-schizo-token-mint-here';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        ca: isPlaceholder ? '' : ca,
+        live: !isPlaceholder 
+      }));
+      return;
+    }
+
     if (pathname.startsWith('/api/simulate') && req.method === 'POST') {
       let body = '';
       req.on('data', chunk => { body += chunk.toString(); });
