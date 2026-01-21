@@ -22,6 +22,7 @@ import { TwitterClient } from './personality/twitter-client.js';
 import { MarketWatcher } from './analysis/market-watcher.js';
 import { PumpPortalClient } from './trading/pumpportal-client.js';
 import { SniperPipeline } from './trading/sniper-pipeline.js';
+import { JupiterClient } from './api/jupiter.js';
 import { agentEvents } from './events/emitter.js';
 import { detectSillyName } from './personality/name-analyzer.js';
 import type { RiskProfile } from './trading/types.js';
@@ -166,6 +167,20 @@ async function main(): Promise<void> {
       log.warn('Wallet not configured - Trading Engine disabled');
     }
 
+    // Initialize Jupiter Client (for graduated tokens)
+    let jupiter: JupiterClient | undefined;
+    if (wallet) {
+      try {
+        jupiter = new JupiterClient({
+          connection,
+          wallet,
+        });
+        log.info('Jupiter client initialized (for graduated tokens)');
+      } catch (error) {
+        log.warn({ error }, 'Failed to initialize Jupiter client');
+      }
+    }
+
 
 
 // ... (Rest of imports)
@@ -205,10 +220,15 @@ async function main(): Promise<void> {
         wallet.publicKey.toBase58(),
         helius,
         claude,
-        undefined, // jupiter - will be set later if available
+        jupiter, // Pass initialized Jupiter client
         learningEngine
       );
       log.info('Trading Engine initialized with smart money detection, transaction parsing & learning');
+      
+      // Sync positions from on-chain data
+      log.info('Syncing positions from on-chain data...');
+      await tradingEngine.syncPositions();
+
     } else {
       log.warn('Trading Engine not available - wallet not configured');
     }

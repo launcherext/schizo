@@ -133,12 +133,21 @@ class TrenchRadio {
     return impulse;
   }
 
-  toggle() {
+  async toggle() {
     this.isEnabled = !this.isEnabled;
+    
     if (this.isEnabled) {
-      this.init().then(() => {
-        this.setState(this.currentState);
-      });
+      // Ensure AudioContext is ready and running
+      if (!this.audioContext) {
+        await this.init();
+      }
+      
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+
+      this.setState(this.currentState);
+
       // Try to play if file source is active
       if (this.currentSource === 'FILE' && this.audioElement.paused) {
           this.audioElement.play().catch(e => console.error('Play failed', e));
@@ -410,8 +419,8 @@ class TrenchRadio {
 
       if (!toggleBtn || !volumeSlider) return;
 
-      toggleBtn.addEventListener('click', () => {
-          const isEnabled = this.toggle();
+      toggleBtn.addEventListener('click', async () => {
+          const isEnabled = await this.toggle();
           toggleBtn.classList.toggle('active', isEnabled);
           panel.classList.toggle('active', isEnabled);
           iconOff.style.display = isEnabled ? 'none' : 'block';

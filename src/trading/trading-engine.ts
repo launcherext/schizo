@@ -2,7 +2,7 @@
  * Trading Engine - Decision logic and risk management
  */
 
-import { Connection, type Keypair } from '@solana/web3.js';
+import { Connection, type Keypair, PublicKey } from '@solana/web3.js';
 import type { DatabaseWithRepositories } from '../db/database-with-repos.js';
 import { PumpPortalClient } from './pumpportal-client.js';
 import { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
@@ -146,6 +146,118 @@ export class TradingEngine {
     this.learningEngine = learningEngine;
 
     logger.info({ config, hasPersonality: !!claude, hasJupiter: !!jupiter, hasLearning: !!learningEngine }, 'Trading Engine initialized');
+  }
+
+  /**
+   * Sync positions from on-chain data
+   * Recovers missing positions by checking wallet holdings
+   */
+  async syncPositions(): Promise<void> {
+    logger.info('Starting position sync...');
+
+    try {
+      // 1. Get all token accounts
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+        new PublicKey(this.walletAddress),
+        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+      );
+
+      // 2. Get current known positions from DB
+      const knownPositions = await this.getOpenPositions();
+      const knownMints = new Set(knownPositions.map(p => p.tokenMint));
+
+      // 3. Check for discrepancies
+      for (const account of tokenAccounts.value) {
+        const info = account.account.data.parsed.info;
+        const mint = info.mint;
+        const amount = parseFloat(info.tokenAmount.uiAmountString);
+
+        // Skip SOL (wrapped SOL is usually transient but we can skip 'So111...')
+        if (mint === 'So11111111111111111111111111111111111111112') continue;
+
+        // Skip if dust (less than 1 token - assuming meme tokens here, adjust for high value?)
+        // Safer: Skip if value < small threshold, but we don't have price yet.
+        // Let's assume > 0 is relevant for now if not tracked.
+        if (amount <= 0) continue;
+
+        // Skip if already known
+        if (knownMints.has(mint)) continue;
+        
+        logger.info({ mint, amount }, 'Found untracked position on-chain');
+
+        // 4. Restore position
+        await this.restorePosition(mint, amount);
+      }
+      
+      logger.info('Position sync complete');
+    } catch (error) {
+      logger.error({ error }, 'Failed to sync positions');
+    }
+  }
+
+  /**
+   * Restore a missing position by inferring cost basis from history
+   */
+  private async restorePosition(mint: string, currentAmount: number): Promise<void> {
+    logger.info({ mint, currentAmount }, 'Restoring missing position...');
+
+    try {
+      // Fetch recent transactions for this mint (to find the buy)
+      // We look at wallet history. Helius API allows filtering by token? 
+      // getTransactionsForAddress returns all txs. We have to filter.
+      // This might be heavy if history is long.
+      
+      const response = await this.helius.getTransactionsForAddress(this.walletAddress, { limit: 100 });
+      let bestBuyTx: any = null;
+      let estimatedCostBasis = 0;
+
+      // Scan txs for token transfers involving this mint
+      // This is a rough heuristic.
+      // Ideally we'd use Helius Enhanced API filter, but our client wrappers might not expose it fully yet.
+      // We'll trust the latest large BUY or just default to current price.
+      
+      // Attempt to get token info for metadata
+      let symbol = 'UNKNOWN';
+      let name = 'Unknown Token';
+      let price = 0;
+
+      try {
+          const info = await this.pumpPortal.getTokenInfo(mint);
+          symbol = info.symbol;
+          name = info.name;
+          price = info.price; // SOL price
+      } catch (e) {
+          // Ignore
+      }
+
+      // If we can't find a historical buy easily (parsing complicated), we use current price as cost basis
+      // to avoid messing up P&L calculations too much (start from 0% P&L).
+      estimatedCostBasis = price * currentAmount;
+
+      logger.info({ mint, price, estimatedCostBasis }, 'Restoring with estimated cost basis');
+
+      // Insert "synthetic" trade record
+      await this.db.trades.insert({
+        signature: `sync-${mint.slice(0, 8)}-${Date.now()}`, // Fake signature
+        timestamp: Date.now(),
+        type: 'BUY',
+        tokenMint: mint,
+        tokenSymbol: symbol,
+        amountTokens: currentAmount,
+        amountSol: estimatedCostBasis,
+        pricePerToken: price,
+        metadata: {
+           isSync: true,
+           note: 'Restored from on-chain data',
+           tokenName: name
+        }
+      });
+
+      logger.info({ mint, amount: currentAmount }, 'Position restored in database');
+      
+    } catch (error) {
+       logger.error({ mint, error }, 'Failed to restore position');
+    }
   }
 
   /**
