@@ -194,6 +194,50 @@ export function createWebSocketServer(
 
   logger.info({ port }, 'WebSocket server started');
 
+  // Start periodic position broadcasting (every 5 seconds)
+  if (tradingEngine) {
+    setInterval(async () => {
+      try {
+        const positions = await tradingEngine.getOpenPositionsWithPrices();
+        
+        // Broadcast to all clients
+        const updateEvent = {
+          type: 'POSITIONS_UPDATE',
+          timestamp: Date.now(),
+          data: {
+            positions: positions.map(p => ({
+              tokenMint: p.tokenMint,
+              tokenSymbol: p.tokenSymbol,
+              tokenName: p.tokenName,
+              entryAmountSol: p.entryAmountSol,
+              entryAmountTokens: p.entryAmountTokens,
+              entryPrice: p.entryPrice,
+              entryTimestamp: p.entryTimestamp,
+              currentPrice: p.currentPrice,
+              unrealizedPnLPercent: p.unrealizedPnLPercent,
+            })),
+          },
+        };
+        
+        broadcast(wss, updateEvent);
+        
+        // Also broadcast updated stats with correct total PnL
+        // We need to calculate total unrealized PnL from positions
+        let totalUnrealizedPnL = 0;
+        let totalRealizedPnL = 0; // We'd need to fetch this from DB effectively, or track it
+        
+        // For now, let's just ensure we trigger a stats calculation if possible, 
+        // or rely on tradingEngine to have the latest cached stats if we implemented that.
+        // Since we don't have a direct "getStats" on tradingEngine exposed easily here without DB access,
+        // let's at least rely on the client calculating total PnL from the positions list for now,
+        // which app.js already does in updateTrenchRadioFromPositions/updateStats logic.
+        
+      } catch (error) {
+        logger.error({ error }, 'Error broadcasting periodic position updates');
+      }
+    }, 5000);
+  }
+
   return wss;
 }
 
