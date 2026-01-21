@@ -70,7 +70,7 @@ export class TokenValidator {
 
       const minBuyPressure = {
         CONSERVATIVE: 1.8,
-        BALANCED: 1.3,
+        BALANCED: 1.0,
         AGGRESSIVE: 1.05,
         ENTERTAINMENT: 0.8, // Lower threshold - just needs some activity
       };
@@ -104,12 +104,19 @@ export class TokenValidator {
       if (metadata.ageMinutes && metadata.ageMinutes > maxAge) {
          // Optionally, we could allow older tokens if they have massive volume?
          // For now, stick to the prompt: strict age window for 'Sniping'
+         // result: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
+         // BUT user requested to remove age filter entirely, so we log but DO NOT REJECT
+         if (metadata.ageMinutes > maxAge) {
+             logger.debug({ mint, age: metadata.ageMinutes, maxAge }, 'Token older than maxAge - proceeding anyway due to relaxed filter');
+         }
+         /*
          return {
             mint,
             passes: false,
             reason: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
             metadata
          };
+         */
       }
 
       // Check 3: Buy Pressure (New)

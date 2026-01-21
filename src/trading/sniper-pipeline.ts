@@ -315,7 +315,7 @@ export class SniperPipeline {
         }
       });
 
-      logger.debug({
+      logger.warn({
         mint: token.mint,
         symbol: token.symbol,
         reason: result.reason
