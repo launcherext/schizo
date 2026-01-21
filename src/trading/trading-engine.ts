@@ -374,7 +374,7 @@ export class TradingEngine {
   /**
    * Execute a buy trade with risk management
    */
-  async executeBuy(mint: string): Promise<string | null> {
+  async executeBuy(mint: string, tokenMetadata?: { liquidity?: number; marketCapSol?: number }): Promise<string | null> {
     logger.info({ mint }, 'Executing buy trade');
 
     // Check if trading is allowed
@@ -385,7 +385,7 @@ export class TradingEngine {
     }
 
     // Evaluate token
-    const decision = await this.evaluateToken(mint);
+    const decision = await this.evaluateToken(mint, tokenMetadata);
     
     logger.info({
       mint,

@@ -18,6 +18,7 @@ import { DeepgramTTS, VoiceNarrator } from './personality/deepgram-tts.js';
 import { TwitterClient } from './personality/twitter-client.js';
 import { MarketWatcher } from './analysis/market-watcher.js';
 import { PumpPortalClient } from './trading/pumpportal-client.js';
+import { SniperPipeline } from './trading/sniper-pipeline.js';
 import { agentEvents } from './events/emitter.js';
 import { detectSillyName } from './personality/name-analyzer.js';
 
@@ -192,11 +193,35 @@ async function main(): Promise<void> {
       log.warn('Trading Engine not available - wallet not configured');
     }
 
-    // Initialize Trading Loop (can run analysis-only without trading engine)
+    // Initialize Sniper Pipeline (Filter-First Architecture)
+    let sniperPipeline: SniperPipeline | undefined;
+    
+    if (tradingEngine || process.env.TRADING_ENABLED === 'false') {
+        const validationDelay = parseInt(process.env.VALIDATION_DELAY_MS || '300000');
+        log.info({ delayMs: validationDelay }, 'Initializing Sniper Pipeline...');
+        
+        sniperPipeline = new SniperPipeline(
+            {
+                validationDelayMs: validationDelay,
+                enableTrading: process.env.TRADING_ENABLED === 'true',
+            },
+            {
+                minLiquidityUsd: parseFloat(process.env.MIN_LIQUIDITY_USD || '5000'),
+                minVolume1hUsd: parseFloat(process.env.MIN_VOLUME_1H_USD || '5000'),
+            },
+            tradingEngine,
+            tokenSafety
+        );
+        
+        await sniperPipeline.start();
+        log.info('🎯 Sniper Pipeline started - Listening for new tokens w/ 5m delay');
+    }
+
+    // Initialize Trading Loop (Handles Position Management + Trending Toknes)
     tradingLoop = new TradingLoop(
       {
         ...DEFAULT_TRADING_LOOP_CONFIG,
-        runLoop: true, // Always run the loop for analysis/dashboard
+        runLoop: true, // Always run the loop for positions/trending
         enableTrading: process.env.TRADING_ENABLED === 'true' && !!tradingEngine,
       },
       connection,
@@ -288,6 +313,7 @@ async function main(): Promise<void> {
       const shutdown = () => {
         log.info('Shutting down...');
         if (marketWatcher) marketWatcher.stop();
+        if (sniperPipeline) sniperPipeline.stop();
         if (tradingLoop) tradingLoop.stop();
         if (wss) wss.close();
         if (db) db.close();
