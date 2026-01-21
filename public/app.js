@@ -686,11 +686,20 @@ function updateSchizoTokenCard(data) {
         }
       };
     }
+    
+    // Hide "Coming Soon" badge when CA is available
+    const statusEl = document.querySelector('.token-card-status');
+    if (statusEl) {
+      statusEl.style.display = 'none';
+    }
   }
   if (data.live) {
     const statusEl = document.querySelector('.token-card-status');
-    statusEl.textContent = 'Live';
-    statusEl.classList.add('live');
+    if (statusEl) {
+      statusEl.textContent = 'Live';
+      statusEl.classList.add('live');
+      statusEl.style.display = ''; // Show it again as "Live"
+    }
     
     // Update button text/link if needed
     const buyBtn = document.querySelector('.btn-primary');
