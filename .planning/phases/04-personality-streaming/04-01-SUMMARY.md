@@ -1,104 +1,105 @@
-# Phase 04 Plan 01 Summary
+---
+phase: 04-personality-streaming
+plan: 01
+subsystem: personality
+tags: [mood, emotional-state, trading-behavior, event-system]
 
-**Plan:** 04-01-PLAN.md  
-**Completed:** 2026-01-20  
-**Duration:** ~15 minutes  
-**Status:** ✅ Complete
+# Dependency graph
+requires:
+  - phase: 03-trading-economic
+    provides: Trading engine that mood system will affect
+provides:
+  - MoodSystem class with 6 mood states
+  - Mood effects on risk/position sizing
+  - Speech timing control
+  - MoodChangeEvent for real-time updates
+affects: [04-02, 04-03, trading-engine-integration]
 
-## Objective
+# Tech tracking
+tech-stack:
+  added: []
+  patterns:
+    - Mood state machine with automatic transitions
+    - Event emission on state change
 
-Integrate Claude API to add paranoid degen AI personality to the trading agent.
+key-files:
+  created:
+    - src/personality/mood-system.ts
+  modified:
+    - src/events/types.ts
+    - src/personality/index.ts
 
-## Deliverables
+key-decisions:
+  - "6 mood types covering win/loss streaks, quiet periods, and random events"
+  - "5 minute quiet period before restlessness"
+  - "10 minute mood decay back to neutral"
+  - "Speech gap minimum of 15 seconds by default"
 
-### Claude API Client (`src/personality/claude-client.ts`)
+patterns-established:
+  - "Mood affects trading via multipliers (risk, position size)"
+  - "Mood affects commentary via speechStyle descriptor"
+  - "Events emitted on mood transitions for UI updates"
 
-Created Claude integration with:
-
-**Features:**
-- ✅ Claude 3.5 Sonnet integration
-- ✅ Trade reasoning generation
-- ✅ Buyback reasoning generation
-- ✅ Fallback logic if API fails
-- ✅ Comprehensive logging
-
-**API Configuration:**
-- Model: claude-3-5-sonnet-20241022
-- Max tokens: 200 (keeps responses brief)
-- System prompt for personality consistency
-
-### Personality Prompts (`src/personality/prompts.ts`)
-
-Created paranoid degen character:
-
-**Personality Traits:**
-- Deeply suspicious, sees patterns everywhere
-- Uses dark humor and conspiracy theories
-- Confident but always hedging
-- Speaks like a degen trader, not corporate bot
-- Obsessed with finding connections
-
-**Context Formatting:**
-- ✅ Token safety analysis formatting
-- ✅ Smart money detection formatting
-- ✅ Trade decision reasoning
-- ✅ Buyback commentary
-
-**Example Outputs:**
-- "This wallet screams smart money but something feels off... probably connected to the devs somehow"
-- "99% sure this is a honeypot setup. The mint authority is still active and I've seen this pattern before"
-- "Smart money is all over this one. Either they know something we don't or it's a coordinated pump. Either way, I'm in."
-
-### Trading Engine Integration
-
-Extended Trading Engine:
-- ✅ Added optional Claude client parameter
-- ✅ Added `reasoning` field to TradeDecision
-- ✅ Generates AI commentary for trade decisions
-- ✅ Graceful fallback if Claude unavailable
-
-### Configuration
-
-Updated `.env.example`:
-- ✅ Added `ANTHROPIC_API_KEY` configuration
-
-## Verification
-
-✅ **TypeScript compilation:** Passed  
-✅ **Module exports:** All personality types exported  
-✅ **Integration:** Claude client integrated with Trading Engine  
-✅ **Fallback logic:** Works without Claude client
-
-## Must-Haves Status
-
-✅ **Truth 1:** Agent has consistent paranoid personality  
-- System prompt defines character
-- Examples guide tone and style
-- Personality stays consistent via Claude's system prompt feature
-
-## Technical Notes
-
-**Optional Integration:**
-- Claude client is optional parameter to Trading Engine
-- Agent works without personality (Phase 1-3 functionality intact)
-- Reasoning only generated if Claude client provided
-
-**Cost Optimization:**
-- Max tokens limited to 200
-- Brief responses (2-3 sentences)
-- Fallback to basic reasoning if API fails
-
-**Error Handling:**
-- API failures logged but don't block trading
-- Fallback reasoning generated if Claude unavailable
-- Graceful degradation
-
-## Next Steps
-
-Ready for Plan 04-02: Event System & Streaming
-
-The personality layer is complete. Next step is to create an event system to stream the agent's thoughts and actions in real-time.
-
+# Metrics
+duration: 4min
+completed: 2026-01-20
 ---
 
-**Phase 4 is 33% complete (1/3 plans).**
+# Phase 4 Plan 1: Mood System Summary
+
+**MoodSystem class with 6 emotional states affecting trading risk tolerance and commentary style via multipliers**
+
+## Performance
+
+- **Duration:** 4 min
+- **Started:** 2026-01-20T12:00:00Z
+- **Completed:** 2026-01-20T12:04:00Z
+- **Tasks:** 3
+- **Files modified:** 3
+
+## Accomplishments
+- Created MoodSystem class tracking 6 mood states: CONFIDENT, PARANOID, RESTLESS, NEUTRAL, MANIC, TILTED
+- Each mood provides distinct risk/position multipliers and speech style descriptors
+- Automatic restlessness after 5 minutes of no trades
+- Mood decay to neutral after 10 minutes
+- Speech timing control with canSpeak() method
+
+## Task Commits
+
+Each task was committed atomically:
+
+1. **Task 1: Create MoodSystem class** - `0c3bf36` (feat)
+2. **Task 2: Add MoodChangeEvent to event types** - `522c104` (feat)
+3. **Task 3: Export MoodSystem from personality index** - `dca58a0` (feat)
+
+## Files Created/Modified
+- `src/personality/mood-system.ts` - MoodSystem class with mood tracking, transitions, and effects calculation
+- `src/events/types.ts` - Added MoodChangeEvent interface and type union
+- `src/personality/index.ts` - Export MoodSystem and related types
+
+## Decisions Made
+- 6 mood types selected to cover trading psychology: wins (CONFIDENT), losses (PARANOID, TILTED), inactivity (RESTLESS), random (MANIC), default (NEUTRAL)
+- Mood effects as multipliers (not absolute values) so trading engine can apply them flexibly
+- Speech timing tracked in MoodSystem since mood affects when/how agent speaks
+- Automatic restlessness builds pressure to trade during quiet periods (entertainment value)
+
+## Deviations from Plan
+
+None - plan executed exactly as written.
+
+## Issues Encountered
+
+None
+
+## User Setup Required
+
+None - no external service configuration required.
+
+## Next Phase Readiness
+- MoodSystem ready for integration with trading engine
+- MoodChangeEvent ready for UI to display current mood
+- Ready for Plan 02: Personality prompts and Claude integration
+
+---
+*Phase: 04-personality-streaming*
+*Completed: 2026-01-20*
