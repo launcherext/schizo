@@ -53,8 +53,9 @@ async function main(): Promise<void> {
     db = createDatabase(dbPath);
     const dbWithRepos = createDatabaseWithRepositories(db);
 
-    // One-time import of historical trade (IMPOSTOR bought before volume was set up)
-    const historicalTrade = {
+    // Historical IMPOSTOR trade - CLOSED (user sold manually at +73%)
+    // Buy entry
+    const historicalBuy = {
       signature: 'iwgr8DTfM7STpQ1N21mHNRvC4DNrN5ms7aSAKYw27PukjTq9dmA95j4NY6x1gh5MwZWaeQJEH5tHWRg6Wryc6uq',
       tokenMint: 'Kvqx8QeAXyjQJULbAX7LnWxfym5U51we9Eft51oBAGS',
       tokenSymbol: 'IMPOSTOR',
@@ -65,11 +66,24 @@ async function main(): Promise<void> {
       timestamp: 1769028771000,
       metadata: { tokenName: 'Impostor', source: 'PUMP_FUN', importedFromHistory: true },
     };
-    const existingTrade = dbWithRepos.trades.getBySignature(historicalTrade.signature);
-    if (!existingTrade) {
-      log.info({ symbol: historicalTrade.tokenSymbol }, 'Importing historical trade...');
-      dbWithRepos.trades.insert(historicalTrade);
-      log.info('Historical trade imported successfully');
+    // Manual sell exit (user sold at +73% because bot couldn't track graduated token)
+    const historicalSell = {
+      signature: 'manual-sell-impostor-2026-01-21',
+      tokenMint: 'Kvqx8QeAXyjQJULbAX7LnWxfym5U51we9Eft51oBAGS',
+      tokenSymbol: 'IMPOSTOR',
+      type: 'SELL' as const,
+      amountSol: 0.046, // ~$3.46 at SOL ~$170 = +73% from $1.99 entry
+      amountTokens: 107358.911004,
+      pricePerToken: 0.000000428, // Exit price ~73% higher
+      timestamp: 1769030000000, // Approximate manual sell time
+      metadata: { tokenName: 'Impostor', source: 'MANUAL', importedFromHistory: true, reason: 'Manual sell - bot missed take-profit on graduated token' },
+    };
+    if (!dbWithRepos.trades.getBySignature(historicalBuy.signature)) {
+      dbWithRepos.trades.insert(historicalBuy);
+    }
+    if (!dbWithRepos.trades.getBySignature(historicalSell.signature)) {
+      dbWithRepos.trades.insert(historicalSell);
+      log.info('Historical IMPOSTOR position closed (manual sell imported)');
     }
 
     // Initialize Helius client
