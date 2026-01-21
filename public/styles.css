@@ -1826,3 +1826,182 @@ td a:hover {
         border-radius: 50%;
     }
 }
+
+/* ============================================
+   TRENCH RADIO STYLES
+   ============================================ */
+
+.trench-radio-panel {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(15, 25, 25, 0.95);
+    border: 1px solid rgba(140, 219, 199, 0.3);
+    border-radius: 12px;
+    padding: 12px 16px;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    min-width: 180px;
+}
+
+.trench-radio-panel:hover {
+    border-color: rgba(140, 219, 199, 0.5);
+    box-shadow: 0 0 20px rgba(140, 219, 199, 0.15);
+}
+
+.trench-radio-panel.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 25px rgba(78, 255, 205, 0.2);
+}
+
+.trench-radio-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.trench-radio-title {
+    font-size: 0.7em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.trench-radio-state {
+    font-size: 0.65em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(140, 219, 199, 0.1);
+    color: rgba(140, 219, 199, 0.6);
+    font-weight: bold;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+}
+
+.trench-radio-state.scanning {
+    background: rgba(140, 219, 199, 0.2);
+    color: var(--accent);
+    animation: pulse-glow 2s infinite;
+}
+
+.trench-radio-state.position-up {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+    animation: pulse-green 0.5s infinite;
+}
+
+.trench-radio-state.position-down {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+    animation: pulse-red 1s infinite;
+}
+
+.trench-radio-state.crash {
+    background: rgba(248, 113, 113, 0.4);
+    color: #ff4444;
+    animation: flash-red 0.2s infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+}
+
+@keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 5px rgba(74, 222, 128, 0.3); }
+    50% { box-shadow: 0 0 15px rgba(74, 222, 128, 0.6); }
+}
+
+@keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 5px rgba(248, 113, 113, 0.3); }
+    50% { box-shadow: 0 0 15px rgba(248, 113, 113, 0.5); }
+}
+
+@keyframes flash-red {
+    0%, 100% { background: rgba(248, 113, 113, 0.4); }
+    50% { background: rgba(248, 113, 113, 0.8); }
+}
+
+.trench-radio-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.trench-radio-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(140, 219, 199, 0.1);
+    border: 1px solid rgba(140, 219, 199, 0.3);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.trench-radio-btn:hover {
+    background: rgba(140, 219, 199, 0.2);
+    transform: scale(1.05);
+}
+
+.trench-radio-btn.active {
+    background: rgba(78, 255, 205, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 15px rgba(78, 255, 205, 0.3);
+}
+
+.trench-radio-btn svg {
+    color: var(--accent);
+}
+
+.trench-radio-slider {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(140, 219, 199, 0.2);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+}
+
+.trench-radio-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.trench-radio-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(78, 255, 205, 0.5);
+}
+
+.trench-radio-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .trench-radio-panel {
+        bottom: 70px;
+        left: 10px;
+        right: 10px;
+        min-width: auto;
+    }
+}

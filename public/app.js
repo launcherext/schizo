@@ -65,6 +65,8 @@ function handleEvent(event) {
       break;
     case 'POSITIONS_UPDATE':
       updateHoldings(event.data.positions);
+      // Update Trench Radio based on position state
+      updateTrenchRadioFromPositions(event.data.positions);
       break;
     case 'ANALYSIS_THOUGHT':
       // SCHIZO's live analysis thoughts - show in feed!
@@ -108,6 +110,10 @@ function handleEvent(event) {
       break;
     case 'STOP_LOSS':
       addToFeed(`🛑 STOP-LOSS: ${formatMint(event.data.mint)} @ ${event.data.lossPercent.toFixed(1)}% loss`, 'stop-loss', event.data.mint);
+      // Trigger Trench Radio crash sound
+      if (window.trenchRadio) {
+        window.trenchRadio.triggerCrash();
+      }
       break;
     case 'TAKE_PROFIT':
       addToFeed(`🎯 TAKE-PROFIT: ${formatMint(event.data.mint)} @ +${event.data.profitPercent.toFixed(1)}% gain`, 'take-profit', event.data.mint);
@@ -825,3 +831,131 @@ function getTimeAgo(timestamp) {
     if (minutes > 0) return `${minutes}m ago`;
     return 'Just now';
 }
+
+// ============================================
+// TRENCH RADIO INTEGRATION
+// ============================================
+
+/**
+ * Update Trench Radio state based on positions
+ */
+function updateTrenchRadioFromPositions(positions) {
+    if (!window.trenchRadio) return;
+
+    // Check if we have any active positions
+    const hasPositions = positions && positions.length > 0;
+
+    if (!hasPositions) {
+        window.trenchRadio.updatePositionPnL(0, false);
+        updateTrenchRadioUI('SCANNING');
+        return;
+    }
+
+    // Calculate aggregate PnL across all positions
+    let totalPnL = 0;
+    let totalWeight = 0;
+
+    positions.forEach(pos => {
+        if (pos.unrealizedPnLPercent !== undefined) {
+            const weight = pos.entryAmountSol || 1;
+            totalPnL += pos.unrealizedPnLPercent * weight;
+            totalWeight += weight;
+        }
+    });
+
+    const avgPnL = totalWeight > 0 ? totalPnL / totalWeight : 0;
+
+    window.trenchRadio.updatePositionPnL(avgPnL, true);
+
+    // Update UI state indicator
+    if (avgPnL >= 0) {
+        updateTrenchRadioUI('POSITION_UP');
+    } else {
+        updateTrenchRadioUI('POSITION_DOWN');
+    }
+}
+
+/**
+ * Update Trench Radio UI state indicator
+ */
+function updateTrenchRadioUI(state) {
+    const stateEl = document.getElementById('trench-radio-state');
+    if (!stateEl) return;
+
+    // Remove all state classes
+    stateEl.classList.remove('scanning', 'position-up', 'position-down', 'crash');
+
+    // Update text and class based on state
+    switch (state) {
+        case 'SCANNING':
+            stateEl.textContent = 'SCANNING';
+            stateEl.classList.add('scanning');
+            break;
+        case 'POSITION_UP':
+            stateEl.textContent = 'PUMPING';
+            stateEl.classList.add('position-up');
+            break;
+        case 'POSITION_DOWN':
+            stateEl.textContent = 'DUMPING';
+            stateEl.classList.add('position-down');
+            break;
+        case 'CRASH':
+            stateEl.textContent = 'REKT';
+            stateEl.classList.add('crash');
+            break;
+        default:
+            stateEl.textContent = 'OFF';
+    }
+}
+
+/**
+ * Initialize Trench Radio UI controls
+ */
+function initTrenchRadio() {
+    const toggleBtn = document.getElementById('trench-radio-toggle');
+    const volumeSlider = document.getElementById('trench-radio-volume');
+    const stateEl = document.getElementById('trench-radio-state');
+    const panel = document.getElementById('trench-radio-controls');
+    const iconOff = document.getElementById('radio-icon-off');
+    const iconOn = document.getElementById('radio-icon-on');
+
+    if (!toggleBtn || !volumeSlider) return;
+
+    // Toggle button
+    toggleBtn.addEventListener('click', () => {
+        if (!window.trenchRadio) return;
+
+        const isEnabled = window.trenchRadio.toggle();
+
+        // Update UI
+        toggleBtn.classList.toggle('active', isEnabled);
+        panel.classList.toggle('active', isEnabled);
+        iconOff.style.display = isEnabled ? 'none' : 'block';
+        iconOn.style.display = isEnabled ? 'block' : 'none';
+
+        if (isEnabled) {
+            stateEl.textContent = 'SCANNING';
+            stateEl.classList.add('scanning');
+        } else {
+            stateEl.textContent = 'OFF';
+            stateEl.classList.remove('scanning', 'position-up', 'position-down', 'crash');
+        }
+    });
+
+    // Volume slider
+    volumeSlider.addEventListener('input', (e) => {
+        if (!window.trenchRadio) return;
+        const volume = parseInt(e.target.value) / 100;
+        window.trenchRadio.setVolume(volume);
+    });
+
+    // Initialize volume from slider
+    if (window.trenchRadio) {
+        window.trenchRadio.setVolume(parseInt(volumeSlider.value) / 100);
+    }
+}
+
+// Initialize Trench Radio when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    initTrenchRadio();
+});

@@ -17,6 +17,7 @@ import type { HeliusClient } from '../api/helius.js';
 import { ScoringEngine, type TokenScore } from './scoring-engine.js';
 import type { RiskProfile } from './types.js';
 import { JupiterClient } from '../api/jupiter.js';
+import { LearningEngine, type TradeFeatures, type TradeLesson } from '../analysis/learning-engine.js';
 
 /**
  * Known LP pool program addresses to exclude from holder concentration
@@ -112,6 +113,8 @@ export class TradingEngine {
   private walletAddress: string;
   private helius: HeliusClient;
   private jupiter?: JupiterClient; // Optional Jupiter client for graduated tokens
+  private learningEngine?: LearningEngine; // Learning from trade outcomes
+  private entryFeatures: Map<string, { features: TradeFeatures; confidence: number; entryPrice: number }> = new Map();
 
   constructor(
     config: TradingConfig,
@@ -123,7 +126,8 @@ export class TradingEngine {
     walletAddress: string,
     helius: HeliusClient,
     claude?: ClaudeClient,
-    jupiter?: JupiterClient
+    jupiter?: JupiterClient,
+    learningEngine?: LearningEngine
   ) {
     this.config = config;
     this.pumpPortal = pumpPortal;
@@ -136,8 +140,9 @@ export class TradingEngine {
     this.txParser = new TransactionParser(connection);
     this.claude = claude;
     this.jupiter = jupiter;
+    this.learningEngine = learningEngine;
 
-    logger.info({ config, hasPersonality: !!claude, hasJupiter: !!jupiter }, 'Trading Engine initialized');
+    logger.info({ config, hasPersonality: !!claude, hasJupiter: !!jupiter, hasLearning: !!learningEngine }, 'Trading Engine initialized');
   }
 
   /**
@@ -582,6 +587,21 @@ export class TradingEngine {
         pricePerToken,
         method: useJupiter ? 'Jupiter' : 'PumpPortal',
       }, 'Buy trade executed successfully');
+
+      // Capture entry features for learning engine
+      if (this.learningEngine) {
+        try {
+          const features = await this.captureEntryFeatures(mint, tokenMetadata);
+          this.entryFeatures.set(mint, {
+            features,
+            confidence: 50, // TODO: Get from decision
+            entryPrice: pricePerToken,
+          });
+          logger.debug({ mint }, 'Captured entry features for learning');
+        } catch (error) {
+          logger.warn({ mint, error }, 'Failed to capture entry features');
+        }
+      }
 
       return signature;
     } catch (error) {
@@ -1207,6 +1227,9 @@ export class TradingEngine {
                 signature,
               },
             });
+
+            // Record trade lesson for learning engine
+            await this.recordTradeLesson(position, currentPrice, Date.now(), pnlPercent);
           }
           continue;
         }
@@ -1273,5 +1296,117 @@ export class TradingEngine {
         amount: t.amountSol,
         tokenSymbol: t.tokenSymbol,
       }));
+  }
+
+  /**
+   * Capture features at trade entry for learning engine
+   */
+  private async captureEntryFeatures(
+    mint: string,
+    tokenMetadata?: { liquidity?: number; marketCapSol?: number; symbol?: string; name?: string }
+  ): Promise<TradeFeatures> {
+    // Get safety analysis
+    const safety = await this.tokenSafety.analyze(mint);
+
+    // Get holder concentration
+    let holderConcentration: HolderConcentrationResult = {
+      top10Percent: 0,
+      topHolderPercent: 0,
+      isConcentrated: false,
+    };
+    try {
+      holderConcentration = await this.checkHolderConcentration(mint);
+    } catch {
+      // Ignore errors
+    }
+
+    // Get token info from PumpPortal for bonding curve progress
+    let bondingProgress = 0;
+    let tokenAgeMins = 0;
+    try {
+      const tokenInfo = await this.pumpPortal.getTokenInfo(mint);
+      bondingProgress = tokenInfo.bondingCurve?.progress ?? 0;
+      if (tokenInfo.createdAt) {
+        tokenAgeMins = Math.floor((Date.now() - tokenInfo.createdAt) / 60000);
+      }
+    } catch {
+      // Ignore errors
+    }
+
+    // Check smart money (simplified)
+    const smartMoneyCount = 0; // Would need holder data to check
+
+    return {
+      bondingCurveProgress: bondingProgress,
+      marketCapSol: tokenMetadata?.marketCapSol ?? 0,
+      liquidity: tokenMetadata?.liquidity ?? 0,
+      tokenAgeMins,
+      buyCount5m: 0, // Would need trade history
+      sellCount5m: 0,
+      buyVolume5m: 0,
+      sellVolume5m: 0,
+      heatMetric: 0, // Would need MomentumScanner
+      holderCount: 0, // Would need API call
+      topHolderPercent: holderConcentration.topHolderPercent,
+      top10HoldersPercent: holderConcentration.top10Percent,
+      smartMoneyCount,
+      smartMoneyBuying: smartMoneyCount > 0,
+      mintAuthorityRevoked: !safety.risks.includes('MINT_AUTHORITY_ACTIVE'),
+      freezeAuthorityRevoked: !safety.risks.includes('FREEZE_AUTHORITY_ACTIVE'),
+      isBundled: false, // Would need BundleDetector
+      bundleScore: 0,
+      hasTwitter: false, // Would need social data
+      hasTelegram: false,
+      hasWebsite: false,
+    };
+  }
+
+  /**
+   * Record a trade lesson when position closes
+   */
+  private async recordTradeLesson(
+    position: OpenPosition,
+    exitPrice: number,
+    exitTimestamp: number,
+    pnlPercent: number
+  ): Promise<void> {
+    if (!this.learningEngine) return;
+
+    const entryData = this.entryFeatures.get(position.tokenMint);
+    if (!entryData) {
+      logger.warn({ mint: position.tokenMint }, 'No entry features found for trade lesson');
+      return;
+    }
+
+    const pnlSol = position.entryAmountSol * pnlPercent;
+    const outcome: 'win' | 'loss' = pnlPercent > 0 ? 'win' : 'loss';
+
+    const lesson: TradeLesson = {
+      id: `${position.tokenMint}-${position.entryTimestamp}`,
+      tokenMint: position.tokenMint,
+      tokenSymbol: position.tokenSymbol,
+      entryTimestamp: position.entryTimestamp,
+      exitTimestamp,
+      features: entryData.features,
+      outcome,
+      pnlPercent: pnlPercent * 100, // Convert to percentage
+      pnlSol,
+      holdTimeMs: exitTimestamp - position.entryTimestamp,
+      entryPrice: entryData.entryPrice,
+      exitPrice,
+      confidenceAtEntry: entryData.confidence,
+    };
+
+    await this.learningEngine.recordLesson(lesson);
+
+    // Clean up entry features
+    this.entryFeatures.delete(position.tokenMint);
+
+    logger.info({
+      mint: position.tokenMint,
+      outcome,
+      pnlPercent: (pnlPercent * 100).toFixed(1) + '%',
+      holdTimeMs: lesson.holdTimeMs,
+    }, 'Trade lesson recorded');
   }
 }

@@ -521,6 +521,84 @@ Response: {
 
 ---
 
+## 7. MORALIS API
+
+**Package**: `src/api/moralis.ts` (Custom client)
+**Purpose**: Alternative trending token discovery with security scores
+**Docs**: https://docs.moralis.com/web3-data-api/solana
+
+### Key Endpoints
+
+```typescript
+import { getMoralisClient } from './api/moralis.js';
+
+const moralis = getMoralisClient();
+
+// Get trending tokens with filters
+const trending = await moralis.getTrendingTokens({
+  limit: 15,
+  minSecurityScore: 30,  // 0-100 (higher = safer)
+  minMarketCap: 10000,   // USD
+  minLiquidity: 5000,    // USD
+});
+
+// Get top gainers
+const gainers = await moralis.getTopGainers({
+  limit: 10,
+  timeFrame: '1h',  // '5m' | '1h' | '4h' | '12h' | '24h'
+});
+
+// Get top losers
+const losers = await moralis.getTopLosers({
+  limit: 10,
+  timeFrame: '24h',
+});
+
+// Search tokens
+const results = await moralis.searchTokens('BONK', 10);
+
+// Get single token
+const token = await moralis.getToken(tokenAddress);
+```
+
+### Response Format
+
+```typescript
+interface MoralisToken {
+  tokenAddress: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  priceUsd: number;
+  priceChange24h?: number;
+  priceChange1h?: number;
+  priceChange5m?: number;
+  volume24h?: number;
+  volume1h?: number;
+  marketCap?: number;
+  liquidity?: number;
+  securityScore?: number;  // 0-100 (Moralis exclusive!)
+  holders?: number;
+  buyers24h?: number;
+  sellers24h?: number;
+}
+```
+
+### Security Score Feature
+
+Moralis provides a **security score** (0-100) not available in Birdeye:
+- **0-30**: High risk - avoid
+- **30-50**: Medium risk - proceed with caution
+- **50-70**: Lower risk - reasonable
+- **70-100**: Safer tokens
+
+### Rate Limits
+
+- Free tier: 40 requests/second
+- Built-in rate limiting in client (200ms delay)
+
+---
+
 ## Trading Logic Reference
 
 ### When to Use Each API
@@ -528,9 +606,9 @@ Response: {
 | Scenario | API to Use |
 |----------|-----------|
 | New pump.fun token | PumpPortal WebSocket + REST |
-| Token safety check | Helius DAS + Birdeye Security |
+| Token safety check | Helius DAS + Birdeye Security + Moralis Score |
 | Graduated token swap | Jupiter |
-| Trending discovery | Birdeye + GeckoTerminal |
+| Trending discovery | Moralis + Birdeye + GeckoTerminal |
 | Wallet analysis | Helius getTransactionsForAddress |
 | Price data | DexScreener (free) or Birdeye |
 
@@ -553,7 +631,10 @@ Response: {
 ```env
 # Required
 HELIUS_API_KEY=your-helius-key
+
+# Token Discovery APIs (at least one recommended)
 BIRDEYE_API_KEY=your-birdeye-key
+MORALIS_API_KEY=your-moralis-key
 
 # Optional
 HELIUS_TIER=developer  # free|developer|business|professional
