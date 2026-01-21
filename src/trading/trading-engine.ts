@@ -1,5 +1,13 @@
 /**
  * Trading Engine - Decision logic and risk management
+ *
+ * PRODUCTION RISK RULES (NON-NEGOTIABLE):
+ * - Stop Loss: 10% (0.10)
+ * - Take Profit: 30% (0.30)
+ * - Buyback: 10% of ALL profitable exits
+ *
+ * These values are HARDCODED and cannot be overridden by config or environment.
+ * EntertainmentMode CANNOT bypass these rules.
  */
 
 import { Connection, type Keypair, PublicKey } from '@solana/web3.js';
@@ -20,6 +28,16 @@ import { JupiterClient } from '../api/jupiter.js';
 import { LearningEngine, type TradeFeatures, type TradeLesson } from '../analysis/learning-engine.js';
 
 /**
+ * ============================================================
+ * HARDCODED RISK CONSTANTS - DO NOT MODIFY
+ * These protect real SOL. Any changes require audit approval.
+ * ============================================================
+ */
+const HARD_STOP_LOSS_PERCENT = 0.10;      // 10% loss = immediate exit
+const HARD_TAKE_PROFIT_PERCENT = 0.30;    // 30% gain = take profit
+const BUYBACK_PERCENT_OF_PROFIT = 0.10;   // 10% of profit goes to $SCHIZO buyback
+
+/**
  * Known LP pool program addresses to exclude from holder concentration
  */
 const LP_PROGRAM_ADDRESSES = new Set([
@@ -31,6 +49,7 @@ const LP_PROGRAM_ADDRESSES = new Set([
 
 /**
  * Trading configuration
+ * Note: stopLossPercent and takeProfitPercent are IGNORED in favor of hardcoded values
  */
 export interface TradingConfig {
   riskProfile: RiskProfile; // Added Risk Profile
@@ -42,8 +61,8 @@ export interface TradingConfig {
   circuitBreakerConsecutiveLosses: number; // Consecutive loss threshold
   minLiquiditySol: number; // Minimum liquidity required
   slippageTolerance: number; // Slippage tolerance (0-1)
-  stopLossPercent: number; // Stop-loss threshold as decimal (e.g., 0.2 = -20%)
-  takeProfitPercent: number; // Take-profit threshold as decimal (e.g., 0.5 = +50%)
+  stopLossPercent: number; // DEPRECATED: Hardcoded to 10%
+  takeProfitPercent: number; // DEPRECATED: Hardcoded to 30%
 }
 
 /**
@@ -970,24 +989,41 @@ export class TradingEngine {
 
   /**
    * Execute a buyback of SCHIZO token
+   *
+   * USES HARDCODED BUYBACK PERCENTAGE: 10% of profit
+   * This cannot be overridden by environment variables.
    */
   async executeBuyback(profitSol: number, sourceTrade?: string): Promise<string | null> {
     const schizoMint = process.env.SCHIZO_TOKEN_MINT;
-    const buybackPercentage = parseFloat(process.env.BUYBACK_PERCENTAGE || '0.5');
+    const executionLogs: string[] = [];
 
     if (!schizoMint) {
       logger.warn('SCHIZO_TOKEN_MINT not configured, skipping buyback');
+      executionLogs.push('SCHIZO_TOKEN_MINT not set - buyback skipped');
       return null;
     }
 
-    const buybackAmount = profitSol * buybackPercentage;
+    // HARDCODED: 10% of profit goes to buyback
+    const buybackAmount = profitSol * BUYBACK_PERCENT_OF_PROFIT;
+    const reasoning = `Buyback triggered: ${BUYBACK_PERCENT_OF_PROFIT * 100}% of ${profitSol.toFixed(4)} SOL profit = ${buybackAmount.toFixed(4)} SOL`;
+
+    // Skip if buyback amount is too small (< 0.001 SOL = ~$0.17)
+    if (buybackAmount < 0.001) {
+      logger.debug({ buybackAmount, profitSol }, 'Buyback amount too small, skipping');
+      executionLogs.push(`Buyback amount ${buybackAmount.toFixed(6)} SOL too small (< 0.001), skipped`);
+      return null;
+    }
+
+    executionLogs.push(`Profit: ${profitSol.toFixed(4)} SOL`);
+    executionLogs.push(`Buyback percentage: ${BUYBACK_PERCENT_OF_PROFIT * 100}% (HARDCODED)`);
+    executionLogs.push(`Buyback amount: ${buybackAmount.toFixed(4)} SOL`);
 
     logger.info({
       profitSol,
-      buybackPercentage,
+      buybackPercentage: BUYBACK_PERCENT_OF_PROFIT,
       buybackAmount,
       sourceTrade,
-    }, 'Executing buyback');
+    }, 'Executing buyback (HARDCODED 10%)');
 
     try {
       // Execute buyback via PumpPortal
@@ -1010,8 +1046,11 @@ export class TradingEngine {
           isBuyback: true,
           sourceTrade,
           profitSol,
+          buybackPercentage: BUYBACK_PERCENT_OF_PROFIT,
         },
       });
+
+      executionLogs.push(`Buyback executed: ${signature}`);
 
       logger.info({
         signature,
@@ -1019,7 +1058,7 @@ export class TradingEngine {
         schizoMint,
       }, 'Buyback executed successfully');
 
-      // Emit buyback event for dashboard
+      // Emit buyback event for dashboard with full context
       agentEvents.emit({
         type: 'BUYBACK_TRIGGERED',
         timestamp: Date.now(),
@@ -1027,12 +1066,30 @@ export class TradingEngine {
           profit: profitSol,
           amount: buybackAmount,
           signature,
+          reasoning,
+          logs: executionLogs,
         },
       });
 
       return signature;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error({ profitSol, error }, 'Buyback execution failed');
+      executionLogs.push(`Buyback FAILED: ${errorMessage}`);
+
+      // Emit failure event for observability
+      agentEvents.emit({
+        type: 'BUYBACK_FAILED',
+        timestamp: Date.now(),
+        data: {
+          reasoning: `Buyback failed after profitable exit`,
+          logs: executionLogs,
+          profitSol,
+          attemptedAmount: buybackAmount,
+          error: errorMessage,
+        },
+      });
+
       return null;
     }
   }
@@ -1343,11 +1400,18 @@ export class TradingEngine {
   /**
    * Check open positions and execute stop-loss/take-profit if needed
    * Returns array of exit trade signatures
+   *
+   * USES HARDCODED RISK VALUES:
+   * - Stop Loss: 10%
+   * - Take Profit: 30%
+   * - Buyback: 10% of profit on ALL profitable exits
    */
   async checkPositionsForExit(): Promise<string[]> {
     const positions = await this.getOpenPositions();
     const exitSignatures: string[] = [];
+    const executionLogs: string[] = [];
 
+    executionLogs.push(`Checking ${positions.length} positions for exit signals`);
     logger.debug({ positionCount: positions.length }, 'Checking positions for exit signals');
 
     for (const position of positions) {
@@ -1359,26 +1423,31 @@ export class TradingEngine {
         // Calculate P&L percentage
         const pnlPercent = (currentPrice - position.entryPrice) / position.entryPrice;
 
+        executionLogs.push(`${position.tokenSymbol || position.tokenMint.slice(0, 6)}: ${(pnlPercent * 100).toFixed(1)}% PnL`);
+
         logger.debug({
           mint: position.tokenMint,
           entryPrice: position.entryPrice,
           currentPrice,
           pnlPercent: (pnlPercent * 100).toFixed(2) + '%',
-        }, 'Position P&L check');
+          hardStopLoss: (HARD_STOP_LOSS_PERCENT * 100) + '%',
+          hardTakeProfit: (HARD_TAKE_PROFIT_PERCENT * 100) + '%',
+        }, 'Position P&L check (using HARDCODED risk values)');
 
-        // Check stop-loss
-        if (pnlPercent <= -this.config.stopLossPercent) {
+        // Check stop-loss - USES HARDCODED VALUE
+        if (pnlPercent <= -HARD_STOP_LOSS_PERCENT) {
+          const reasoning = `Stop-loss triggered at ${(pnlPercent * 100).toFixed(1)}% (threshold: -${HARD_STOP_LOSS_PERCENT * 100}%)`;
           logger.warn({
             mint: position.tokenMint,
             pnlPercent: (pnlPercent * 100).toFixed(2) + '%',
-            stopLoss: (-this.config.stopLossPercent * 100).toFixed(2) + '%',
-          }, 'STOP-LOSS triggered');
+            stopLoss: (-HARD_STOP_LOSS_PERCENT * 100).toFixed(2) + '%',
+          }, 'STOP-LOSS triggered (HARDCODED 10%)');
 
           const signature = await this.executeSell(position.tokenMint, position.entryAmountTokens);
           if (signature) {
             exitSignatures.push(signature);
 
-            // Emit stop-loss event
+            // Emit stop-loss event with reasoning
             agentEvents.emit({
               type: 'STOP_LOSS',
               timestamp: Date.now(),
@@ -1388,6 +1457,8 @@ export class TradingEngine {
                 exitPrice: currentPrice,
                 lossPercent: pnlPercent * 100,
                 signature,
+                reasoning,
+                logs: [...executionLogs],
               },
             });
 
@@ -1397,19 +1468,20 @@ export class TradingEngine {
           continue;
         }
 
-        // Check take-profit
-        if (pnlPercent >= this.config.takeProfitPercent) {
+        // Check take-profit - USES HARDCODED VALUE
+        if (pnlPercent >= HARD_TAKE_PROFIT_PERCENT) {
+          const reasoning = `Take-profit triggered at ${(pnlPercent * 100).toFixed(1)}% (threshold: +${HARD_TAKE_PROFIT_PERCENT * 100}%)`;
           logger.info({
             mint: position.tokenMint,
             pnlPercent: (pnlPercent * 100).toFixed(2) + '%',
-            takeProfit: (this.config.takeProfitPercent * 100).toFixed(2) + '%',
-          }, 'TAKE-PROFIT triggered');
+            takeProfit: (HARD_TAKE_PROFIT_PERCENT * 100).toFixed(2) + '%',
+          }, 'TAKE-PROFIT triggered (HARDCODED 30%)');
 
           const signature = await this.executeSell(position.tokenMint, position.entryAmountTokens);
           if (signature) {
             exitSignatures.push(signature);
 
-            // Emit take-profit event
+            // Emit take-profit event with reasoning
             agentEvents.emit({
               type: 'TAKE_PROFIT',
               timestamp: Date.now(),
@@ -1419,13 +1491,15 @@ export class TradingEngine {
                 exitPrice: currentPrice,
                 profitPercent: pnlPercent * 100,
                 signature,
+                reasoning,
+                logs: [...executionLogs],
               },
             });
 
             // Record trade lesson for learning engine
             await this.recordTradeLesson(position, currentPrice, Date.now(), pnlPercent);
 
-            // Calculate profit and trigger buyback if profitable
+            // Calculate profit and ALWAYS trigger buyback on profitable exits
             const profitSol = position.entryAmountSol * pnlPercent;
             if (profitSol > 0) {
               await this.executeBuyback(profitSol, signature);
@@ -1434,6 +1508,7 @@ export class TradingEngine {
         }
       } catch (error) {
         logger.error({ mint: position.tokenMint, error }, 'Error checking position for exit');
+        executionLogs.push(`Error checking ${position.tokenMint.slice(0, 6)}: ${error}`);
       }
     }
 

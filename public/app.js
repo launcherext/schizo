@@ -102,8 +102,41 @@ function handleEvent(event) {
       break;
     case 'BUYBACK_TRIGGERED':
       addToFeed(`🔄 BUYBACK: ${event.data.amount.toFixed(2)} SOL (profit: ${event.data.profit.toFixed(2)} SOL)`, 'buyback');
+      if (event.data.reasoning) {
+        addToFeed(`   └─ ${event.data.reasoning}`, 'buyback-detail');
+      }
       buybackCount = (buybackCount || 0) + 1;
       updateBuybackCount();
+      break;
+    case 'BUYBACK_FAILED':
+      addToFeed(`❌ BUYBACK FAILED: Attempted ${event.data.attemptedAmount.toFixed(4)} SOL - ${event.data.error}`, 'error');
+      break;
+    case 'FEE_CLAIMED':
+      addToFeed(`💰 FEES CLAIMED: ${formatSignature(event.data.signature)}`, 'system');
+      break;
+    case 'REWARD_CLAIMED':
+      addToFeed(`💎 REWARD CLAIMED: ${event.data.amountSol.toFixed(4)} SOL from ${event.data.source}`, 'reward');
+      break;
+    case 'REWARD_FAILED':
+      addToFeed(`❌ REWARD FAILED: ${event.data.source} - ${event.data.error}`, 'error');
+      break;
+    case 'SCAN':
+      // Token scan event with full context
+      addToFeed(`📡 [SCAN] ${event.data.symbol} from ${event.data.source} - ${event.data.reasoning}`, 'scan', event.data.mint);
+      break;
+    case 'REJECT':
+      // Token rejection with reason
+      addToFeed(`❌ [REJECT] ${event.data.symbol}: ${event.data.rejectReason} (stage: ${event.data.stage})`, 'reject', event.data.mint);
+      break;
+    case 'MOOD_CHANGE':
+      // Agent mood changed
+      addToFeed(`🧠 MOOD: ${event.data.previous} → ${event.data.current} (${(event.data.intensity * 100).toFixed(0)}%)`, 'mood');
+      updateMoodDisplay(event.data.current, event.data.intensity);
+      break;
+    case 'SIMULATE_ACK':
+      // Simulation acknowledgment
+      console.log('🧪 Simulation:', event.data.action, '-', event.data.message);
+      addToFeed(`🧪 [TEST] ${event.data.message}`, 'test');
       break;
     case 'STATS_UPDATE':
       updateStats(event.data);
@@ -353,7 +386,11 @@ function updateStats(stats) {
   pnlElement.textContent = formatPnL(totalPnL) + (stats.balance !== undefined ? ' SOL' : '');
   pnlElement.className = totalPnL >= 0 ? 'positive' : 'negative';
   
-  document.getElementById('buybacks').textContent = stats.totalBuybacks;
+  if (stats.totalBuybackSol && stats.totalBuybackSol > 0) {
+    document.getElementById('buybacks').textContent = `${stats.totalBuybacks} (${stats.totalBuybackSol.toFixed(2)} SOL)`;
+  } else {
+    document.getElementById('buybacks').textContent = stats.totalBuybacks;
+  }
   if (stats.balance !== undefined) {
     document.getElementById('balance').textContent = stats.balance.toFixed(4) + ' SOL';
   }
@@ -961,4 +998,84 @@ function updateTrenchRadioUI(state) {
 }
 
 // initTrenchRadio removed to avoid conflict with trench-radio.js logic
+
+// ============================================
+// MOOD DISPLAY
+// ============================================
+
+/**
+ * Update the mood indicator display
+ */
+function updateMoodDisplay(mood, intensity) {
+    const moodEl = document.getElementById('agent-mood');
+    if (!moodEl) return;
+
+    // Mood colors
+    const moodColors = {
+        'CONFIDENT': '#22c55e',
+        'PARANOID': '#ef4444',
+        'MANIC': '#f59e0b',
+        'DEPRESSED': '#6b7280',
+        'EUPHORIC': '#8b5cf6',
+        'ANXIOUS': '#f97316',
+    };
+
+    const color = moodColors[mood] || '#94a3b8';
+
+    moodEl.textContent = mood;
+    moodEl.style.color = color;
+    moodEl.style.textShadow = `0 0 ${intensity * 10}px ${color}`;
+}
+
+// ============================================
+// SIMULATION HELPERS (for testing without real SOL)
+// ============================================
+
+/**
+ * Send simulation request to server
+ * Usage in browser console:
+ *   simulateEvent('scan')
+ *   simulateEvent('buy')
+ *   simulateEvent('sell', { isProfit: true })
+ *   simulateEvent('mood', { mood: 'PARANOID' })
+ */
+function simulateEvent(action, params = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.error('WebSocket not connected');
+        return;
+    }
+
+    ws.send(JSON.stringify({
+        type: 'SIMULATE',
+        action: action,
+        params: params
+    }));
+
+    console.log(`🧪 Simulation request sent: ${action}`, params);
+}
+
+// Expose for console usage
+window.simulateEvent = simulateEvent;
+
+// Quick simulation shortcuts
+window.simScan = () => simulateEvent('scan');
+window.simReject = () => simulateEvent('reject');
+window.simBuy = () => simulateEvent('buy');
+window.simTakeProfit = () => simulateEvent('sell', { isProfit: true });
+window.simStopLoss = () => simulateEvent('sell', { isProfit: false });
+window.simBuyback = () => simulateEvent('buyback');
+window.simMood = (mood) => simulateEvent('mood', { mood: mood || 'PARANOID' });
+window.simReward = () => simulateEvent('reward');
+window.simRewardFail = () => simulateEvent('reward', { success: false });
+
+console.log('🧪 Simulation helpers loaded. Use these in console:');
+console.log('   simScan() - Simulate token scan');
+console.log('   simReject() - Simulate token rejection');
+console.log('   simBuy() - Simulate buy trade');
+console.log('   simTakeProfit() - Simulate take-profit exit');
+console.log('   simStopLoss() - Simulate stop-loss exit');
+console.log('   simBuyback() - Simulate buyback');
+console.log('   simMood("PARANOID") - Simulate mood change');
+console.log('   simReward() - Simulate reward claim');
+console.log('   simRewardFail() - Simulate reward failure');
 

@@ -6,12 +6,27 @@ import { createLogger } from '../lib/logger.js';
 const logger = createLogger('token-safety');
 
 /**
+ * Configuration for holder distribution thresholds
+ */
+interface HolderThresholds {
+  maxTopHolderPercent: number;    // Reject if top holder owns more than this
+  maxTop10HoldersPercent: number; // Reject if top 10 own more than this
+  minHolderCount: number;         // Warn if fewer holders than this
+}
+
+const DEFAULT_HOLDER_THRESHOLDS: HolderThresholds = {
+  maxTopHolderPercent: 30,        // 30% max for single holder
+  maxTop10HoldersPercent: 50,     // 50% max for top 10 combined
+  minHolderCount: 20,             // At least 20 holders
+};
+
+/**
  * Analyzer for detecting honeypot tokens and rug pull indicators.
  * 
  * Checks:
  * - Classic SPL Token authorities (mint, freeze)
  * - Token-2022 extensions (permanent delegate, transfer fees, hooks)
- * - Metadata mutability
+ * - Holder distribution (top holder %, top 10 %)
  * 
  * Results are cached for 24 hours to minimize API calls.
  * 
@@ -23,10 +38,15 @@ const logger = createLogger('token-safety');
  * }
  */
 class TokenSafetyAnalyzer {
+  private holderThresholds: HolderThresholds;
+
   constructor(
     private helius: HeliusClient,
-    private cache: AnalysisCacheRepository
-  ) {}
+    private cache: AnalysisCacheRepository,
+    holderThresholds?: Partial<HolderThresholds>
+  ) {
+    this.holderThresholds = { ...DEFAULT_HOLDER_THRESHOLDS, ...holderThresholds };
+  }
 
   /**
    * Analyze a token for safety indicators.
@@ -44,7 +64,7 @@ class TokenSafetyAnalyzer {
       return cached;
     }
 
-    // Fetch from Helius
+    // Fetch asset metadata from Helius
     let asset: GetAssetResponse;
     try {
       asset = await this.helius.getAsset(mintAddress);
@@ -53,14 +73,75 @@ class TokenSafetyAnalyzer {
       throw error;
     }
 
-    // Analyze safety
+    // Analyze on-chain safety first
     const result = this.analyzeAsset(asset);
+
+    // Fetch holder distribution (separate call, may fail for very new tokens)
+    try {
+      const holdersData = await this.helius.getTokenHolders(mintAddress, 20);
+      
+      if (holdersData.holders.length > 0) {
+        // Calculate top holder %
+        const topHolderPercent = holdersData.holders[0]?.percentage || 0;
+        
+        // Calculate top 10 combined %
+        const top10 = holdersData.holders.slice(0, 10);
+        const top10HoldersPercent = top10.reduce((sum, h) => sum + h.percentage, 0);
+
+        // Add holder distribution to result
+        result.holderDistribution = {
+          topHolderPercent,
+          top10HoldersPercent,
+          totalHolders: holdersData.totalHolders,
+        };
+
+        // Check holder concentration risks
+        if (topHolderPercent > this.holderThresholds.maxTopHolderPercent) {
+          result.risks.push('HIGH_TOP_HOLDER');
+          result.isSafe = false;
+          logger.warn({ 
+            mintAddress, 
+            topHolderPercent: topHolderPercent.toFixed(1) 
+          }, `Top holder owns ${topHolderPercent.toFixed(1)}% - REJECTED`);
+        }
+
+        if (top10HoldersPercent > this.holderThresholds.maxTop10HoldersPercent) {
+          result.risks.push('HIGH_TOP10_HOLDERS');
+          result.isSafe = false;
+          logger.warn({ 
+            mintAddress, 
+            top10HoldersPercent: top10HoldersPercent.toFixed(1) 
+          }, `Top 10 holders own ${top10HoldersPercent.toFixed(1)}% - REJECTED`);
+        }
+
+        // Check for insider concentration (few holders with high ownership)
+        if (holdersData.totalHolders < this.holderThresholds.minHolderCount && 
+            top10HoldersPercent > 40) {
+          result.risks.push('INSIDER_CONCENTRATION');
+          result.isSafe = false;
+          logger.warn({ 
+            mintAddress, 
+            totalHolders: holdersData.totalHolders,
+            top10HoldersPercent: top10HoldersPercent.toFixed(1)
+          }, 'Insider concentration detected - REJECTED');
+        }
+      }
+    } catch (error) {
+      // Log but don't fail - holder data may not be available for very new tokens
+      logger.warn({ mintAddress, error }, 'Failed to fetch holder distribution (token may be too new)');
+    }
 
     // Cache result
     this.cache.set(mintAddress, 'token_safety', result, CACHE_TTL.tokenSafety);
 
     logger.info(
-      { mintAddress, isSafe: result.isSafe, risks: result.risks },
+      { 
+        mintAddress, 
+        isSafe: result.isSafe, 
+        risks: result.risks,
+        topHolderPercent: result.holderDistribution?.topHolderPercent?.toFixed(1),
+        top10Percent: result.holderDistribution?.top10HoldersPercent?.toFixed(1),
+      },
       'Token safety analysis complete'
     );
 
@@ -73,8 +154,7 @@ class TokenSafetyAnalyzer {
    * Follows the pattern from 02-RESEARCH.md:
    * 1. Check classic authorities (mint, freeze)
    * 2. Check Token-2022 extensions (permanent delegate, transfer fee, hook)
-   * 3. Check metadata mutability
-   * 4. Determine overall safety
+   * 3. Determine overall safety
    * 
    * @param asset - Helius DAS API response
    * @returns Token safety result
@@ -106,14 +186,8 @@ class TokenSafetyAnalyzer {
       risks.push('TRANSFER_HOOK');
     }
 
-    // Check metadata mutability
-    // REMOVED FILTER: User requested to ignore mutable metadata risk
-    /* if (asset.mutable) {
-      risks.push('MUTABLE_METADATA');
-    } */
-
-    // Determine safety
-    // Safe if no risks OR only mutable metadata (warning, not blocker)
+    // Determine safety (holder checks added later in analyze())
+    // Safe if no critical risks found
     const isSafe = risks.length === 0 ||
                    (risks.length === 1 && risks[0] === 'MUTABLE_METADATA');
 
@@ -154,3 +228,4 @@ class TokenSafetyAnalyzer {
 }
 
 export { TokenSafetyAnalyzer };
+

@@ -27,6 +27,7 @@ import { agentEvents } from './events/emitter.js';
 import { detectSillyName } from './personality/name-analyzer.js';
 import type { RiskProfile } from './trading/types.js';
 import { LearningEngine } from './analysis/learning-engine.js';
+import { RewardClaimer } from './rewards/reward-claimer.js';
 
 const log = createLogger('main');
 let db: ReturnType<typeof createDatabase> | null = null;
@@ -196,6 +197,7 @@ async function main(): Promise<void> {
     // Initialize Trading Engine (if we have PumpPortal)
     let tradingEngine: TradingEngine | undefined;
     let tradingLoop: TradingLoop | undefined;
+    let rewardClaimer: RewardClaimer | undefined;
 
     if (pumpPortal && wallet) {
       tradingEngine = new TradingEngine(
@@ -414,6 +416,7 @@ async function main(): Promise<void> {
       // Shutdown handlers
       const shutdown = () => {
         log.info('Shutting down...');
+        if (rewardClaimer) rewardClaimer.stop();
         if (commentarySystem) commentarySystem.stop();
         if (marketWatcher) marketWatcher.stop();
         if (sniperPipeline) sniperPipeline.stop();
@@ -509,6 +512,35 @@ async function main(): Promise<void> {
         } else {
           log.info('👀 ANALYSIS MODE - Monitoring tokens without trading');
         }
+      }
+
+      // Initialize Reward Claimer - handles automatic fee claiming
+      if (pumpPortal && process.env.TRADING_ENABLED === 'true') {
+        rewardClaimer = new RewardClaimer(pumpPortal, {
+          enabled: true,
+          claimIntervalMs: 5 * 60 * 1000,    // 5 minutes
+          minClaimThreshold: 0.001,          // 0.001 SOL minimum
+          maxRetries: 3,
+          retryDelayMs: 5000,
+          claimPumpCreator: true,            // Enable creator fees
+          claimPumpReferral: false,          // Disabled by default
+          claimMeteoraDbc: false,            // Disabled by default
+        });
+
+        rewardClaimer.start();
+        log.info('💰 RewardClaimer started - automatic fee claiming enabled');
+
+        // Voice successful claims
+        agentEvents.onAny(async (event) => {
+          if (event.type === 'REWARD_CLAIMED' && narrator) {
+            try {
+              const amount = event.data.amountSol?.toFixed(4) || 'some';
+              await narrator.say(`Creator fees claimed. ${amount} SOL. The flywheel keeps spinning.`);
+            } catch (error) {
+              log.error({ error }, 'Failed to voice reward claim');
+            }
+          }
+        });
       }
 
       // Generate initial greeting and periodic idle thoughts

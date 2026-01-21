@@ -1,16 +1,35 @@
 /**
  * Event type definitions for agent actions
+ *
+ * PRODUCTION EVENT SCHEMA:
+ * Every event MUST include:
+ * - timestamp: number
+ * - eventType: The specific event type
+ * - reasoning: Human-readable explanation of WHY this happened
+ * - logs: Array of debug/context strings
  */
 
 import type { TradeDecision } from '../trading/trading-engine.js';
 import type { TokenSafetyResult } from '../analysis/types.js';
 
 /**
- * Base event structure
+ * Base event structure - ALL events inherit this
  */
 interface BaseEvent {
   type: string;
   timestamp: number;
+}
+
+/**
+ * Rich event data that provides frontend observability
+ */
+export interface RichEventData {
+  reasoning: string;      // WHY this happened (human readable)
+  logs: string[];         // Context/debug breadcrumbs
+  tokenSymbol?: string;   // Token symbol if applicable
+  mint?: string;          // Token mint if applicable
+  pnlPercent?: number;    // PnL if applicable
+  moodState?: string;     // Agent mood if relevant
 }
 
 /**
@@ -23,6 +42,8 @@ export type AgentEvent =
   | TradeDecisionEvent
   | TradeExecutedEvent
   | BuybackTriggeredEvent
+  | BuybackFailedEvent
+  | FeeClaimedEvent
   | StatsUpdateEvent
   | StopLossEvent
   | TakeProfitEvent
@@ -37,7 +58,74 @@ export type AgentEvent =
   | AnalysisThoughtEvent
   | CopyTradeSignalEvent
   | MoodChangeEvent
-  | PositionsUpdateEvent;
+  | PositionsUpdateEvent
+  | ScanEvent
+  | RejectEvent
+  | RewardClaimedEvent
+  | RewardFailedEvent;
+
+/**
+ * Token scan initiated (even if rejected)
+ */
+export interface ScanEvent extends BaseEvent {
+  type: 'SCAN';
+  data: RichEventData & {
+    mint: string;
+    symbol: string;
+    name?: string;
+    source: 'PUMP_PORTAL' | 'PUMP_FUN' | 'BIRDEYE' | 'MORALIS' | 'DEXSCREENER' | 'GECKOTERMINAL' | 'SNIPER_PIPELINE';
+    liquidity?: number;
+    marketCap?: number;
+  };
+}
+
+/**
+ * Token explicitly rejected with reason
+ */
+export interface RejectEvent extends BaseEvent {
+  type: 'REJECT';
+  data: RichEventData & {
+    mint: string;
+    symbol: string;
+    rejectReason: string;
+    stage: 'filter' | 'safety' | 'liquidity' | 'concentration' | 'circuit_breaker' | 'validation';
+  };
+}
+
+/**
+ * Reward claimed from protocol (creator fees, referrals)
+ */
+export interface RewardClaimedEvent extends BaseEvent {
+  type: 'REWARD_CLAIMED';
+  data: RichEventData & {
+    signature: string;
+    amountSol: number;
+    source: 'pump_creator' | 'pump_referral' | 'meteora_dbc';
+  };
+}
+
+/**
+ * Reward claim failed
+ */
+export interface RewardFailedEvent extends BaseEvent {
+  type: 'REWARD_FAILED';
+  data: RichEventData & {
+    source: 'pump_creator' | 'pump_referral' | 'meteora_dbc';
+    error: string;
+  };
+}
+
+/**
+ * Buyback execution failed
+ */
+export interface BuybackFailedEvent extends BaseEvent {
+  type: 'BUYBACK_FAILED';
+  data: RichEventData & {
+    profitSol: number;
+    attemptedAmount: number;
+    error: string;
+  };
+}
 
 /**
  * Copy trade signal detected
@@ -108,6 +196,8 @@ export interface TradeExecutedEvent extends BaseEvent {
     type: 'BUY' | 'SELL';
     signature: string;
     amount: number;
+    reasoning?: string;
+    logs?: string[];
   };
 }
 
@@ -120,6 +210,19 @@ export interface BuybackTriggeredEvent extends BaseEvent {
     profit: number;
     amount: number;
     signature: string;
+    reasoning?: string;
+    logs?: string[];
+  };
+}
+
+/**
+ * Fee claimed event
+ */
+export interface FeeClaimedEvent extends BaseEvent {
+  type: 'FEE_CLAIMED';
+  data: {
+    signature: string;
+    pool: 'pump' | 'meteora-dbc';
   };
 }
 
@@ -131,11 +234,12 @@ export interface StatsUpdateEvent extends BaseEvent {
   data: {
     todayTrades: number;
     openPositions: number;
-    realizedPnL: number;    // NEW: Profit/loss from closed positions
-    unrealizedPnL: number;  // NEW: Current value change of open positions
+    realizedPnL: number;    // Profit/loss from closed positions
+    unrealizedPnL: number;  // Current value change of open positions
     dailyPnL: number;       // Backwards compat: same as realizedPnL
     winRate: number;
     totalBuybacks: number;
+    totalBuybackSol?: number; // Total SOL spent on buybacks
     balance: number;
     // Entertainment mode stats
     mood?: string;              // Current mood (CONFIDENT, PARANOID, etc.)
@@ -157,6 +261,8 @@ export interface StopLossEvent extends BaseEvent {
     exitPrice: number;
     lossPercent: number;
     signature: string;
+    reasoning?: string;
+    logs?: string[];
   };
 }
 
@@ -171,6 +277,8 @@ export interface TakeProfitEvent extends BaseEvent {
     exitPrice: number;
     profitPercent: number;
     signature: string;
+    reasoning?: string;
+    logs?: string[];
   };
 }
 
@@ -270,7 +378,7 @@ export interface TokenDiscoveredEvent extends BaseEvent {
     dexUrl: string;
     imageUrl?: string;
     marketCapSol?: number;
-    source?: 'new' | 'trending';
+    source?: 'new' | 'trending' | string;
   };
 }
 
@@ -322,6 +430,8 @@ export interface MoodChangeEvent extends BaseEvent {
     current: string;
     intensity: number;
     trigger?: string;
+    reasoning?: string;
+    logs?: string[];
   };
 }
 

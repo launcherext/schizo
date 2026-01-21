@@ -13,6 +13,15 @@ import type { VoiceNarrator } from '../personality/deepgram-tts.js';
 import type { TradingEngine } from '../trading/trading-engine.js';
 import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
 import { logger } from '../lib/logger.js';
+import {
+  simulateScan,
+  simulateReject,
+  simulateBuy,
+  simulateSell,
+  simulateBuyback,
+  simulateMoodChange,
+  simulateRewardClaim,
+} from '../test/manual-trigger.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '../../public');
@@ -42,6 +51,19 @@ interface ChatMessage {
 }
 
 /**
+ * Simulation request from client (for testing)
+ */
+interface SimulateRequest {
+  type: 'SIMULATE';
+  action: 'scan' | 'reject' | 'buy' | 'sell' | 'buyback' | 'mood' | 'reward';
+  params?: {
+    mood?: string;
+    isProfit?: boolean;
+    success?: boolean;
+  };
+}
+
+/**
  * WebSocket server context with chat capabilities
  */
 export interface WebSocketContext {
@@ -65,12 +87,41 @@ export function createWebSocketServer(
   tokenSafety?: TokenSafetyAnalyzer,
   tradingEnabled?: boolean
 ): WebSocketServer {
-  // Create HTTP server to serve static files
+  // Create HTTP server to serve static files and API endpoints
   const server = createServer((req, res) => {
-    let filePath = req.url === '/' ? '/index.html' : req.url || '/index.html';
+    const url = new URL(req.url || '/', `http://localhost:${port}`);
+    const pathname = url.pathname;
 
-    // Remove query strings
-    filePath = filePath.split('?')[0];
+    // CORS headers for API requests
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Handle OPTIONS (preflight)
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // === API ENDPOINTS ===
+    if (pathname.startsWith('/api/simulate') && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const params = body ? JSON.parse(body) : {};
+          handleSimulateAPI(pathname, params, eventEmitter, res);
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+        }
+      });
+      return;
+    }
+
+    // === STATIC FILE SERVING ===
+    let filePath = pathname === '/' ? '/index.html' : pathname;
 
     const fullPath = join(PUBLIC_DIR, filePath);
     const ext = extname(fullPath);
@@ -209,13 +260,16 @@ export function createWebSocketServer(
       })();
     }
 
-    // Handle incoming messages (chat)
+    // Handle incoming messages (chat and simulation)
     ws.on('message', async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString());
 
         if (message.type === 'CHAT' && message.message) {
           await handleChatMessage(message, ws, wss, eventEmitter, claude, narrator, tradingEngine, tokenSafety, tradingEnabled);
+        } else if (message.type === 'SIMULATE') {
+          // Handle simulation requests for dry-run testing
+          handleSimulateRequest(message as SimulateRequest, ws);
         }
       } catch (error) {
         logger.error({ error }, 'Error processing client message');
@@ -711,4 +765,151 @@ function getDefaultChatResponse(message: string): string {
     'My brain buffered. Hit me with that again.',
     'Connection hiccup. What\'s good?',
   ]);
+}
+
+/**
+ * Handle simulation requests for dry-run testing
+ *
+ * Usage via WebSocket:
+ *   ws.send(JSON.stringify({ type: 'SIMULATE', action: 'scan' }))
+ *   ws.send(JSON.stringify({ type: 'SIMULATE', action: 'buy' }))
+ *   ws.send(JSON.stringify({ type: 'SIMULATE', action: 'sell', params: { isProfit: true } }))
+ *   ws.send(JSON.stringify({ type: 'SIMULATE', action: 'mood', params: { mood: 'PARANOID' } }))
+ */
+function handleSimulateRequest(request: SimulateRequest, ws: WebSocket): void {
+  logger.info({ action: request.action, params: request.params }, '🧪 Simulation request received');
+
+  try {
+    switch (request.action) {
+      case 'scan':
+        simulateScan();
+        sendSimulateAck(ws, 'scan', 'Token scan simulated');
+        break;
+
+      case 'reject':
+        simulateReject();
+        sendSimulateAck(ws, 'reject', 'Token rejection simulated');
+        break;
+
+      case 'buy':
+        simulateBuy();
+        sendSimulateAck(ws, 'buy', 'Buy trade simulated');
+        break;
+
+      case 'sell':
+        simulateSell(request.params?.isProfit !== false);
+        sendSimulateAck(ws, 'sell', request.params?.isProfit !== false ? 'Take-profit simulated' : 'Stop-loss simulated');
+        break;
+
+      case 'buyback':
+        simulateBuyback();
+        sendSimulateAck(ws, 'buyback', 'Buyback simulated');
+        break;
+
+      case 'mood':
+        simulateMoodChange(request.params?.mood);
+        sendSimulateAck(ws, 'mood', `Mood change simulated: ${request.params?.mood || 'random'}`);
+        break;
+
+      case 'reward':
+        simulateRewardClaim(request.params?.success !== false);
+        sendSimulateAck(ws, 'reward', request.params?.success !== false ? 'Reward claim simulated' : 'Reward failure simulated');
+        break;
+
+      default:
+        sendSimulateAck(ws, 'error', `Unknown simulation action: ${request.action}`);
+    }
+  } catch (error) {
+    logger.error({ error, action: request.action }, 'Simulation failed');
+    sendSimulateAck(ws, 'error', `Simulation failed: ${error}`);
+  }
+}
+
+/**
+ * Send simulation acknowledgment back to client
+ */
+function sendSimulateAck(ws: WebSocket, action: string, message: string): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'SIMULATE_ACK',
+      timestamp: Date.now(),
+      data: { action, message },
+    }));
+  }
+}
+
+/**
+ * Handle HTTP API simulation requests
+ *
+ * API Endpoints:
+ * POST /api/simulate/scan - Simulate token scan
+ * POST /api/simulate/reject - Simulate token rejection
+ * POST /api/simulate/buy - Simulate buy trade
+ * POST /api/simulate/sell - Simulate sell (body: { isProfit: boolean })
+ * POST /api/simulate/buyback - Simulate buyback
+ * POST /api/simulate/mood - Simulate mood change (body: { mood: string })
+ * POST /api/simulate/reward - Simulate reward claim (body: { success: boolean })
+ */
+function handleSimulateAPI(
+  pathname: string,
+  params: Record<string, any>,
+  eventEmitter: AgentEventEmitter,
+  res: import('http').ServerResponse
+): void {
+  const action = pathname.replace('/api/simulate/', '');
+
+  try {
+    let message = '';
+
+    switch (action) {
+      case 'scan':
+        simulateScan();
+        message = 'Token scan simulated';
+        break;
+
+      case 'reject':
+        simulateReject();
+        message = 'Token rejection simulated';
+        break;
+
+      case 'buy':
+        simulateBuy();
+        message = 'Buy trade simulated';
+        break;
+
+      case 'sell':
+        simulateSell(params?.isProfit !== false);
+        message = params?.isProfit !== false ? 'Take-profit simulated' : 'Stop-loss simulated';
+        break;
+
+      case 'buyback':
+        simulateBuyback();
+        message = 'Buyback simulated';
+        break;
+
+      case 'mood':
+        simulateMoodChange(params?.mood);
+        message = `Mood change simulated: ${params?.mood || 'random'}`;
+        break;
+
+      case 'reward':
+        simulateRewardClaim(params?.success !== false);
+        message = params?.success !== false ? 'Reward claim simulated' : 'Reward failure simulated';
+        break;
+
+      default:
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Unknown simulation action: ${action}` }));
+        return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, action, message }));
+    logger.info({ action, message }, 'HTTP API simulation executed');
+
+  } catch (error) {
+    logger.error({ error, action }, 'HTTP API simulation failed');
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `Simulation failed: ${error}` }));
+  }
 }

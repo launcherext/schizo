@@ -49,7 +49,10 @@ export type TokenRisk =
   | 'PERMANENT_DELEGATE'
   | 'HIGH_TRANSFER_FEE'
   | 'TRANSFER_HOOK'
-  | 'MUTABLE_METADATA';
+  | 'MUTABLE_METADATA'
+  | 'HIGH_TOP_HOLDER'       // Top holder owns >30%
+  | 'HIGH_TOP10_HOLDERS'    // Top 10 holders own >50%
+  | 'INSIDER_CONCENTRATION'; // Suspicious holder patterns
 
 /**
  * Result of token safety analysis.
@@ -72,6 +75,11 @@ export interface TokenSafetyResult {
   };
   metadata: {
     isMutable: boolean;
+  };
+  holderDistribution?: {
+    topHolderPercent: number;
+    top10HoldersPercent: number;
+    totalHolders: number;
   };
   timestamp: number;
 }

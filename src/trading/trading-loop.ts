@@ -627,7 +627,9 @@ export class TradingLoop {
         : 0;
 
       // Count buybacks
-      const buybacks = allTrades.filter(t => t.metadata?.isBuyback).length;
+      const buybackTrades = allTrades.filter(t => t.metadata?.isBuyback);
+      const buybacks = buybackTrades.length;
+      const totalBuybackSol = buybackTrades.reduce((sum, t) => sum + t.amountSol, 0);
 
       // Get wallet balance
       let balance = 0;
@@ -675,6 +677,7 @@ export class TradingLoop {
           dailyPnL: stats.dailyPnL,
           winRate,
           totalBuybacks: buybacks,
+          totalBuybackSol,
           balance,
           // Entertainment stats
           mood,
@@ -872,8 +875,12 @@ export class TradingLoop {
   /**
    * Analyze a token and execute trade if approved
    * Accepts data from Birdeye (trending tokens) using Trending Analysis
+   *
+   * Emits SCAN event on entry, REJECT event on failure with full observability
    */
   private async analyzeAndTrade(mint: string, birdeyeToken?: BirdeyeToken): Promise<void> {
+    const analysisLogs: string[] = [];
+
     // Try to get enriched metadata from DexScreener
     let metadata = this.tokenMetadataCache.get(mint);
     if (!metadata) {
@@ -891,10 +898,32 @@ export class TradingLoop {
     const marketCapSol = (birdeyeToken?.marketCap ? birdeyeToken.marketCap / 170 : 0);
     const liquidity = metadata?.liquidity || birdeyeToken?.liquidity || (marketCapSol * 170);
     const isTrending = !!birdeyeToken;
+    const source = isTrending ? 'BIRDEYE' : 'DEXSCREENER';
+
+    analysisLogs.push(`Token: ${symbol} (${mint.slice(0, 8)}...)`);
+    analysisLogs.push(`Source: ${source}`);
+    analysisLogs.push(`Liquidity: $${liquidity.toLocaleString()}`);
+
+    // EMIT SCAN EVENT - Token is being analyzed
+    agentEvents.emit({
+      type: 'SCAN',
+      timestamp: Date.now(),
+      data: {
+        reasoning: `Analyzing ${symbol} from ${source} feed`,
+        logs: [...analysisLogs],
+        mint,
+        symbol,
+        name,
+        source: source as any,
+        liquidity,
+        marketCap: marketCapSol * 170,
+      },
+    });
 
     // CRITICAL: Safety Analysis FIRST (save API calls and time)
     // Bail immediately if unsafe (mint/freeze auth enabled)
     const safetyResult = await this.tokenSafety.analyze(mint);
+    analysisLogs.push(`Safety check: ${safetyResult.isSafe ? 'PASSED' : 'FAILED'}`);
 
     agentEvents.emit({
       type: 'SAFETY_CHECK',
@@ -903,7 +932,23 @@ export class TradingLoop {
     });
 
     if (!safetyResult.isSafe) {
+        const rejectReason = safetyResult.risks.join(', ');
+        analysisLogs.push(`Rejected: ${rejectReason}`);
         logger.warn({ mint, risks: safetyResult.risks }, '⛔ REJECTED: Unsafe token (Mint/Freeze Auth)');
+
+        // EMIT REJECT EVENT
+        agentEvents.emit({
+          type: 'REJECT',
+          timestamp: Date.now(),
+          data: {
+            reasoning: `${symbol} rejected due to safety risks: ${rejectReason}`,
+            logs: analysisLogs,
+            mint,
+            symbol,
+            rejectReason,
+            stage: 'safety',
+          },
+        });
         return;
     }
 
@@ -912,8 +957,26 @@ export class TradingLoop {
     if (liquidity > 0 && marketCapSol > 0) {
         const mcUsd = marketCapSol * 170; // Approx SOL price
         const ratio = liquidity / mcUsd;
+        analysisLogs.push(`Liquidity/MC ratio: ${(ratio * 100).toFixed(1)}%`);
+
         if (ratio < 0.08) {
+             const rejectReason = `Thin liquidity: ${(ratio * 100).toFixed(1)}% of MC (min: 8%)`;
+             analysisLogs.push(`Rejected: ${rejectReason}`);
              logger.warn({ mint, liquidity, mcUsd, ratio: ratio.toFixed(3) }, '⛔ REJECTED: Thin Liquidity (<8% of MC)');
+
+             // EMIT REJECT EVENT
+             agentEvents.emit({
+               type: 'REJECT',
+               timestamp: Date.now(),
+               data: {
+                 reasoning: `${symbol} rejected: ${rejectReason}`,
+                 logs: analysisLogs,
+                 mint,
+                 symbol,
+                 rejectReason,
+                 stage: 'liquidity',
+               },
+             });
              return;
         }
     }
@@ -977,10 +1040,26 @@ export class TradingLoop {
 
         // Reject ONLY if there's literally zero activity
         if (volume < MIN_VOLUME_USD && totalTxns < MIN_TRANSACTIONS) {
-          logger.info({ 
+          const rejectReason = `Zero activity: $${volume.toFixed(0)} volume, ${totalTxns} txns`;
+          analysisLogs.push(`Rejected: ${rejectReason}`);
+          logger.info({
             mint, symbol, volume, totalTxns,
-            reason: 'Zero activity detected' 
+            reason: 'Zero activity detected'
           }, 'REJECTED: Token has no trading activity');
+
+          // EMIT REJECT EVENT
+          agentEvents.emit({
+            type: 'REJECT',
+            timestamp: Date.now(),
+            data: {
+              reasoning: `${symbol} rejected: ${rejectReason}`,
+              logs: analysisLogs,
+              mint,
+              symbol,
+              rejectReason,
+              stage: 'filter',
+            },
+          });
           return;
         }
 

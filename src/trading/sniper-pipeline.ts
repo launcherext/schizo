@@ -20,8 +20,8 @@ const DEFAULT_CONFIG: SniperPipelineConfig = {
   validationDelayMs: 0, // 0 = Auto-calculate based on risk
   maxQueueSize: 1000,
   enableTrading: false,
-  maxRetries: 3,
-  retryDelayMs: 5000,
+  maxRetries: 10,        // Increased: DexScreener needs time to index new tokens
+  retryDelayMs: 30000,   // 30 seconds between retries (total: ~5 minutes of retries)
 };
 
 export interface QueuedToken {
@@ -205,23 +205,45 @@ export class SniperPipeline {
 
   /**
    * Validate a single token and pass to execution if good
+   * Emits SCAN event on entry, REJECT event on failure with full observability
    */
   private async validateAndExecute(queued: QueuedToken): Promise<void> {
     const { token } = queued;
+    const analysisLogs: string[] = [];
 
-      // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
-      agentEvents.emit({
-        type: 'ANALYSIS_THOUGHT',
-        timestamp: Date.now(),
-        data: { 
-          mint: token.mint,
-          symbol: token.symbol,
-          name: token.name,
-          marketCapSol: token.marketCapSol,
-          stage: 'scanning',
-          thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
-        }
-      });
+    analysisLogs.push(`Token: ${token.symbol} (${token.mint.slice(0, 8)}...)`);
+    analysisLogs.push(`Source: PUMP_FUN`);
+    analysisLogs.push(`Wait time: ${(this.config.validationDelayMs / 60000).toFixed(1)} min`);
+
+    // EMIT SCAN EVENT - Token is being analyzed
+    agentEvents.emit({
+      type: 'SCAN',
+      timestamp: Date.now(),
+      data: {
+        reasoning: `Analyzing ${token.symbol} from PumpPortal - survived ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay`,
+        logs: [...analysisLogs],
+        mint: token.mint,
+        symbol: token.symbol,
+        name: token.name,
+        source: 'PUMP_FUN',
+        liquidity: 0, // Will be updated after validation
+        marketCap: token.marketCapSol * 170,
+      },
+    });
+
+    // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
+    agentEvents.emit({
+      type: 'ANALYSIS_THOUGHT',
+      timestamp: Date.now(),
+      data: {
+        mint: token.mint,
+        symbol: token.symbol,
+        name: token.name,
+        marketCapSol: token.marketCapSol,
+        stage: 'scanning',
+        thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
+      }
+    });
 
     logger.info({ mint: token.mint, symbol: token.symbol }, '🔍 Validating token via DexScreener...');
 
@@ -267,8 +289,27 @@ export class SniperPipeline {
         if (this.tokenSafety) {
             // Safety check
             const safety = await this.tokenSafety.analyze(token.mint);
+            analysisLogs.push(`Safety check: ${safety.isSafe ? 'PASSED' : 'FAILED'}`);
+
             if (!safety.isSafe) {
-                // Emit rejection
+                const rejectReason = safety.risks.join(', ');
+                analysisLogs.push(`Rejected: ${rejectReason}`);
+
+                // Emit rejection with REJECT event
+                agentEvents.emit({
+                  type: 'REJECT',
+                  timestamp: Date.now(),
+                  data: {
+                    reasoning: `${token.symbol} rejected due to safety risks: ${rejectReason}`,
+                    logs: analysisLogs,
+                    mint: token.mint,
+                    symbol: token.symbol,
+                    rejectReason,
+                    stage: 'safety',
+                  },
+                });
+
+                // Also emit ANALYSIS_THOUGHT for compatibility
                 agentEvents.emit({
                   type: 'ANALYSIS_THOUGHT',
                   timestamp: Date.now(),
@@ -309,7 +350,25 @@ export class SniperPipeline {
       }
 
     } else {
-      // Validation failed - emit rejection
+      const rejectReason = result.reason || 'DexScreener validation failed';
+      analysisLogs.push(`Validation: FAILED`);
+      analysisLogs.push(`Rejected: ${rejectReason}`);
+
+      // Validation failed - emit REJECT event
+      agentEvents.emit({
+        type: 'REJECT',
+        timestamp: Date.now(),
+        data: {
+          reasoning: `${token.symbol} rejected: ${rejectReason}`,
+          logs: analysisLogs,
+          mint: token.mint,
+          symbol: token.symbol,
+          rejectReason,
+          stage: 'validation',
+        },
+      });
+
+      // Also emit ANALYSIS_THOUGHT for compatibility
       agentEvents.emit({
         type: 'ANALYSIS_THOUGHT',
         timestamp: Date.now(),
