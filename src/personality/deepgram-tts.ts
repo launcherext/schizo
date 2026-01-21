@@ -206,6 +206,10 @@ export class VoiceNarrator {
   private cleanTextForSpeech(text: string): string {
     // Remove asterisk actions like *neural networks flickering*
     let cleaned = text.replace(/\*[^*]+\*/g, '');
+    
+    // Remove emojis and graphic symbols
+    cleaned = cleaned.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
+    
     // Remove multiple spaces
     cleaned = cleaned.replace(/\s+/g, ' ').trim();
     return cleaned;
