@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-01-20)
 ## Current Position
 
 Phase: 4 of 4 (Personality & Streaming)
-Plan: 2 of 3 in Phase 4
-Status: In progress
-Last activity: 2026-01-20 - Completed 04-02-PLAN.md (Entertainment Mode)
+Plan: 3 of 3 in Phase 4
+Status: Phase 4 Complete
+Last activity: 2026-01-20 - Completed 04-03-PLAN.md (Commentary System)
 
-Progress: [##############-] 93% (14/15 plans)
+Progress: [################] 100% (15/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 7 min
-- Total execution time: 44 min
+- Total plans completed: 15
+- Average duration: ~7 min
+- Total execution time: ~100 min
 
 **By Phase:**
 
@@ -30,11 +30,11 @@ Progress: [##############-] 93% (14/15 plans)
 | 1. Foundation & Security | 5/5 | 29 min | 6 min |
 | 2. Analysis & Token Safety | 4/4 | 44 min | 11 min |
 | 3. Trading & Economic Loop | 4/4 | - | - |
-| 4. Personality & Streaming | 2/3 | 9 min | 4.5 min |
+| 4. Personality & Streaming | 3/3 | ~15 min | ~5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-04 (8 min), 01-05 (5 min), 02-01 (15 min), 02-02 (10 min), 02-03 (10 min)
-- Trend: Stable around 10 min/plan
+- Last 5 plans: 02-03 (10 min), 04-01 (4 min), 04-02 (~5 min), 04-03 (5 min)
+- Trend: Phase 4 faster due to less infrastructure complexity
 
 *Updated after each plan completion*
 
@@ -67,15 +67,19 @@ Recent decisions affecting current work:
 | 0.01-0.05 SOL micro bet range | 04-02 | Keep losses small while allowing frequent trading |
 | 8% degen chance for random apes | 04-02 | Add unpredictability and entertainment value |
 | 5-15 min time pressure window | 04-02 | Balance entertainment with not being too aggressive |
+| Narrative beat speech triggers | 04-03 | Commentary only at interesting moments |
+| 15s minimum speech gap | 04-03 | Prevent spam, feel natural |
+| Priority queue for commentary | 04-03 | Trade results always reported, filler dropped when busy |
 
 ### Pending Todos
 
-None yet.
+None - all phases complete.
 
 ### Blockers/Concerns
 
-- **Research flag (Phase 4):** pump.fun chat API not fully documented. May need reverse engineering or community resources.
-- **Research flag (Phase 4):** Prompt engineering for paranoid personality requires iteration.
+Resolved during execution:
+- ~~Research flag (Phase 4): pump.fun chat API not fully documented~~ - Using ClaudeClient for personality
+- ~~Research flag (Phase 4): Prompt engineering for paranoid personality~~ - Comprehensive prompts implemented
 
 ## Phase 1 Completion Summary
 
@@ -126,19 +130,45 @@ None yet.
 - Updated `.env.example` with economic flywheel configuration
 
 **Economic Flywheel Complete:**
-1. Creator fees → Claimed via PumpPortal
-2. Fee split → 30% creator, 70% trading (configurable)
-3. Trading → Intelligent decisions using Phase 2 analysis
-4. Profits → Detected on trade close
-5. Buybacks → 50% of profits buy $SCHIZO (configurable)
-6. Buying pressure → Buybacks create demand
+1. Creator fees -> Claimed via PumpPortal
+2. Fee split -> 30% creator, 70% trading (configurable)
+3. Trading -> Intelligent decisions using Phase 2 analysis
+4. Profits -> Detected on trade close
+5. Buybacks -> 50% of profits buy $SCHIZO (configurable)
+6. Buying pressure -> Buybacks create demand
 
-## Next Phase
+## Phase 4 Completion Summary
 
-Ready for Phase 4: Personality & Streaming
+**All Phase 4 success criteria met:**
+1. MoodSystem tracks agent emotional state with 6 moods
+2. Mood affects trading via risk/position multipliers
+3. CommentarySystem controls speech timing (15s+ gaps)
+4. Speech triggers only at narrative beats (not every scan)
+5. Mood-aware prompts for personality consistency
+6. Paranoid musings fill quiet periods
+
+**Modules delivered:**
+- `src/personality/mood-system.ts` - MoodSystem with 6 emotional states
+- `src/personality/commentary-system.ts` - CommentarySystem with timing and queue
+- `src/personality/prompts.ts` - Extended with mood-aware helpers
+- `src/trading/entertainment-mode.ts` - Entertainment mode integration
+
+**Personality System Complete:**
+1. Mood tracking -> CONFIDENT, PARANOID, RESTLESS, MANIC, TILTED, NEUTRAL
+2. Mood effects -> Risk multipliers, position multipliers, speech style
+3. Commentary queue -> Priority-based, max 3 items, expiry
+4. Narrative beats -> DISCOVERY, ANALYSIS, DECISION, TRADE_RESULT, PARANOID_MUSING, TIME_PRESSURE
+5. Quiet period detection -> Automatic musings after 60s silence
+
+## Project Complete
+
+All 4 phases executed successfully. Core $SCHIZO agent ready for:
+- Mainnet deployment
+- Frontend streaming integration
+- TTS integration via onSpeech callback
 
 ## Session Continuity
 
 Last session: 2026-01-20
-Stopped at: Completed 04-02-PLAN.md (Entertainment Mode)
+Stopped at: Completed 04-03-PLAN.md (Commentary System)
 Resume file: None
