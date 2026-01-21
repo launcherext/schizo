@@ -350,22 +350,8 @@ function updateStats(stats) {
   // R: +0.000
   // U: +0.000
   // T: +0.000
-  pnlElement.innerHTML = `
-    <div class="pnl-compact">
-      <div class="pnl-row">
-        <span class="pnl-label-small">R:</span>
-        <span class="pnl-value-small ${realizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(realizedPnL)}</span>
-      </div>
-      <div class="pnl-row">
-        <span class="pnl-label-small">U:</span>
-        <span class="pnl-value-small ${unrealizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(unrealizedPnL)}</span>
-      </div>
-      <div class="pnl-row total-row">
-        <span class="pnl-label-small">T:</span>
-        <span class="pnl-value-small ${totalPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(totalPnL)}</span>
-      </div>
-    </div>
-  `;
+  pnlElement.textContent = formatPnL(totalPnL) + (stats.balance !== undefined ? ' SOL' : '');
+  pnlElement.className = totalPnL >= 0 ? 'positive' : 'negative';
   
   document.getElementById('buybacks').textContent = stats.totalBuybacks;
   if (stats.balance !== undefined) {
