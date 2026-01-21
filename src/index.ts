@@ -53,6 +53,25 @@ async function main(): Promise<void> {
     db = createDatabase(dbPath);
     const dbWithRepos = createDatabaseWithRepositories(db);
 
+    // One-time import of historical trade (IMPOSTOR bought before volume was set up)
+    const historicalTrade = {
+      signature: 'iwgr8DTfM7STpQ1N21mHNRvC4DNrN5ms7aSAKYw27PukjTq9dmA95j4NY6x1gh5MwZWaeQJEH5tHWRg6Wryc6uq',
+      tokenMint: 'Kvqx8QeAXyjQJULbAX7LnWxfym5U51we9Eft51oBAGS',
+      tokenSymbol: 'IMPOSTOR',
+      type: 'BUY' as const,
+      amountSol: 0.026412,
+      amountTokens: 107358.911004,
+      pricePerToken: 0.000000246014,
+      timestamp: 1769028771000,
+      metadata: { tokenName: 'Impostor', source: 'PUMP_FUN', importedFromHistory: true },
+    };
+    const existingTrade = dbWithRepos.trades.getBySignature(historicalTrade.signature);
+    if (!existingTrade) {
+      log.info({ symbol: historicalTrade.tokenSymbol }, 'Importing historical trade...');
+      dbWithRepos.trades.insert(historicalTrade);
+      log.info('Historical trade imported successfully');
+    }
+
     // Initialize Helius client
     const heliusApiKey = process.env.HELIUS_API_KEY;
     if (!heliusApiKey) {
