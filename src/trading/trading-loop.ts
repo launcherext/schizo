@@ -1,5 +1,8 @@
 /**
  * Trading Loop - Automatic token monitoring and trading
+ *
+ * Integrates EntertainmentMode for frequent degen trading and
+ * CommentarySystem for controlled speech timing.
  */
 
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
@@ -8,6 +11,9 @@ import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
 import type { SmartMoneyTracker } from '../analysis/smart-money.js';
 import type { TradingEngine } from './trading-engine.js';
 import type { ClaudeClient } from '../personality/claude-client.js';
+import type { MoodSystem } from '../personality/mood-system.js';
+import type { CommentarySystem, NarrativeBeat } from '../personality/commentary-system.js';
+import { EntertainmentMode, type TokenContext, type EntertainmentDecision } from './entertainment-mode.js';
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
 import { getBirdeyeClient, type BirdeyeToken } from '../api/birdeye.js';
 import { agentEvents } from '../events/emitter.js';
@@ -21,6 +27,7 @@ export interface TradingLoopConfig {
   enableTrading: boolean; // Controls if trades are actually executed
   pollIntervalMs: number;
   maxTokensPerCycle: number;
+  entertainmentMode: boolean; // Use EntertainmentMode for trade decisions
 }
 
 /**
@@ -31,6 +38,7 @@ export const DEFAULT_TRADING_LOOP_CONFIG: TradingLoopConfig = {
   enableTrading: false,
   pollIntervalMs: 10000, // 10 seconds - gotta catch those runners
   maxTokensPerCycle: 10,
+  entertainmentMode: true, // Default ON for entertaining agent
 };
 
 /**
@@ -55,6 +63,11 @@ export class TradingLoop {
   private isProcessing = false; // Prevent concurrent processing
   private lastTrendingScan = 0; // Track last trending scan time
 
+  // Entertainment systems (optional)
+  private moodSystem?: MoodSystem;
+  private entertainmentMode?: EntertainmentMode;
+  private commentarySystem?: CommentarySystem;
+
   constructor(
     config: TradingLoopConfig,
     connection: Connection,
@@ -63,7 +76,10 @@ export class TradingLoop {
     smartMoney: SmartMoneyTracker,
     tradingEngine?: TradingEngine,
     claude?: ClaudeClient,
-    walletPublicKey?: PublicKey
+    walletPublicKey?: PublicKey,
+    moodSystem?: MoodSystem,
+    entertainmentMode?: EntertainmentMode,
+    commentarySystem?: CommentarySystem
   ) {
     this.config = config;
     this.connection = connection;
@@ -73,9 +89,13 @@ export class TradingLoop {
     this.tradingEngine = tradingEngine;
     this.claude = claude;
     this.walletPublicKey = walletPublicKey;
+    this.moodSystem = moodSystem;
+    this.entertainmentMode = entertainmentMode;
+    this.commentarySystem = commentarySystem;
 
     const mode = tradingEngine ? 'FULL' : 'ANALYSIS-ONLY';
-    logger.info({ config, mode }, 'Trading Loop initialized');
+    const entertainment = config.entertainmentMode && entertainmentMode ? 'ENABLED' : 'DISABLED';
+    logger.info({ config, mode, entertainment }, 'Trading Loop initialized');
   }
 
   /**
@@ -366,6 +386,28 @@ export class TradingLoop {
         logger.debug('No wallet configured - balance will show as 0');
       }
 
+      // Entertainment mode stats
+      let mood: string | undefined;
+      let moodIntensity: number | undefined;
+      let timeSinceLastTrade: number | undefined;
+      let tradesThisHour: number | undefined;
+      let timePressure: number | undefined;
+
+      if (this.moodSystem) {
+        const moodState = this.moodSystem.getState();
+        mood = moodState.current;
+        moodIntensity = moodState.intensity;
+        timeSinceLastTrade = moodState.lastTradeTime > 0
+          ? Math.floor((Date.now() - moodState.lastTradeTime) / 1000)
+          : undefined;
+      }
+
+      if (this.entertainmentMode) {
+        const entertainmentStats = this.entertainmentMode.getStats();
+        tradesThisHour = entertainmentStats.tradesLastHour;
+        timePressure = entertainmentStats.timePressure;
+      }
+
       agentEvents.emit({
         type: 'STATS_UPDATE',
         timestamp: Date.now(),
@@ -376,6 +418,12 @@ export class TradingLoop {
           winRate,
           totalBuybacks: buybacks,
           balance,
+          // Entertainment stats
+          mood,
+          moodIntensity,
+          timeSinceLastTrade,
+          tradesThisHour,
+          timePressure,
         },
       });
     } catch (error) {
@@ -433,10 +481,22 @@ export class TradingLoop {
             amount: 0, // Amount determined by position
           },
         });
+
+        // Update mood system on position exit
+        // NOTE: Actual profit/loss tracking would come from the tradingEngine
+        // For now, we track that an exit occurred - real mood updates
+        // happen from STOP_LOSS and TAKE_PROFIT events in index.ts
       }
 
       if (exitSignatures.length > 0) {
         logger.info({ count: exitSignatures.length }, 'Position exits executed');
+
+        // Record trade in entertainment mode for rate limiting
+        if (this.entertainmentMode) {
+          for (const signature of exitSignatures) {
+            this.entertainmentMode.recordTrade(signature);
+          }
+        }
       }
     } catch (error) {
       logger.error({ error }, 'Error checking position exits');
@@ -667,8 +727,71 @@ export class TradingLoop {
         }
       }
 
-      // Step 3: Get trading decision from Trading Engine (if available)
-      if (!this.tradingEngine) {
+      // Step 3: Get trading decision
+      // Use EntertainmentMode if enabled, otherwise use TradingEngine
+
+      // Use a looser type that works for both entertainment and standard decisions
+      interface LocalDecision {
+        shouldTrade: boolean;
+        reasons: string[];
+        positionSizeSol: number;
+        safetyAnalysis?: typeof safetyResult;
+        smartMoneyCount?: number;
+        reasoning?: string;
+      }
+
+      let decision: LocalDecision;
+      let entertainmentDecision: EntertainmentDecision | null = null;
+
+      // Entertainment mode: Use relaxed thresholds for frequent trading
+      if (this.config.entertainmentMode && this.entertainmentMode) {
+        // Build token context for entertainment mode evaluation
+        const tokenContext: TokenContext = {
+          mint,
+          name,
+          symbol,
+          priceUsd: metadata?.priceUsd,
+          volumeUsd24h: metadata?.volume1h ? metadata.volume1h * 24 : birdeyeToken?.volume24h,
+          liquiditySol: (metadata?.liquidity ?? birdeyeToken?.liquidity ?? 0) / 170, // Convert USD to SOL approx
+          holderCount: metadata?.buys5m, // Use buys as proxy for holders
+          createdAt: metadata?.ageMinutes ? Date.now() - (metadata.ageMinutes * 60 * 1000) : undefined,
+          hasMinAuthorities: safetyResult.risks.includes('MINT_AUTHORITY_ACTIVE'),
+          hasFreezeAuth: safetyResult.risks.includes('FREEZE_AUTHORITY_ACTIVE'),
+        };
+
+        entertainmentDecision = this.entertainmentMode.evaluate(tokenContext);
+
+        decision = {
+          shouldTrade: entertainmentDecision.shouldTrade,
+          reasons: [entertainmentDecision.reason],
+          positionSizeSol: entertainmentDecision.positionSizeSol,
+          safetyAnalysis: safetyResult,
+          smartMoneyCount,
+          reasoning: entertainmentDecision.isDegenMoment
+            ? 'DEGEN MOMENT - random ape'
+            : entertainmentDecision.isHypeTrade
+            ? 'HYPE DETECTED - volume + holders'
+            : `Quality score ${(entertainmentDecision.currentRiskThreshold * 10).toFixed(1)} (pressure: ${(entertainmentDecision.timePressure * 100).toFixed(0)}%)`,
+        };
+
+        logger.debug({
+          mint,
+          decision: entertainmentDecision,
+          timePressure: entertainmentDecision.timePressure,
+          isDegenMoment: entertainmentDecision.isDegenMoment,
+        }, 'Entertainment mode decision');
+
+        // Queue commentary through CommentarySystem instead of direct speech
+        if (this.commentarySystem && entertainmentDecision.shouldTrade) {
+          this.commentarySystem.queueCommentary('DECISION', {
+            symbol,
+            name,
+            shouldTrade: true,
+            reasons: [entertainmentDecision.reason],
+            positionSizeSol: entertainmentDecision.positionSizeSol,
+          });
+        }
+      } else if (!this.tradingEngine) {
         // Analysis-only mode - just emit that we analyzed it
         agentEvents.emit({
           type: 'TRADE_DECISION',
@@ -686,29 +809,41 @@ export class TradingLoop {
           },
         });
         return;
+      } else {
+        // Standard mode: Use TradingEngine's conservative evaluation
+        const tokenMeta = {
+          liquidity: metadata?.liquidity,
+          marketCapSol: marketCapSol,
+        };
+        const engineDecision = await this.tradingEngine.evaluateToken(mint, tokenMeta);
+        decision = engineDecision;
       }
 
-      // Pass metadata to avoid extra API calls
-      const tokenMeta = {
-        liquidity: metadata?.liquidity,
-        marketCapSol: marketCapSol,
-      };
-      const decision = await this.tradingEngine.evaluateToken(mint, tokenMeta);
-
       // Emit decision event with AI reasoning
+      // Ensure decision matches TradeDecision type for event emission
+      const eventDecision = {
+        shouldTrade: decision.shouldTrade,
+        positionSizeSol: decision.positionSizeSol,
+        reasons: decision.reasons,
+        safetyAnalysis: decision.safetyAnalysis ?? safetyResult,
+        smartMoneyCount: decision.smartMoneyCount ?? smartMoneyCount,
+        reasoning: decision.reasoning,
+      };
+
       agentEvents.emit({
         type: 'TRADE_DECISION',
         timestamp: Date.now(),
         data: {
           mint,
-          decision,
+          decision: eventDecision,
           reasoning: decision.reasoning,
         },
       });
 
       // Emit DECISION thought - ONLY on BUY decisions (not every single reject)
       // This prevents SCHIZO from being too chatty about every token he passes on
-      if (this.claude && decision.shouldTrade) {
+      // In entertainment mode, commentary goes through CommentarySystem instead
+      if (this.claude && decision.shouldTrade && !this.commentarySystem) {
         try {
           const decisionThought = await this.claude.generateAnalysisThought('decision', {
             symbol,
@@ -739,7 +874,7 @@ export class TradingLoop {
       if (decision.shouldTrade) {
         if (!this.config.enableTrading) {
           logger.info({ mint, decision }, 'Trade approved but execution DISABLED (Analysis Mode)');
-          
+
           // Emit SIMULATED trade event for dashboard visualization
           agentEvents.emit({
             type: 'TRADE_EXECUTED',
@@ -751,13 +886,35 @@ export class TradingLoop {
               amount: decision.positionSizeSol,
             },
           });
+
+          // Record trade in entertainment mode for rate limiting
+          if (entertainmentDecision && this.entertainmentMode) {
+            this.entertainmentMode.recordTrade(mint);
+          }
+
+          // Queue trade result commentary
+          if (this.commentarySystem) {
+            this.commentarySystem.queueCommentary('TRADE_RESULT', {
+              symbol,
+              name,
+              tradeType: 'BUY',
+              positionSizeSol: decision.positionSizeSol,
+            });
+          }
+
+          return;
+        }
+
+        // Only proceed with execution if we have a trading engine
+        if (!this.tradingEngine) {
+          logger.warn({ mint }, 'Trade approved but no trading engine available');
           return;
         }
 
         logger.info({ mint, positionSize: decision.positionSizeSol }, 'Executing trade...');
-        
+
         const signature = await this.tradingEngine.executeBuy(mint);
-        
+
         if (signature) {
           agentEvents.emit({
             type: 'TRADE_EXECUTED',
@@ -769,6 +926,28 @@ export class TradingLoop {
               amount: decision.positionSizeSol,
             },
           });
+
+          // Record trade in entertainment mode for rate limiting
+          if (entertainmentDecision && this.entertainmentMode) {
+            this.entertainmentMode.recordTrade(mint);
+          }
+
+          // Update mood on trade execution (success)
+          if (this.moodSystem) {
+            // For BUY trades, we don't know the result yet
+            // Mood update happens on SELL (position close)
+            logger.debug({ mint }, 'Trade executed - mood update will occur on position close');
+          }
+
+          // Queue trade result commentary
+          if (this.commentarySystem) {
+            this.commentarySystem.queueCommentary('TRADE_RESULT', {
+              symbol,
+              name,
+              tradeType: 'BUY',
+              positionSizeSol: decision.positionSizeSol,
+            });
+          }
 
           logger.info({ mint, signature }, 'Trade executed successfully');
         } else {
