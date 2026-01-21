@@ -217,37 +217,267 @@ class TrenchRadio {
   }
 
   /**
-   * State 1: "The Hunt" - Low-fi ambient, radar/sonar vibes
+   * State 1: "The Hunt" - Lofi hip-hop chill beats
    */
   playScanningAmbient() {
     if (!this.audioContext) return;
 
-    // Reset effects
-    this.lowPassFilter.frequency.setTargetAtTime(3000, this.audioContext.currentTime, 0.5);
-    this.distortion.curve = this.makeDistortionCurve(0);
-    this.reverbGain.gain.setTargetAtTime(0.3, this.audioContext.currentTime, 0.5);
+    // Lofi sound: warm, filtered, with vinyl crackle
+    this.lowPassFilter.frequency.setTargetAtTime(2500, this.audioContext.currentTime, 0.5);
+    this.distortion.curve = this.makeDistortionCurve(5); // Slight warmth
+    this.reverbGain.gain.setTargetAtTime(0.25, this.audioContext.currentTime, 0.5);
 
-    // Create ambient drone
-    const baseFreq = 55; // Low A
+    // Vinyl crackle (filtered noise)
+    this.noiseNode = this.createVinylCrackle();
 
-    // Sub bass drone
-    const subOsc = this.audioContext.createOscillator();
-    subOsc.type = 'sine';
-    subOsc.frequency.value = baseFreq;
+    // Start lofi beat
+    this.playLofiBeat(75); // 75 BPM - chill tempo
 
-    const subGain = this.audioContext.createGain();
-    subGain.gain.value = 0.15;
+    // Play lofi chords
+    this.playLofiChords(75);
+  }
 
-    subOsc.connect(subGain);
-    subGain.connect(this.dryGain);
-    subOsc.start();
-    this.oscillators.push(subOsc);
+  /**
+   * Create vinyl crackle effect
+   */
+  createVinylCrackle() {
+    const bufferSize = 2 * this.audioContext.sampleRate;
+    const noiseBuffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
 
-    // Filtered noise for texture
-    this.noiseNode = this.createFilteredNoise(800, 0.05);
+    // Create crackle pattern - mostly silent with occasional pops
+    for (let i = 0; i < bufferSize; i++) {
+      // Base vinyl hiss
+      output[i] = (Math.random() * 2 - 1) * 0.02;
 
-    // Sonar ping every few seconds
-    this.startSonarPing();
+      // Random crackles/pops
+      if (Math.random() < 0.0003) {
+        output[i] = (Math.random() * 2 - 1) * 0.3;
+      }
+    }
+
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = noiseBuffer;
+    noise.loop = true;
+
+    // Bandpass filter for that vinyl character
+    const vinylFilter = this.audioContext.createBiquadFilter();
+    vinylFilter.type = 'bandpass';
+    vinylFilter.frequency.value = 1500;
+    vinylFilter.Q.value = 0.5;
+
+    const vinylGain = this.audioContext.createGain();
+    vinylGain.gain.value = 0.15;
+
+    noise.connect(vinylFilter);
+    vinylFilter.connect(vinylGain);
+    vinylGain.connect(this.dryGain);
+    noise.start();
+
+    return noise;
+  }
+
+  /**
+   * Play lofi boom-bap beat
+   */
+  playLofiBeat(bpm) {
+    const beatLength = 60 / bpm;
+    let beat = 0;
+
+    const playBeat = () => {
+      if (this.currentState !== 'SCANNING' || !this.isEnabled) return;
+
+      const time = this.audioContext.currentTime;
+
+      // Lofi kick - soft and warm
+      if (beat % 4 === 0 || beat % 4 === 2.5) {
+        this.playLofiKick(time);
+      }
+
+      // Lofi snare on 2 and 4 (with swing)
+      if (beat % 4 === 1 || beat % 4 === 3) {
+        this.playLofiSnare(time + (Math.random() * 0.02)); // Slight timing humanization
+      }
+
+      // Soft hi-hat with swing
+      this.playLofiHat(time, beat % 2 === 1 ? 0.06 : 0.03);
+
+      beat = (beat + 0.5) % 8; // Half-beat increments for swing
+      setTimeout(playBeat, (beatLength / 2) * 1000);
+    };
+
+    playBeat();
+  }
+
+  /**
+   * Soft lofi kick
+   */
+  playLofiKick(time) {
+    const osc = this.audioContext.createOscillator();
+    const gain = this.audioContext.createGain();
+
+    osc.frequency.setValueAtTime(100, time);
+    osc.frequency.exponentialRampToValueAtTime(40, time + 0.15);
+
+    gain.gain.setValueAtTime(0.4, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+
+    // Low pass for warmth
+    const kickFilter = this.audioContext.createBiquadFilter();
+    kickFilter.type = 'lowpass';
+    kickFilter.frequency.value = 200;
+
+    osc.connect(kickFilter);
+    kickFilter.connect(gain);
+    gain.connect(this.dryGain);
+
+    osc.start(time);
+    osc.stop(time + 0.25);
+  }
+
+  /**
+   * Soft lofi snare (more like a rim shot)
+   */
+  playLofiSnare(time) {
+    // Noise burst for snare
+    const bufferSize = this.audioContext.sampleRate * 0.15;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    // Bandpass for that lofi snare character
+    const snareFilter = this.audioContext.createBiquadFilter();
+    snareFilter.type = 'bandpass';
+    snareFilter.frequency.value = 1200;
+    snareFilter.Q.value = 1;
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0.12, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+
+    noise.connect(snareFilter);
+    snareFilter.connect(gain);
+    gain.connect(this.dryGain);
+    gain.connect(this.convolver); // Add reverb to snare
+
+    noise.start(time);
+  }
+
+  /**
+   * Soft lofi hi-hat
+   */
+  playLofiHat(time, volume) {
+    const bufferSize = this.audioContext.sampleRate * 0.05;
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.audioContext.createBufferSource();
+    noise.buffer = buffer;
+
+    const hatFilter = this.audioContext.createBiquadFilter();
+    hatFilter.type = 'highpass';
+    hatFilter.frequency.value = 6000;
+
+    // Low pass to take off harsh highs (lofi character)
+    const lofiFilter = this.audioContext.createBiquadFilter();
+    lofiFilter.type = 'lowpass';
+    lofiFilter.frequency.value = 8000;
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(volume, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+    noise.connect(hatFilter);
+    hatFilter.connect(lofiFilter);
+    lofiFilter.connect(gain);
+    gain.connect(this.dryGain);
+
+    noise.start(time);
+  }
+
+  /**
+   * Play lofi jazz chords
+   */
+  playLofiChords(bpm) {
+    const barLength = (60 / bpm) * 4; // 4 beats per bar
+
+    // Lofi jazz chord progression (ii-V-I-vi style, but chill)
+    // Using frequencies for Dm7 - G7 - Cmaj7 - Am7
+    const chordProgression = [
+      [146.83, 174.61, 220, 261.63],     // Dm7 (D F A C)
+      [196, 246.94, 293.66, 349.23],     // G7 (G B D F)
+      [130.81, 164.81, 196, 246.94],     // Cmaj7 (C E G B)
+      [220, 261.63, 329.63, 392],        // Am7 (A C E G)
+    ];
+
+    let chordIndex = 0;
+
+    const playChord = () => {
+      if (this.currentState !== 'SCANNING' || !this.isEnabled) return;
+
+      const chord = chordProgression[chordIndex];
+      const time = this.audioContext.currentTime;
+
+      chord.forEach((freq, i) => {
+        // Stagger note attacks slightly for human feel
+        const noteTime = time + (i * 0.03);
+        this.playLofiNote(freq, noteTime, barLength * 0.9);
+      });
+
+      chordIndex = (chordIndex + 1) % chordProgression.length;
+      setTimeout(playChord, barLength * 1000);
+    };
+
+    // Start after a beat
+    setTimeout(playChord, (60 / bpm) * 1000);
+  }
+
+  /**
+   * Play a single lofi piano-like note
+   */
+  playLofiNote(freq, time, duration) {
+    // Use triangle wave for soft piano-like tone
+    const osc = this.audioContext.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+
+    // Add slight detune for warmth
+    const osc2 = this.audioContext.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.value = freq * 1.002; // Slight detune
+
+    const gain = this.audioContext.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(0.08, time + 0.05); // Soft attack
+    gain.gain.exponentialRampToValueAtTime(0.04, time + 0.3); // Quick decay
+    gain.gain.exponentialRampToValueAtTime(0.001, time + duration); // Release
+
+    // Heavy low-pass for lofi warmth
+    const noteFilter = this.audioContext.createBiquadFilter();
+    noteFilter.type = 'lowpass';
+    noteFilter.frequency.value = 1500;
+    noteFilter.Q.value = 0.5;
+
+    osc.connect(noteFilter);
+    osc2.connect(noteFilter);
+    noteFilter.connect(gain);
+    gain.connect(this.dryGain);
+    gain.connect(this.convolver); // Add reverb
+
+    osc.start(time);
+    osc2.start(time);
+    osc.stop(time + duration);
+    osc2.stop(time + duration);
   }
 
   /**
@@ -279,37 +509,6 @@ class TrenchRadio {
     noise.start();
 
     return noise;
-  }
-
-  /**
-   * Sonar ping effect
-   */
-  startSonarPing() {
-    const ping = () => {
-      if (this.currentState !== 'SCANNING' || !this.isEnabled) return;
-
-      const osc = this.audioContext.createOscillator();
-      const gain = this.audioContext.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(1200, this.audioContext.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(800, this.audioContext.currentTime + 0.1);
-
-      gain.gain.setValueAtTime(0.1, this.audioContext.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.5);
-
-      osc.connect(gain);
-      gain.connect(this.convolver);
-      gain.connect(this.dryGain);
-
-      osc.start();
-      osc.stop(this.audioContext.currentTime + 0.5);
-
-      // Random interval for next ping (3-8 seconds)
-      setTimeout(ping, 3000 + Math.random() * 5000);
-    };
-
-    setTimeout(ping, 1000);
   }
 
   /**
