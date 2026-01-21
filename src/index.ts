@@ -45,9 +45,12 @@ async function main(): Promise<void> {
     log.info('');
     await runDevnetTest();
   } else {
-    // Initialize database
-    log.info('Initializing database...');
-    db = createDatabase('schizo-agent.db');
+    // Initialize database - use volume path on Railway for persistence
+    const dbPath = process.env.RAILWAY_ENVIRONMENT
+      ? '/app/data/schizo-agent.db'
+      : 'schizo-agent.db';
+    log.info({ dbPath }, 'Initializing database...');
+    db = createDatabase(dbPath);
     const dbWithRepos = createDatabaseWithRepositories(db);
 
     // Initialize Helius client
