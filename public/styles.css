@@ -1869,8 +1869,9 @@ td a:hover {
 
 .trench-radio-panel {
     position: fixed;
-    bottom: 20px;
-    left: 20px;
+    bottom: 80px;
+    right: 20px;
+    /* left: 20px; Removed to move to right side */
     background: rgba(15, 25, 25, 0.95);
     border: 1px solid rgba(140, 219, 199, 0.3);
     border-radius: 12px;
@@ -2068,4 +2069,48 @@ td a:hover {
         right: 10px;
         min-width: auto;
     }
+}
+
+/* Chat Input Styling */
+#chat-input-area {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.4);
+    border-top: 1px solid rgba(140, 219, 199, 0.2);
+}
+
+.chat-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+#usernameInput {
+    width: 30%;
+    min-width: 80px;
+    padding: 8px;
+    background: rgba(0, 20, 0, 0.6);
+    border: 1px solid rgba(140, 219, 199, 0.3);
+    color: #4ade80;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    border-radius: 4px;
+}
+
+#usernameInput:focus {
+    outline: none;
+    border-color: #4ade80;
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.2);
+}
+
+#chatInput {
+    flex: 1;
+    background: rgba(0, 20, 0, 0.6);
+    border: 1px solid rgba(140, 219, 199, 0.3);
+    color: #fff;
+    padding: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    border-radius: 4px;
 }

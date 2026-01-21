@@ -99,7 +99,8 @@
                 <div id="token-stream-box">
                     <div class="panel-header">
                         <div class="panel-tabs">
-                            <button class="panel-tab active" data-tab="holdings">Holdings <span id="holdings-count">(0)</span></button>
+                            <button class="panel-tab active" data-tab="holdings">Holdings <span
+                                    id="holdings-count">(0)</span></button>
                         </div>
                         <button id="pauseTokensBtn">Pause</button>
                     </div>
@@ -123,6 +124,10 @@
                     <div id="chat-header">Chat with $SCHIZO</div>
                     <div id="chat-messages"></div>
                     <div id="chat-input-area">
+                        <div class="chat-input-row">
+                            <input type="text" id="usernameInput" placeholder="Name" maxlength="15" value="anon"
+                                title="Your username">
+                        </div>
                         <input type="text" id="chatInput" placeholder="Ask $SCHIZO anything..." maxlength="500">
                         <button id="sendBtn">Send</button>
                     </div>
@@ -185,12 +190,14 @@
         </div>
         <div class="trench-radio-body">
             <button id="trench-radio-toggle" class="trench-radio-btn">
-                <svg id="radio-icon-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg id="radio-icon-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                     <line x1="23" y1="9" x2="17" y2="15"></line>
                     <line x1="17" y1="9" x2="23" y2="15"></line>
                 </svg>
-                <svg id="radio-icon-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                <svg id="radio-icon-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" style="display:none;">
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                 </svg>

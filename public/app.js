@@ -570,13 +570,34 @@ function sendChatMessage() {
   ws.send(JSON.stringify({
     type: 'CHAT',
     message: message,
-    username: 'anon' // Could be customizable
+    username: getUsername() // Use dynamic username
   }));
 
   chatInput.value = '';
 }
 
 sendBtn.addEventListener('click', sendChatMessage);
+
+// Get username with fallback
+function getUsername() {
+  const input = document.getElementById('usernameInput');
+  return input && input.value.trim() ? input.value.trim() : 'anon';
+}
+
+// Handle username changes
+const usernameInput = document.getElementById('usernameInput');
+if (usernameInput) {
+  // Load saved username
+  const savedName = localStorage.getItem('schizo_username');
+  if (savedName) {
+    usernameInput.value = savedName;
+  }
+
+  // Save on change
+  usernameInput.addEventListener('change', () => {
+    localStorage.setItem('schizo_username', usernameInput.value.trim());
+  });
+}
 
 chatInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
