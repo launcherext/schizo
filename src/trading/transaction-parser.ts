@@ -99,12 +99,15 @@ export class TransactionParser {
 
       if (tradeType === 'buy') {
         // For buy: we spend SOL, receive tokens
+        // solChange is negative (we spent SOL), fee is already included in the balance delta
         tokenAmount = tokenChange ? Math.abs(tokenChange.change) : 0;
-        solAmount = Math.abs(solChange) - fee; // Exclude fee from cost basis
+        solAmount = Math.abs(solChange); // Balance delta already excludes fee paid
       } else {
         // For sell: we spend tokens, receive SOL
+        // solChange = (PostBalance - PreBalance) = Net Proceeds (already minus fee)
+        // To get gross proceeds for P&L: add fee back
         tokenAmount = tokenChange ? Math.abs(tokenChange.change) : 0;
-        solAmount = Math.abs(solChange) - fee; // FIXED: Subtract fee from proceeds (was incorrectly adding)
+        solAmount = Math.abs(solChange) + fee; // Gross proceeds = Net + Fee
       }
 
       // Calculate price per token

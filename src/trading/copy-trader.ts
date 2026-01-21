@@ -1,5 +1,5 @@
 import { HeliusClient, TransactionResult } from '../api/helius.js';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey, Logs } from '@solana/web3.js';
 import { createLogger } from '../lib/logger.js';
 import { agentEvents } from '../events/emitter.js';
 
@@ -7,22 +7,24 @@ const logger = createLogger('copy-trader');
 
 export interface CopyTraderConfig {
   walletAddress: string;
-  pollIntervalMs: number;
+  pollIntervalMs: number; // Kept for fallback polling
   enabled: boolean;
 }
 
 /**
  * CopyTrader - Watches a specific wallet and copies their trades
- * "Schizo copy trades" - blindly follows the target with high confidence
+ * Uses WebSocket subscription for real-time detection
  */
 export class CopyTrader {
   private config: CopyTraderConfig;
   private helius: HeliusClient;
   private connection: Connection;
   private isRunning: boolean = false;
-  private intervalId?: NodeJS.Timeout;
+  private subscriptionId: number | null = null;
+  private fallbackIntervalId?: NodeJS.Timeout;
   private lastSignature: string | null = null;
   private isProcessing = false;
+  private processedSignatures = new Set<string>(); // Prevent duplicate processing
 
   constructor(
     config: CopyTraderConfig,
@@ -36,11 +38,11 @@ export class CopyTrader {
     logger.info({ 
       wallet: this.config.walletAddress, 
       enabled: this.config.enabled 
-    }, 'CopyTrader initialized');
+    }, 'CopyTrader initialized (WebSocket mode)');
   }
 
   /**
-   * Start watching the target wallet
+   * Start watching the target wallet via WebSocket
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -54,27 +56,84 @@ export class CopyTrader {
     }
 
     this.isRunning = true;
-    logger.info(`Started watching wallet: ${this.config.walletAddress}`);
+    logger.info(`🔌 Starting CopyTrader WebSocket for: ${this.config.walletAddress}`);
 
-    // Initial fetch to get the latest signature so we don't process old trades
+    // Subscribe to logs for the target wallet
     try {
-      const response = await this.helius.getTransactionsForAddress(this.config.walletAddress, {
-        limit: 1
-      });
-      if (response.data && response.data.length > 0) {
-        this.lastSignature = response.data[0].signature;
-        logger.debug({ lastSignature: this.lastSignature }, 'Set initial sync point');
-      }
+      const walletPubkey = new PublicKey(this.config.walletAddress);
+      
+      this.subscriptionId = this.connection.onLogs(
+        walletPubkey,
+        (logs: Logs) => this.handleLogNotification(logs),
+        'confirmed'
+      );
+
+      logger.info({ subscriptionId: this.subscriptionId }, '✅ WebSocket subscription active');
     } catch (error) {
-      logger.warn({ error }, 'Failed to get initial transaction history');
+      logger.error({ error }, 'Failed to subscribe to wallet logs, falling back to polling');
+      this.startFallbackPolling();
     }
 
-    // Start polling
-    this.intervalId = setInterval(() => {
+    // Also start fallback polling as backup (less frequent)
+    this.startFallbackPolling();
+  }
+
+  /**
+   * Start fallback polling (slower interval as backup)
+   */
+  private startFallbackPolling(): void {
+    if (this.fallbackIntervalId) return;
+
+    // Poll every 30 seconds as a fallback (not the primary method)
+    const fallbackInterval = Math.max(this.config.pollIntervalMs * 6, 30000);
+    
+    this.fallbackIntervalId = setInterval(() => {
       this.pollWallet().catch(err => {
-        logger.error({ error: err }, 'Error in CopyTrader poll');
+        logger.error({ error: err }, 'Error in CopyTrader fallback poll');
       });
-    }, this.config.pollIntervalMs);
+    }, fallbackInterval);
+
+    logger.debug({ intervalMs: fallbackInterval }, 'Fallback polling started');
+  }
+
+  /**
+   * Handle real-time log notification from WebSocket
+   */
+  private async handleLogNotification(logs: Logs): Promise<void> {
+    if (logs.err) {
+      logger.debug({ signature: logs.signature }, 'Ignoring failed transaction');
+      return;
+    }
+
+    // Skip if already processed
+    if (this.processedSignatures.has(logs.signature)) {
+      return;
+    }
+    this.processedSignatures.add(logs.signature);
+
+    // Limit cache size
+    if (this.processedSignatures.size > 1000) {
+      const entries = Array.from(this.processedSignatures);
+      this.processedSignatures = new Set(entries.slice(-500));
+    }
+
+    logger.info({ signature: logs.signature }, '⚡ Real-time transaction detected!');
+
+    // Check if it looks like a swap (common program logs)
+    const isLikelySwap = logs.logs.some(log => 
+      log.includes('Instruction: Swap') || 
+      log.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') || // Raydium
+      log.includes('Program JUP') || // Jupiter
+      log.includes('pump') // Pump.fun
+    );
+
+    if (!isLikelySwap) {
+      logger.debug({ signature: logs.signature }, 'Not a swap transaction');
+      return;
+    }
+
+    // Analyze the transaction
+    await this.analyzeTransactionBySignature(logs.signature);
   }
 
   /**
@@ -84,60 +143,51 @@ export class CopyTrader {
     if (!this.isRunning) return;
     
     this.isRunning = false;
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = undefined;
+
+    // Unsubscribe from WebSocket
+    if (this.subscriptionId !== null) {
+      this.connection.removeOnLogsListener(this.subscriptionId).catch(err => {
+        logger.warn({ error: err }, 'Failed to remove logs listener');
+      });
+      this.subscriptionId = null;
     }
+
+    // Stop fallback polling
+    if (this.fallbackIntervalId) {
+      clearInterval(this.fallbackIntervalId);
+      this.fallbackIntervalId = undefined;
+    }
+
     logger.info('CopyTrader stopped');
   }
 
   /**
-   * Poll for new transactions
+   * Fallback poll for new transactions (slower, as backup)
    */
   private async pollWallet(): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
     try {
-      // Fetch latest transactions
       const response = await this.helius.getTransactionsForAddress(this.config.walletAddress, {
-        limit: 10 // Checking last 10 should be enough for 5s intervals
+        limit: 5
       });
 
       if (!response.data || response.data.length === 0) {
         return;
       }
 
-      // Filter for new transactions Since last check
-      const newTransactions: TransactionResult[] = [];
-      
-      // If we have a last signature, find strictly newer ones
-      if (this.lastSignature) {
-        for (const tx of response.data) {
-          if (tx.signature === this.lastSignature) {
-            break; // Reached known history
-          }
-          newTransactions.push(tx);
-        }
-      } else {
-        // First run (shouldn't really happen due to start() logic, but safe fallback)
-        // Just take the single most recent one to avoid spamming old history
-        if (response.data.length > 0) {
-           // On very first blind poll, maybe just mark the latest and don't trade it to be safe?
-           // Or just trade the very latest. Let's just track it for now.
-           this.lastSignature = response.data[0].signature;
-           return; 
-        }
+      // Filter for new transactions
+      for (const tx of response.data) {
+        if (this.processedSignatures.has(tx.signature)) continue;
+        if (tx.signature === this.lastSignature) break;
+
+        this.processedSignatures.add(tx.signature);
+        await this.analyzeTransaction(tx);
       }
 
-      // Update last signature if we found new stuff
       if (response.data.length > 0) {
         this.lastSignature = response.data[0].signature;
-      }
-
-      // Process new transactions (oldest first to preserve order)
-      for (const tx of newTransactions.reverse()) {
-        await this.analyzeTransaction(tx);
       }
 
     } catch (error) {
@@ -148,26 +198,31 @@ export class CopyTrader {
   }
 
   /**
-   * Analyze a transaction to see if it's a buy we should copy
+   * Analyze transaction by signature (for WebSocket path)
+   */
+  private async analyzeTransactionBySignature(signature: string): Promise<void> {
+    try {
+      const parsed = await this.connection.getParsedTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed'
+      });
+
+      if (!parsed || !parsed.meta) return;
+
+      await this.processTransaction(signature, parsed);
+    } catch (error) {
+      logger.warn({ error, signature }, 'Failed to parse transaction from WebSocket');
+    }
+  }
+
+  /**
+   * Analyze a transaction from Helius response (for polling path)
    */
   private async analyzeTransaction(tx: TransactionResult): Promise<void> {
-    // Only care about successful SWAP transactions
     if (!tx.success || tx.type !== 'SWAP') {
       return;
     }
 
-    logger.info({ signature: tx.signature }, 'Analyzing potential copy trade');
-
-    // We need to parse details to see if it was a BUY (SOL -> Token)
-    // The Helius simplified response doesn't give us balance changes,
-    // so we use our TransactionParser locally or rely on enhanced Helius data if we had it.
-    // Since HeliusClient.getTransactionsForAddress returns basic info, we might need to fetch parsed tx
-    // OR, if we trust the "SWAP" type, we can try to guess.
-    // BUT, we need the MINT to copy trade.
-    
-    // We'll use the TransactionParser which fetches the full parsed tx from RPC (Connection).
-    // Note: This adds RPC load.
-    
     try {
       const parsed = await this.connection.getParsedTransaction(tx.signature, {
         maxSupportedTransactionVersion: 0,
@@ -176,80 +231,72 @@ export class CopyTrader {
 
       if (!parsed || !parsed.meta) return;
 
-      // Check balance changes for this wallet
-      const preTokenBalances = parsed.meta.preTokenBalances || [];
-      const postTokenBalances = parsed.meta.postTokenBalances || [];
-      const accountKeys = parsed.transaction.message.accountKeys;
-      
-      const walletPubkey = this.config.walletAddress;
-      const walletIndex = accountKeys.findIndex((k: any) => k.pubkey.toBase58() === walletPubkey);
-
-      if (walletIndex === -1) return;
-
-      // Check SOL change (Spend SOL = Buy)
-      const preSol = parsed.meta.preBalances[walletIndex];
-      const postSol = parsed.meta.postBalances[walletIndex];
-      const solChange = (postSol - preSol) / 1e9;
-
-      // Check Token changes
-      // Find a token account owned by this wallet that INCREASED in balance
-      let boughtMint: string | undefined;
-      let boughtAmount = 0;
-
-      // Helper to get balance
-      const getBalance = (balances: any[], mint: string, owner: string) => {
-        const b = balances.find(x => x.mint === mint && x.owner === owner);
-        return b ? parseFloat(b.uiTokenAmount.uiAmountString || '0') : 0;
-      };
-
-      // Identify all mints involved for this owner
-      const involvedMints = new Set<string>();
-      [...preTokenBalances, ...postTokenBalances].forEach(b => {
-        if (b.owner === walletPubkey) involvedMints.add(b.mint);
-      });
-
-      for (const mint of involvedMints) {
-        const pre = getBalance(preTokenBalances, mint, walletPubkey);
-        const post = getBalance(postTokenBalances, mint, walletPubkey);
-        if (post > pre) {
-          // Balance increased -> They BOUGHT (or received)
-          boughtMint = mint;
-          boughtAmount = post - pre;
-          break; // Assume single token swap for simplicity
-        }
-      }
-
-      // Logic:
-      // If SOL decreased significantly AND Token increased -> BUY
-      // If Token decreased AND SOL increased -> SELL (we might want to sell too? For now just Copy BUY)
-      
-      const isBuy = solChange < -0.001 && !!boughtMint; // Approx check, allowing for fees
-      
-      if (isBuy && boughtMint) {
-        logger.info({ 
-          signature: tx.signature, 
-          mint: boughtMint, 
-          solSpent: Math.abs(solChange).toFixed(4)
-        }, '🎯 DETECTED COPY TRADE BUY SIGNAL');
-
-        // Emit signal for TradingEngine
-        agentEvents.emit({
-          type: 'COPY_TRADE_SIGNAL',
-          timestamp: Date.now(),
-          data: {
-             mint: boughtMint,
-             sourceWallet: this.config.walletAddress,
-             signature: tx.signature,
-             solSpent: Math.abs(solChange)
-          }
-        });
-
-      } else {
-        logger.debug({ signature: tx.signature }, 'Transaction was not a clear buy');
-      }
-
+      await this.processTransaction(tx.signature, parsed);
     } catch (error) {
       logger.warn({ error, signature: tx.signature }, 'Failed to parse potential copy trade');
     }
   }
+
+  /**
+   * Process a parsed transaction to detect buy signals
+   */
+  private async processTransaction(signature: string, parsed: any): Promise<void> {
+    const preTokenBalances = parsed.meta.preTokenBalances || [];
+    const postTokenBalances = parsed.meta.postTokenBalances || [];
+    const accountKeys = parsed.transaction.message.accountKeys;
+    
+    const walletPubkey = this.config.walletAddress;
+    const walletIndex = accountKeys.findIndex((k: any) => k.pubkey.toBase58() === walletPubkey);
+
+    if (walletIndex === -1) return;
+
+    // Check SOL change
+    const preSol = parsed.meta.preBalances[walletIndex];
+    const postSol = parsed.meta.postBalances[walletIndex];
+    const solChange = (postSol - preSol) / 1e9;
+
+    // Check Token changes
+    let boughtMint: string | undefined;
+
+    const getBalance = (balances: any[], mint: string, owner: string) => {
+      const b = balances.find(x => x.mint === mint && x.owner === owner);
+      return b ? parseFloat(b.uiTokenAmount.uiAmountString || '0') : 0;
+    };
+
+    const involvedMints = new Set<string>();
+    [...preTokenBalances, ...postTokenBalances].forEach(b => {
+      if (b.owner === walletPubkey) involvedMints.add(b.mint);
+    });
+
+    for (const mint of involvedMints) {
+      const pre = getBalance(preTokenBalances, mint, walletPubkey);
+      const post = getBalance(postTokenBalances, mint, walletPubkey);
+      if (post > pre) {
+        boughtMint = mint;
+        break;
+      }
+    }
+
+    const isBuy = solChange < -0.001 && !!boughtMint;
+    
+    if (isBuy && boughtMint) {
+      logger.info({ 
+        signature, 
+        mint: boughtMint, 
+        solSpent: Math.abs(solChange).toFixed(4)
+      }, '🎯 COPY TRADE BUY SIGNAL (Real-time)');
+
+      agentEvents.emit({
+        type: 'COPY_TRADE_SIGNAL',
+        timestamp: Date.now(),
+        data: {
+           mint: boughtMint,
+           sourceWallet: this.config.walletAddress,
+           signature,
+           solSpent: Math.abs(solChange)
+        }
+      });
+    }
+  }
 }
+

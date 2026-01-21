@@ -14,6 +14,17 @@ import type { AnalysisContext } from '../personality/prompts.js';
 import { agentEvents } from '../events/emitter.js';
 import { TransactionParser } from './transaction-parser.js';
 import type { HeliusClient } from '../api/helius.js';
+import { ScoringEngine, type TokenScore } from './scoring-engine.js';
+
+/**
+ * Known LP pool program addresses to exclude from holder concentration
+ */
+const LP_PROGRAM_ADDRESSES = new Set([
+  '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', // Raydium AMM
+  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Raydium V4
+  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
+  '6EF8rrecthR5Dkzon8Nwu2RMhZvZP9vhU8uLxWv2fCmY', // Pump.fun Bonding Curve
+]);
 
 /**
  * Trading configuration
@@ -150,13 +161,31 @@ export class TradingEngine {
         };
       }
 
-      // Calculate top 10 holder concentration
-      const top10 = holders.slice(0, 10);
-      const top10Percent = top10.reduce((sum, h) => sum + h.percentage, 0);
-      const topHolderPercent = holders[0]?.percentage || 0;
+      // Filter out LP program addresses before calculating concentration
+      const nonLpHolders = holders.filter(h => !LP_PROGRAM_ADDRESSES.has(h.owner));
 
-      // STRICT thresholds: top 10 < 20%, single holder < 10%
-      const isConcentrated = top10Percent > 20 || topHolderPercent > 10;
+      if (nonLpHolders.length === 0) {
+        return {
+          top10Percent: 0,
+          topHolderPercent: 0,
+          isConcentrated: false,
+          reason: 'Only LP pools as holders',
+        };
+      }
+
+      // Calculate top 10 holder concentration (excluding LPs)
+      const top10 = nonLpHolders.slice(0, 10);
+      const totalPercent = nonLpHolders.reduce((sum, h) => sum + h.percentage, 0);
+      // Normalize percentages after excluding LPs
+      const top10Percent = totalPercent > 0 
+        ? (top10.reduce((sum, h) => sum + h.percentage, 0) / totalPercent) * 100 
+        : 0;
+      const topHolderPercent = totalPercent > 0 
+        ? (nonLpHolders[0]?.percentage / totalPercent) * 100 
+        : 0;
+
+      // RELAXED thresholds: top holder < 15%, top 10 < 50%
+      const isConcentrated = topHolderPercent > 15 || top10Percent > 50;
       let reason: string | undefined;
 
       if (topHolderPercent > 10) {
@@ -285,31 +314,23 @@ export class TradingEngine {
     }
     reasons.push(`Holder distribution OK (top holder: ${concentration.topHolderPercent.toFixed(1)}%, top 10: ${concentration.top10Percent.toFixed(1)}%)`);
 
-    // Step 3: Check smart money participation - REQUIRED for entry
+    // Step 3: Check smart money participation - OPTIONAL, used for position sizing bonus
     const smartMoneyResult = await this.countSmartMoney(mint);
     const smartMoneyCount = smartMoneyResult.count;
 
-    // STRICT: Must have at least 1 smart money wallet to buy
+    // Smart money is now OPTIONAL - we trade based on safety/concentration/liquidity
+    // Smart money presence increases position size as a bonus
     if (smartMoneyCount === 0) {
-      reasons.push('REJECTED: No smart money detected - need at least 1 whale/profitable wallet');
-      return {
-        shouldTrade: false,
-        positionSizeSol: 0,
-        reasons,
-        safetyAnalysis,
-        smartMoneyCount: 0,
-      };
-    }
-
-    // Scale position based on smart money count
-    if (smartMoneyCount >= 5) {
+      reasons.push('No smart money detected - using base position size');
+    } else if (smartMoneyCount >= 5) {
       positionSize *= 1.5;
       reasons.push(`Strong smart money signal (${smartMoneyCount} wallets) - increased position 50%`);
     } else if (smartMoneyCount >= 3) {
       positionSize *= 1.25;
       reasons.push(`Good smart money signal (${smartMoneyCount} wallets) - increased position 25%`);
     } else {
-      reasons.push(`Smart money present (${smartMoneyCount} wallet(s)) - entry approved`);
+      positionSize *= 1.1;
+      reasons.push(`Smart money present (${smartMoneyCount} wallet(s)) - increased position 10%`);
     }
 
     // Cap at maximum position size

@@ -88,15 +88,19 @@ export interface TopTrader {
 export class BirdeyeClient {
   private apiKey: string;
   private baseUrl: string;
+  
+  // Rate Limiting State
   private lastRequestTime = 0;
-  // FREE TIER: 100 requests/minute = ~1.67 req/s, so 1000ms delay is safe
-  private readonly MIN_REQUEST_DELAY_MS = 1000; // Rate limiting for FREE tier
+  // STRICT LIMIT: Free tier is ~1 req/sec. We use 1200ms to be safe against clock drift.
+  private readonly MIN_REQUEST_DELAY_MS = 1200; 
+  // Queue promise to strictly serialize rate limit checks
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   constructor(config: BirdeyeConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl || 'https://public-api.birdeye.so';
 
-    log.info('Birdeye client initialized (FREE tier rate limits)');
+    log.info('Birdeye client initialized (Queue-based Rate Limiter Active)');
   }
 
   /**
@@ -505,18 +509,31 @@ export class BirdeyeClient {
   }
 
   /**
-   * Enforce rate limiting
+   * Enforce rate limiting using a Mutex/Queue pattern
+   * This prevents race conditions when multiple requests are fired via Promise.all
    */
   private async enforceRateLimit(): Promise<void> {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
+    // Chain this request to the end of the existing queue
+    // This ensures Request B waits for Request A to finish its delay logic
+    const nextRequest = this.rateLimitQueue.then(async () => {
+        const now = Date.now();
+        const timeSinceLastRequest = now - this.lastRequestTime;
 
-    if (timeSinceLastRequest < this.MIN_REQUEST_DELAY_MS) {
-      const delay = this.MIN_REQUEST_DELAY_MS - timeSinceLastRequest;
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
+        if (timeSinceLastRequest < this.MIN_REQUEST_DELAY_MS) {
+            const delay = this.MIN_REQUEST_DELAY_MS - timeSinceLastRequest;
+            // log.debug({ delay }, 'Rate limit throttling active');
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
 
-    this.lastRequestTime = Date.now();
+        // Update timestamp *immediately* before releasing the lock
+        this.lastRequestTime = Date.now();
+    });
+
+    // Update the queue pointer
+    this.rateLimitQueue = nextRequest;
+    
+    // Wait for our turn
+    return nextRequest;
   }
 }
 
