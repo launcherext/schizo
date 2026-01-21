@@ -346,11 +346,24 @@ function updateStats(stats) {
   // Format PnL values with sign
   const formatPnL = (val) => (val >= 0 ? '+' : '') + val.toFixed(3);
   
-  // Display breakdown: "R: X | U: Y | T: Z"
+  // Display breakdown with better styling
   pnlElement.innerHTML = `
-    <span class="${realizedPnL >= 0 ? 'positive' : 'negative'}">R: ${formatPnL(realizedPnL)}</span> |
-    <span class="${unrealizedPnL >= 0 ? 'positive' : 'negative'}">U: ${formatPnL(unrealizedPnL)}</span> |
-    <span class="${totalPnL >= 0 ? 'positive' : 'negative'}">T: ${formatPnL(totalPnL)} SOL</span>
+    <div class="pnl-breakdown">
+      <div class="pnl-item">
+        <span class="pnl-label">REALIZED</span>
+        <span class="pnl-value ${realizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(realizedPnL)}</span>
+      </div>
+      <div class="pnl-divider">•</div>
+      <div class="pnl-item">
+        <span class="pnl-label">UNREALIZED</span>
+        <span class="pnl-value ${unrealizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(unrealizedPnL)}</span>
+      </div>
+      <div class="pnl-divider">•</div>
+      <div class="pnl-item">
+        <span class="pnl-label">TOTAL</span>
+        <span class="pnl-value ${totalPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(totalPnL)} <span class="pnl-unit">SOL</span></span>
+      </div>
+    </div>
   `;
   
   document.getElementById('buybacks').textContent = stats.totalBuybacks;

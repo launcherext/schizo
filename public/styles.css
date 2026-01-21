@@ -556,6 +556,49 @@ h2 {
     color: #f87171;
 }
 
+/* PnL Breakdown Styling */
+.pnl-breakdown {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pnl-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.pnl-label {
+    font-size: 0.65em;
+    color: rgba(140, 219, 199, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: normal;
+}
+
+.pnl-value {
+    font-size: 1.4em;
+    font-weight: bold;
+    text-shadow: 0 0 10px currentColor;
+    letter-spacing: 0.5px;
+}
+
+.pnl-unit {
+    font-size: 0.7em;
+    opacity: 0.8;
+    margin-left: 3px;
+}
+
+.pnl-divider {
+    color: rgba(140, 219, 199, 0.3);
+    font-size: 1.2em;
+    margin: 0 4px;
+}
+
 /* Main Panels - Side by Side Layout */
 #main-panels {
     display: flex;
