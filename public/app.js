@@ -933,6 +933,7 @@ function updateTrenchRadioFromPositions(positions) {
 
     if (!hasPositions) {
         window.trenchRadio.updatePositionPnL(0, false);
+        window.trenchRadio.setState('SCANNING');
         updateTrenchRadioUI('SCANNING');
         return;
     }

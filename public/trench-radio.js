@@ -29,6 +29,7 @@ class TrenchRadio {
     this.positionPnL = 0;
     this.hasActivePosition = false;
     this.crashTimeout = null;
+    this.isAudioPlaying = false;
     
     // File Playback
     this.audioElement = new Audio();
@@ -178,16 +179,19 @@ class TrenchRadio {
       try { this.noiseNode.stop(); } catch (e) {}
       this.noiseNode = null;
     }
-    
+
     // Stop File
     if (this.audioElement) {
         this.audioElement.pause();
     }
+
+    this.isAudioPlaying = false;
   }
 
   setState(state) {
-    if (this.currentState === state && this.isEnabled) return;
-    
+    // Only skip if state is the same AND audio is already playing
+    if (this.currentState === state && this.isAudioPlaying) return;
+
     const prevState = this.currentState;
     this.currentState = state;
     console.log(`Trench Radio: ${prevState} -> ${state}`);
@@ -197,9 +201,13 @@ class TrenchRadio {
       this.crashTimeout = null;
     }
 
-    if (!this.isEnabled) return;
+    if (!this.isEnabled) {
+      this.isAudioPlaying = false;
+      return;
+    }
 
     this.stopAllAudio();
+    this.isAudioPlaying = true;
 
     switch (state) {
       case 'SCANNING':
