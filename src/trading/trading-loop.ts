@@ -48,7 +48,7 @@ export class TradingLoop {
   private isRunning: boolean = false;
   private intervalId?: NodeJS.Timeout;
   private trendingIntervalId?: NodeJS.Timeout; // Separate interval for trending scan
-  private seenTokens = new Set<string>(); // Track tokens we've already analyzed
+  private seenTokens = new Map<string, number>(); // Track tokens we've already analyzed with timestamp
   private tokenMetadataCache = new Map<string, TokenMetadata>(); // Cache enriched data
 
   private trendingTokenQueue: BirdeyeToken[] = []; // Queue of trending tokens from Birdeye
@@ -160,8 +160,9 @@ export class TradingLoop {
       let addedCount = 0;
 
       for (const token of allTokens) {
-        // Skip if already seen
-        if (this.seenTokens.has(token.address)) continue;
+        // Skip if already seen recently (within last 30 mins)
+        const lastSeen = this.seenTokens.get(token.address);
+        if (lastSeen && Date.now() - lastSeen < 30 * 60 * 1000) continue;
 
         // Quick filter for trending tokens
         const filterResult = this.passesTrendingFilter(token);
@@ -174,7 +175,7 @@ export class TradingLoop {
           continue;
         }
 
-        this.seenTokens.add(token.address);
+        this.seenTokens.set(token.address, Date.now());
         this.trendingTokenQueue.push(token);
         addedCount++;
 
@@ -237,14 +238,25 @@ export class TradingLoop {
    * Process trending token queue
    */
   private async processTrendingQueue(): Promise<void> {
-    if (this.isProcessing || this.trendingTokenQueue.length === 0) return;
+    this.isProcessing = true;
+    try {
+      // Process up to 3 trending tokens per cycle
+      const tokensToProcess = this.trendingTokenQueue.splice(0, 3);
 
-    // Process up to 3 trending tokens per cycle
-    const tokensToProcess = this.trendingTokenQueue.splice(0, 3);
+      for (const token of tokensToProcess) {
+        // Convert Birdeye token to analysis format
+        await this.analyzeAndTrade(token.address, token);
+      }
+    } finally {
+      this.isProcessing = false;
 
-    for (const token of tokensToProcess) {
-      // Convert Birdeye token to analysis format
-      await this.analyzeAndTrade(token.address, token);
+      // Cleanup seen tokens map occasionally (every cycle)
+      const now = Date.now();
+      for (const [mint, timestamp] of this.seenTokens.entries()) {
+        if (now - timestamp > 60 * 60 * 1000) { // 1 hour TTL
+          this.seenTokens.delete(mint);
+        }
+      }
     }
   }
 
@@ -482,6 +494,32 @@ export class TradingLoop {
     const liquidity = metadata?.liquidity || birdeyeToken?.liquidity || (marketCapSol * 170);
     const isTrending = !!birdeyeToken;
 
+    // CRITICAL: Safety Analysis FIRST (save API calls and time)
+    // Bail immediately if unsafe (mint/freeze auth enabled)
+    const safetyResult = await this.tokenSafety.analyze(mint);
+
+    agentEvents.emit({
+      type: 'SAFETY_CHECK',
+      timestamp: Date.now(),
+      data: { mint, result: safetyResult },
+    });
+
+    if (!safetyResult.isSafe) {
+        logger.warn({ mint, risks: safetyResult.risks }, '⛔ REJECTED: Unsafe token (Mint/Freeze Auth)');
+        return;
+    }
+
+    // Filter: Liquidity to Market Cap Ratio Check
+    // Prevent thin LP rugs (liquidity < 8% of MC)
+    if (liquidity > 0 && marketCapSol > 0) {
+        const mcUsd = marketCapSol * 170; // Approx SOL price
+        const ratio = liquidity / mcUsd;
+        if (ratio < 0.08) {
+             logger.warn({ mint, liquidity, mcUsd, ratio: ratio.toFixed(3) }, '⛔ REJECTED: Thin Liquidity (<8% of MC)');
+             return;
+        }
+    }
+
     logger.info({
       mint,
       symbol,
@@ -557,15 +595,9 @@ export class TradingLoop {
         logger.info({ mint, symbol, volume24h: birdeyeToken?.volume24h, liquidity: birdeyeToken?.liquidity }, 'Trending token - skipping new token activity checks');
       }
 
-      // Step 1: Safety analysis
-      const safetyResult = await this.tokenSafety.analyze(mint);
-
-      agentEvents.emit({
-        type: 'SAFETY_CHECK',
-        timestamp: Date.now(),
-        data: { mint, result: safetyResult },
-      });
-
+      // Step 1: Safety analysis (Already done above!)
+      // Skipping redundant call...
+      
       // Only emit SAFETY thought if there are critical risks worth calling out
       const hasCriticalRisk = safetyResult.risks.some(r =>
         r === 'MINT_AUTHORITY_ACTIVE' || r === 'FREEZE_AUTHORITY_ACTIVE'
