@@ -13,7 +13,10 @@ import { TokenSafetyAnalyzer } from './analysis/token-safety.js';
 import { SmartMoneyTracker } from './analysis/smart-money.js';
 import { TradingEngine } from './trading/trading-engine.js';
 import { TradingLoop, DEFAULT_TRADING_LOOP_CONFIG } from './trading/trading-loop.js';
+import { EntertainmentMode } from './trading/entertainment-mode.js';
 import { ClaudeClient, DEFAULT_CLAUDE_CONFIG } from './personality/claude-client.js';
+import { MoodSystem } from './personality/mood-system.js';
+import { CommentarySystem } from './personality/commentary-system.js';
 import { DeepgramTTS, VoiceNarrator } from './personality/deepgram-tts.js';
 import { TwitterClient } from './personality/twitter-client.js';
 import { MarketWatcher } from './analysis/market-watcher.js';
@@ -229,12 +232,67 @@ async function main(): Promise<void> {
         log.info('🎯 Sniper Pipeline started - Listening for new tokens w/ dynamic delay');
     }
 
-    // Initialize Trading Loop (Handles Position Management + Trending Toknes)
+    // Initialize Entertainment Systems (Phase 4)
+    const entertainmentEnabled = process.env.ENTERTAINMENT_MODE !== 'false';
+    log.info({ entertainmentEnabled }, 'Entertainment mode configuration');
+
+    // MoodSystem - tracks agent emotional state
+    const moodSystem = new MoodSystem({
+      quietPeriodMs: 5 * 60 * 1000,    // 5 min to restlessness
+      maniacChance: 0.08,               // 8% degen moments
+      moodDecayMs: 10 * 60 * 1000,      // 10 min mood decay
+    });
+    log.info('MoodSystem initialized');
+
+    // EntertainmentMode - degen trading decisions
+    const entertainmentMode = new EntertainmentMode({
+      enabled: entertainmentEnabled,
+      minPositionSol: 0.01,             // $2 min bet
+      maxPositionSol: 0.05,             // $10 max bet
+      quietPeriodMs: 5 * 60 * 1000,     // 5 min pressure start
+      maxQuietPeriodMs: 15 * 60 * 1000, // 15 min max pressure
+      degenChance: 0.08,                // 8% random ape
+      cooldownMs: 5 * 60 * 1000,        // 5 min between trades
+      maxTradesPerHour: 6,              // Rate limit
+    }, moodSystem);
+    log.info({ enabled: entertainmentEnabled }, 'EntertainmentMode initialized');
+
+    // CommentarySystem - controls speech timing
+    const commentarySystem = new CommentarySystem(moodSystem, {
+      minSpeechGapMs: 15000,            // 15 second minimum
+      maxSpeechGapMs: 60000,            // 60 second max before musing
+      maxQueueSize: 3,                  // Priority queue size
+    });
+    if (claude) {
+      commentarySystem.setClaudeClient(claude);
+    }
+
+    // Hook up commentary to narrator for TTS
+    if (narrator) {
+      commentarySystem.onSpeech(async (text, beat) => {
+        await narrator.say(text);
+        agentEvents.emit({
+          type: 'SCHIZO_SPEAKS',
+          timestamp: Date.now(),
+          data: { text },
+        });
+      });
+    }
+
+    // Start commentary system
+    commentarySystem.start();
+    log.info('CommentarySystem initialized and started');
+
+    // Listen for mood changes and emit events
+    // Mood changes happen internally via MoodSystem.setMood which emits MOOD_CHANGE
+
+    // Initialize Trading Loop (Handles Position Management + Trending Tokens)
     tradingLoop = new TradingLoop(
       {
         ...DEFAULT_TRADING_LOOP_CONFIG,
         runLoop: true, // Always run the loop for positions/trending
         enableTrading: process.env.TRADING_ENABLED === 'true' && !!tradingEngine,
+        entertainmentMode: entertainmentEnabled,
       },
       connection,
       dbWithRepos,
@@ -242,7 +300,10 @@ async function main(): Promise<void> {
       smartMoney,
       tradingEngine!, // May be undefined - loop handles this
       claude,
-      wallet?.publicKey // Pass wallet public key for balance tracking
+      wallet?.publicKey, // Pass wallet public key for balance tracking
+      moodSystem,
+      entertainmentMode,
+      commentarySystem
     );
 
     // Initialize Copy Trader (supports multiple wallets)
@@ -326,6 +387,7 @@ async function main(): Promise<void> {
       // Shutdown handlers
       const shutdown = () => {
         log.info('Shutting down...');
+        if (commentarySystem) commentarySystem.stop();
         if (marketWatcher) marketWatcher.stop();
         if (sniperPipeline) sniperPipeline.stop();
         if (tradingLoop) tradingLoop.stop();
@@ -349,6 +411,7 @@ async function main(): Promise<void> {
       log.info(`  ${tradingEngine ? '✅' : '⚠️'} Phase 3: Trading Engine ${tradingEngine ? '(READY)' : '(DISABLED)'}`);
       log.info(`  ${claude ? '✅' : '⚠️'} Phase 4: AI Personality ${claude ? '(ACTIVE)' : '(DISABLED)'}`);
       log.info(`  ${narrator ? '✅' : '⚠️'} Voice: Deepgram TTS ${narrator ? '(ACTIVE)' : '(DISABLED)'}`);
+      log.info(`  ${entertainmentEnabled ? '✅' : '⚠️'} Entertainment Mode ${entertainmentEnabled ? '(ACTIVE - Degen trading)' : '(DISABLED)'}`);
       log.info(`  ✅ Market Watcher: Learning from trades`);
       log.info('');
 
@@ -357,17 +420,20 @@ async function main(): Promise<void> {
       log.info('🧠 Market Watcher started - Learning patterns...');
 
       // Voice announcements for analysis and trade events
+      // NOTE: When entertainmentMode is enabled, speech goes through CommentarySystem
+      // This handler is for backwards compat and non-commentary events
       if (narrator) {
         agentEvents.onAny(async (event) => {
           try {
             let speech: string | null = null;
 
             // ANALYSIS_THOUGHT events - SCHIZO thinking out loud during analysis
-            if (event.type === 'ANALYSIS_THOUGHT') {
+            // Skip if commentarySystem is handling speech
+            if (event.type === 'ANALYSIS_THOUGHT' && !entertainmentEnabled) {
               speech = event.data.thought;
             }
-            // Trade executed events
-            else if (event.type === 'TRADE_EXECUTED') {
+            // Trade executed events - only voice if not using commentary system
+            else if (event.type === 'TRADE_EXECUTED' && !entertainmentEnabled) {
               const { type, amount, mint } = event.data;
               const shortMint = mint.slice(0, 6);
               if (claude) {
@@ -383,9 +449,13 @@ async function main(): Promise<void> {
               }
             } else if (event.type === 'STOP_LOSS') {
               const { mint, lossPercent } = event.data;
+              // Update mood on loss
+              moodSystem.recordTradeResult(false, -lossPercent);
               speech = `Stop loss triggered. Down ${lossPercent.toFixed(1)} percent on ${mint.slice(0, 6)}. The patterns lied to me.`;
             } else if (event.type === 'TAKE_PROFIT') {
               const { mint, profitPercent } = event.data;
+              // Update mood on win
+              moodSystem.recordTradeResult(true, profitPercent);
               speech = `Taking profit. Up ${profitPercent.toFixed(1)} percent on ${mint.slice(0, 6)}. The voices were right this time.`;
             } else if (event.type === 'BUYBACK_TRIGGERED') {
               const { amount, profit } = event.data;
