@@ -32,7 +32,7 @@ export interface AIResponse {
  */
 const DEFAULT_MODELS: Record<AIProvider, string> = {
   claude: 'claude-sonnet-4-20250514',
-  groq: 'llama-3.1-70b-versatile',  // Fast & free
+  groq: 'llama-3.3-70b-versatile',  // Fast & free (updated from decommissioned 3.1)
   gemini: 'gemini-1.5-flash',        // Fast & free
 };
 
