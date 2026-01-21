@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-20)
 
 **Core value:** Self-funding AI trader with deep wallet forensics and entertaining paranoid personality
-**Current focus:** Phase 4 - Personality & Streaming
+**Current focus:** Phase 4 Complete - All systems integrated
 
 ## Current Position
 
 Phase: 4 of 4 (Personality & Streaming)
-Plan: 3 of 3 in Phase 4
-Status: Phase 4 Complete
-Last activity: 2026-01-20 - Completed 04-03-PLAN.md (Commentary System)
+Plan: 4 of 4 in Phase 4
+Status: Phase 4 Complete - Full Integration Done
+Last activity: 2026-01-21 - Completed 04-04-PLAN.md (Entertainment Integration)
 
-Progress: [################] 100% (15/15 plans)
+Progress: [################] 100% (16/16 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
+- Total plans completed: 16
 - Average duration: ~7 min
-- Total execution time: ~100 min
+- Total execution time: ~106 min
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [################] 100% (15/15 plans)
 | 1. Foundation & Security | 5/5 | 29 min | 6 min |
 | 2. Analysis & Token Safety | 4/4 | 44 min | 11 min |
 | 3. Trading & Economic Loop | 4/4 | - | - |
-| 4. Personality & Streaming | 3/3 | ~15 min | ~5 min |
+| 4. Personality & Streaming | 4/4 | ~21 min | ~5 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (10 min), 04-01 (4 min), 04-02 (~5 min), 04-03 (5 min)
+- Last 5 plans: 04-01 (4 min), 04-02 (~5 min), 04-03 (5 min), 04-04 (6 min)
 - Trend: Phase 4 faster due to less infrastructure complexity
 
 *Updated after each plan completion*
@@ -70,6 +70,9 @@ Recent decisions affecting current work:
 | Narrative beat speech triggers | 04-03 | Commentary only at interesting moments |
 | 15s minimum speech gap | 04-03 | Prevent spam, feel natural |
 | Priority queue for commentary | 04-03 | Trade results always reported, filler dropped when busy |
+| Entertainment mode on by default | 04-04 | Opt-out via ENTERTAINMENT_MODE=false |
+| Commentary through CommentarySystem | 04-04 | Controlled speech timing in TradingLoop |
+| Mood updates from trade events | 04-04 | STOP_LOSS/TAKE_PROFIT trigger mood changes |
 
 ### Pending Todos
 
@@ -146,12 +149,17 @@ Resolved during execution:
 4. Speech triggers only at narrative beats (not every scan)
 5. Mood-aware prompts for personality consistency
 6. Paranoid musings fill quiet periods
+7. Entertainment mode fully integrated into TradingLoop
+8. STATS_UPDATE includes mood and time pressure for frontend
 
 **Modules delivered:**
 - `src/personality/mood-system.ts` - MoodSystem with 6 emotional states
 - `src/personality/commentary-system.ts` - CommentarySystem with timing and queue
 - `src/personality/prompts.ts` - Extended with mood-aware helpers
-- `src/trading/entertainment-mode.ts` - Entertainment mode integration
+- `src/trading/entertainment-mode.ts` - Entertainment mode decisions
+- Updated `src/trading/trading-loop.ts` - Full entertainment integration
+- Updated `src/index.ts` - Initialize and wire all systems
+- Updated `src/events/types.ts` - STATS_UPDATE with mood data
 
 **Personality System Complete:**
 1. Mood tracking -> CONFIDENT, PARANOID, RESTLESS, MANIC, TILTED, NEUTRAL
@@ -159,16 +167,19 @@ Resolved during execution:
 3. Commentary queue -> Priority-based, max 3 items, expiry
 4. Narrative beats -> DISCOVERY, ANALYSIS, DECISION, TRADE_RESULT, PARANOID_MUSING, TIME_PRESSURE
 5. Quiet period detection -> Automatic musings after 60s silence
+6. Entertainment mode -> Micro bets (0.01-0.05 SOL), time pressure, degen moments
+7. Full integration -> TradingLoop uses EntertainmentMode, updates mood, queues commentary
 
 ## Project Complete
 
 All 4 phases executed successfully. Core $SCHIZO agent ready for:
 - Mainnet deployment
-- Frontend streaming integration
+- Frontend streaming integration (mood/time pressure in STATS_UPDATE)
 - TTS integration via onSpeech callback
+- pump.fun integration via WebSocket proxy
 
 ## Session Continuity
 
-Last session: 2026-01-20
-Stopped at: Completed 04-03-PLAN.md (Commentary System)
+Last session: 2026-01-21
+Stopped at: Completed 04-04-PLAN.md (Entertainment Integration)
 Resume file: None
