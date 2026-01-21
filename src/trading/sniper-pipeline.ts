@@ -137,8 +137,9 @@ export class SniperPipeline {
     // PRE-FILTER: Skip tokens that are extremely unlikely to pass validation
     // This saves API calls and reduces queue congestion
 
-    // 1. Minimum market cap filter - tokens below 30 SOL rarely survive
-    const MIN_MCAP_SOL = 30;
+    // 1. Minimum market cap filter - extremely low mcap tokens are usually dead
+    // Lowered to 25 SOL to catch early momentum (tokens start at ~28 SOL)
+    const MIN_MCAP_SOL = 25;
     if (token.marketCapSol < MIN_MCAP_SOL) {
       logger.debug({
         mint: token.mint,
