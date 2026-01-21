@@ -27,3 +27,7 @@ Thumbs.db
 *.log
 logs/
 promotional-video
+*.mp4
+*.mov
+*.avi
+*.mkv

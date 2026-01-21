@@ -107,9 +107,10 @@ class TokenSafetyAnalyzer {
     }
 
     // Check metadata mutability
-    if (asset.mutable) {
+    // REMOVED FILTER: User requested to ignore mutable metadata risk
+    /* if (asset.mutable) {
       risks.push('MUTABLE_METADATA');
-    }
+    } */
 
     // Determine safety
     // Safe if no risks OR only mutable metadata (warning, not blocker)
