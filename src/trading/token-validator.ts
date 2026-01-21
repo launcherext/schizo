@@ -199,12 +199,12 @@ export class TokenValidator {
     const bondingProgress = Math.min(100, (token.vSolInBondingCurve / GRADUATION_THRESHOLD_SOL) * 100);
 
     // Market cap thresholds in SOL (since bonding curve tokens are priced in SOL)
-    // Lower thresholds to catch early momentum - most tokens start at ~28 SOL
+    // Most tokens start at ~28 SOL mcap - thresholds set to catch early momentum
     const minMarketCapSol = {
-      CONSERVATIVE: 60,    // ~$10k at $170/SOL
-      BALANCED: 35,        // ~$6k - reasonable entry
-      AGGRESSIVE: 28,      // ~$4.8k - very early
-      ENTERTAINMENT: 25,   // ~$4.3k - earliest possible
+      CONSERVATIVE: 50,    // ~$8.5k at $170/SOL
+      BALANCED: 28,        // ~$4.8k - catch early momentum (lowered from 30 to match reality)
+      AGGRESSIVE: 28,      // ~$4.8k - very early entry
+      ENTERTAINMENT: 0,    // No minimum - catch everything
     };
 
     // Minimum bonding progress (% toward graduation)

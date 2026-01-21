@@ -102,11 +102,28 @@ async function main(): Promise<void> {
     // Initialize Solana connection
     const connection = new Connection('https://api.mainnet-beta.solana.com');
 
-    // Initialize analysis modules
+    // Load Risk Profile early for safety analyzer configuration
+    const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;
+    log.info({ riskProfile }, 'Loading Risk Profile');
+
+    // Initialize analysis modules with risk-aware holder thresholds
     log.info('Initializing analysis modules...');
     const { WalletAnalyzer } = await import('./analysis/wallet-analyzer.js');
     const walletAnalyzer = new WalletAnalyzer(helius, dbWithRepos.analysisCache);
-    const tokenSafety = new TokenSafetyAnalyzer(helius, dbWithRepos.analysisCache);
+    
+    // Risk-based holder distribution thresholds
+    const holderThresholds = {
+      CONSERVATIVE: { maxTopHolderPercent: 20, maxTop10HoldersPercent: 40, minHolderCount: 50 },
+      BALANCED: { maxTopHolderPercent: 30, maxTop10HoldersPercent: 50, minHolderCount: 20 },
+      AGGRESSIVE: { maxTopHolderPercent: 40, maxTop10HoldersPercent: 60, minHolderCount: 10 },
+      ENTERTAINMENT: { maxTopHolderPercent: 70, maxTop10HoldersPercent: 90, minHolderCount: 5 }, // Very permissive
+    };
+    
+    const tokenSafety = new TokenSafetyAnalyzer(
+      helius, 
+      dbWithRepos.analysisCache,
+      holderThresholds[riskProfile]
+    );
     const smartMoney = new SmartMoneyTracker(walletAnalyzer, dbWithRepos.analysisCache);
 
     // Initialize Claude client (optional)
@@ -227,10 +244,6 @@ async function main(): Promise<void> {
 
 
 // ... (Rest of imports)
-
-    // Load Risk Profile
-    const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;
-    log.info({ riskProfile }, 'Loading Risk Profile');
 
     // Initialize Learning Engine (learns from trade outcomes)
     const learningEngine = new LearningEngine(dbWithRepos);
