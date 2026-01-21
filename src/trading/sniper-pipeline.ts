@@ -20,8 +20,10 @@ const DEFAULT_CONFIG: SniperPipelineConfig = {
   validationDelayMs: 0, // 0 = Auto-calculate based on risk
   maxQueueSize: 1000,
   enableTrading: false,
-  maxRetries: 10,        // Increased: DexScreener needs time to index new tokens
-  retryDelayMs: 30000,   // 30 seconds between retries (total: ~5 minutes of retries)
+  // Smarter retry logic - use env var, default to 5 (was 10)
+  // Most tokens that fail validation will never pass - reduce wasted API calls
+  maxRetries: parseInt(process.env.MAX_VALIDATION_RETRIES || '5', 10),
+  retryDelayMs: 30000,   // 30 seconds between retries
 };
 
 export interface QueuedToken {
@@ -126,10 +128,38 @@ export class SniperPipeline {
 
   /**
    * Add new token to the delayed queue
+   * Pre-filters tokens that are unlikely to pass validation
    */
   private enqueueToken(token: PumpNewTokenEvent): void {
     // Basic deduplication
     if (this.queue.some(t => t.token.mint === token.mint)) return;
+
+    // PRE-FILTER: Skip tokens that are extremely unlikely to pass validation
+    // This saves API calls and reduces queue congestion
+
+    // 1. Minimum market cap filter - tokens below 30 SOL rarely survive
+    const MIN_MCAP_SOL = 30;
+    if (token.marketCapSol < MIN_MCAP_SOL) {
+      logger.debug({
+        mint: token.mint,
+        symbol: token.symbol,
+        marketCapSol: token.marketCapSol.toFixed(2)
+      }, 'Skipped: Market cap too low for queue');
+      return;
+    }
+
+    // 2. Suspicious name filter - common rug patterns
+    const suspiciousPatterns = [/test/i, /rug/i, /scam/i, /honeypot/i, /fake/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        logger.debug({
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name
+        }, 'Skipped: Suspicious token name');
+        return;
+      }
+    }
 
     // Queue limiting
     if (this.queue.length >= this.config.maxQueueSize) {
@@ -145,9 +175,10 @@ export class SniperPipeline {
       retryCount: 0,
     });
 
-    logger.info({ 
-      mint: token.mint, 
+    logger.info({
+      mint: token.mint,
       symbol: token.symbol,
+      marketCapSol: token.marketCapSol.toFixed(2),
       queueSize: this.queue.length,
       validateAfter: new Date(now + this.config.validationDelayMs).toISOString()
     }, '📥 Token queued for delayed validation');
@@ -245,10 +276,11 @@ export class SniperPipeline {
       }
     });
 
-    logger.info({ mint: token.mint, symbol: token.symbol }, '🔍 Validating token via DexScreener...');
+    logger.info({ mint: token.mint, symbol: token.symbol, marketCapSol: token.marketCapSol.toFixed(2) }, '🔍 Validating bonding curve token...');
 
-    // 3. The Validator (DexScreener)
-    const result = await this.validator.validate(token.mint);
+    // 3. The Validator (Bonding Curve - uses PumpPortal data, not DexScreener)
+    // Bonding curve tokens have $0 DEX liquidity, so we validate using market cap and bonding progress
+    const result = this.validator.validateBondingCurve(token);
 
     if (result.passes) {
       // Emit validation success for frontend
@@ -259,28 +291,33 @@ export class SniperPipeline {
           mint: token.mint,
           symbol: token.symbol,
           name: token.name,
-          liquidity: result.metadata?.liquidity,
-          marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
+          liquidity: 0, // Bonding curve = no DEX liquidity
+          marketCapSol: result.marketCapSol,
           stage: 'safety',
-          thought: `${token.symbol} has $${result.metadata?.liquidity?.toLocaleString() || '?'} liquidity. Looking good so far...`
+          thought: `${token.symbol} at ${result.marketCapSol.toFixed(1)} SOL mcap (${result.bondingProgress.toFixed(1)}% to graduation). Looking promising...`
         }
       });
 
       logger.info({
         mint: token.mint,
         symbol: token.symbol,
-        liquidity: result.metadata?.liquidity,
-        volume: result.metadata?.volume1h,
-        reason: 'Passed DexScreener validation'
-      }, '✅ Token validated! Passing to Execution...');
+        marketCapSol: result.marketCapSol,
+        bondingProgress: result.bondingProgress,
+        reason: 'Passed bonding curve validation'
+      }, '✅ Bonding curve token validated! Passing to Execution...');
 
       // Notify system
       agentEvents.emit({
         type: 'TOKEN_DISCOVERED',
         timestamp: Date.now(),
         data: {
-          ...result.metadata!,
-          source: 'SNIPER_PIPELINE'
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name,
+          marketCapSol: result.marketCapSol,
+          bondingProgress: result.bondingProgress,
+          source: 'SNIPER_PIPELINE',
+          isBondingCurve: true,
         } as any
       });
 
@@ -339,10 +376,10 @@ export class SniperPipeline {
           }
         });
 
-        // Execute via Trading Engine
+        // Execute via Trading Engine (bonding curve token)
         this.tradingEngine.executeBuy(token.mint, {
-             marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
-             liquidity: result.metadata?.liquidity,
+             marketCapSol: result.marketCapSol,
+             liquidity: 0, // Bonding curve = no DEX liquidity
              symbol: token.symbol,
              name: token.name,
              imageUrl: token.imageUrl,
@@ -350,7 +387,7 @@ export class SniperPipeline {
       }
 
     } else {
-      const rejectReason = result.reason || 'DexScreener validation failed';
+      const rejectReason = result.reason || 'Bonding curve validation failed';
       analysisLogs.push(`Validation: FAILED`);
       analysisLogs.push(`Rejected: ${rejectReason}`);
 
@@ -381,28 +418,13 @@ export class SniperPipeline {
         }
       });
 
-      // RETRY LOGIC for Low Liquidity / No Data
-      // If the reason is "no data" or "low liquidity" (and it's $0), it might just be indexing lag.
-      if ((!result.metadata || result.metadata.liquidity === 0) && queued.retryCount < this.config.maxRetries) {
-          logger.warn({
-            mint: token.mint,
-            symbol: token.symbol,
-            retry: `${queued.retryCount + 1}/${this.config.maxRetries}`,
-            reason: result.reason
-          }, `⚠️ Validation failed (${result.reason}). Retrying in ${this.config.retryDelayMs/1000}s...`);
-
-          // Re-queue with delay
-          this.queue.push({
-              ...queued,
-              retryCount: queued.retryCount + 1,
-              validateAfter: Date.now() + this.config.retryDelayMs
-          });
-          return;
-      }
-
-      logger.warn({
+      // No retry needed for bonding curve validation - we already have all the data
+      // Token either passes now (market cap + bonding progress criteria) or it doesn't
+      logger.info({
         mint: token.mint,
         symbol: token.symbol,
+        marketCapSol: result.marketCapSol.toFixed(2),
+        bondingProgress: result.bondingProgress.toFixed(1),
         reason: result.reason
       }, `❌ Token rejected: ${result.reason}`);
     }

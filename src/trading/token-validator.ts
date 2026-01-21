@@ -1,6 +1,7 @@
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
 import { createLogger } from '../lib/logger.js';
 import type { RiskProfile } from './types.js';
+import type { PumpNewTokenEvent } from '../api/pumpportal-data.js';
 
 const logger = createLogger('token-validator');
 
@@ -9,6 +10,15 @@ export interface ValidationResult {
   passes: boolean;
   reason?: string;
   metadata?: TokenMetadata;
+  isBondingCurve?: boolean; // True if validated via bonding curve data
+}
+
+export interface BondingCurveValidationResult {
+  mint: string;
+  passes: boolean;
+  reason?: string;
+  marketCapSol: number;
+  bondingProgress: number; // 0-100% progress toward graduation
 }
 
 export interface ValidatorConfig {
@@ -20,8 +30,11 @@ export interface ValidatorConfig {
 
 const DEFAULT_CONFIG: ValidatorConfig = {
   riskProfile: 'BALANCED',
-  requireSocials: false, 
+  requireSocials: false,
 };
+
+// Graduation threshold: ~400 SOL in bonding curve = ~$69k market cap
+const GRADUATION_THRESHOLD_SOL = 400;
 
 /**
  * TokenValidator
@@ -172,5 +185,93 @@ export class TokenValidator {
         reason: 'Validation error',
       };
     }
+  }
+
+  /**
+   * Validate a bonding curve token using PumpPortal data
+   * This is for tokens still on the pump.fun bonding curve (not yet graduated)
+   */
+  validateBondingCurve(token: PumpNewTokenEvent): BondingCurveValidationResult {
+    const profile = this.config.riskProfile;
+
+    // Calculate bonding progress (0-100%)
+    // Tokens graduate at ~400 SOL in bonding curve
+    const bondingProgress = Math.min(100, (token.vSolInBondingCurve / GRADUATION_THRESHOLD_SOL) * 100);
+
+    // Market cap thresholds in SOL (since bonding curve tokens are priced in SOL)
+    const minMarketCapSol = {
+      CONSERVATIVE: 100,   // ~$17k at $170/SOL
+      BALANCED: 50,        // ~$8.5k
+      AGGRESSIVE: 30,      // ~$5k - catch early
+      ENTERTAINMENT: 20,   // ~$3.4k - very early entry
+    };
+
+    // Minimum bonding progress (% toward graduation)
+    const minBondingProgress = {
+      CONSERVATIVE: 20,    // 20% = ~80 SOL in curve
+      BALANCED: 10,        // 10% = ~40 SOL in curve
+      AGGRESSIVE: 5,       // 5% = ~20 SOL in curve
+      ENTERTAINMENT: 2,    // 2% = ~8 SOL in curve - very early
+    };
+
+    const minMcap = minMarketCapSol[profile];
+    const minProgress = minBondingProgress[profile];
+
+    // Check 1: Minimum market cap
+    if (token.marketCapSol < minMcap) {
+      return {
+        mint: token.mint,
+        passes: false,
+        reason: `Low market cap: ${token.marketCapSol.toFixed(1)} SOL < ${minMcap} SOL (${profile})`,
+        marketCapSol: token.marketCapSol,
+        bondingProgress,
+      };
+    }
+
+    // Check 2: Minimum bonding progress (shows there's buying activity)
+    if (bondingProgress < minProgress) {
+      return {
+        mint: token.mint,
+        passes: false,
+        reason: `Low bonding progress: ${bondingProgress.toFixed(1)}% < ${minProgress}% (${profile})`,
+        marketCapSol: token.marketCapSol,
+        bondingProgress,
+      };
+    }
+
+    // Check 3: Creator didn't dump immediately (initialBuy > 0 means dev bought)
+    // If dev didn't buy at all, slightly suspicious but not a deal breaker
+    if (token.initialBuy === 0) {
+      logger.debug({ mint: token.mint }, 'Dev did not buy - proceeding with caution');
+    }
+
+    // Check 4: Suspicious name patterns
+    const suspiciousPatterns = [/rug/i, /scam/i, /honeypot/i, /fake/i, /exit/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        return {
+          mint: token.mint,
+          passes: false,
+          reason: `Suspicious token name: ${token.name}`,
+          marketCapSol: token.marketCapSol,
+          bondingProgress,
+        };
+      }
+    }
+
+    logger.info({
+      mint: token.mint,
+      symbol: token.symbol,
+      marketCapSol: token.marketCapSol.toFixed(2),
+      bondingProgress: bondingProgress.toFixed(1),
+      profile,
+    }, '✅ Bonding curve token validated');
+
+    return {
+      mint: token.mint,
+      passes: true,
+      marketCapSol: token.marketCapSol,
+      bondingProgress,
+    };
   }
 }
