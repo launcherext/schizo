@@ -59,7 +59,9 @@ export class GeckoTerminalClient {
   async getTrendingPools(limit: number = 20): Promise<TokenMetadata[]> {
     try {
       // GeckoTerminal is strict about headers sometimes, but works openly usually
-      const response = await fetch(`${BASE_URL}/networks/solana/trending_pools?page[limit]=${limit}`, {
+      // GeckoTerminal is strict about headers sometimes
+      // Removing page[limit] as it might cause 400s if malformed or restricted
+      const response = await fetch(`${BASE_URL}/networks/solana/trending_pools`, {
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'SchizoAgent/1.0'
@@ -67,7 +69,12 @@ export class GeckoTerminalClient {
       });
 
       if (!response.ok) {
-        logger.warn({ status: response.status, statusText: response.statusText }, 'Failed to fetch GeckoTerminal trending pools');
+        const text = await response.text();
+        logger.warn({ 
+            status: response.status, 
+            statusText: response.statusText,
+            responseBody: text.slice(0, 200) // Log first 200 chars of body
+        }, 'Failed to fetch GeckoTerminal trending pools');
         return [];
       }
 
