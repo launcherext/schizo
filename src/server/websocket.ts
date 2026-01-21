@@ -13,6 +13,7 @@ import type { VoiceNarrator } from '../personality/deepgram-tts.js';
 import type { TradingEngine } from '../trading/trading-engine.js';
 import type { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
 import { logger } from '../lib/logger.js';
+import { handleHeliusWebhook, verifyWebhookSignature, type HeliusWebhookEvent } from '../api/helius-webhook.js';
 import {
   simulateScan,
   simulateReject,
@@ -105,6 +106,41 @@ export function createWebSocketServer(
     }
 
     // === API ENDPOINTS ===
+    
+    // Helius webhook endpoint for real-time wallet tracking
+    if (pathname === '/api/helius-webhook' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          // Verify webhook signature if configured
+          const signature = req.headers['authorization'];
+          if (!verifyWebhookSignature(body, signature as string | undefined)) {
+            logger.warn('Invalid webhook signature');
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid signature' }));
+            return;
+          }
+
+          const events = JSON.parse(body) as HeliusWebhookEvent[];
+          const walletAddress = process.env.WALLET_PUBLIC_KEY || '';
+
+          logger.info({ eventCount: events.length }, '📡 Helius webhook received');
+
+          // Handle events asynchronously
+          await handleHeliusWebhook(events, walletAddress);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, processed: events.length }));
+        } catch (error) {
+          logger.error({ error }, 'Failed to process Helius webhook');
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal server error' }));
+        }
+      });
+      return;
+    }
+    
     // Get SCHIZO token CA from environment
     if (pathname === '/api/schizo-ca' && req.method === 'GET') {
       const ca = process.env.SCHIZO_TOKEN_MINT || '';
