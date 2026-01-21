@@ -1869,17 +1869,20 @@ td a:hover {
 
 .trench-radio-panel {
     position: fixed;
-    bottom: 80px;
-    right: 20px;
-    /* left: 20px; Removed to move to right side */
+    bottom: 20px;
+    right: 140px;
     background: rgba(15, 25, 25, 0.95);
     border: 1px solid rgba(140, 219, 199, 0.3);
-    border-radius: 12px;
-    padding: 12px 16px;
+    border-radius: 24px;
+    /* More pill-shaped */
+    padding: 8px 20px;
     z-index: 1000;
     backdrop-filter: blur(10px);
     transition: all 0.3s ease;
-    min-width: 180px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    min-width: 340px;
 }
 
 .trench-radio-panel:hover {
@@ -1894,16 +1897,17 @@ td a:hover {
 
 .trench-radio-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    gap: 12px;
+    margin-bottom: 0;
+    flex-shrink: 0;
 }
 
 .trench-radio-title {
-    font-size: 0.7em;
+    font-size: 0.75em;
     font-weight: bold;
     color: var(--accent);
-    letter-spacing: 2px;
+    letter-spacing: 1px;
     text-transform: uppercase;
 }
 
@@ -1994,6 +1998,7 @@ td a:hover {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex: 1;
 }
 
 .trench-radio-btn {

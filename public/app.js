@@ -914,13 +914,16 @@ function updateTrenchRadioFromPositions(positions) {
 
     const avgPnL = totalWeight > 0 ? totalPnL / totalWeight : 0;
 
-    window.trenchRadio.updatePositionPnL(avgPnL, true);
-
-    // Update UI state indicator
-    if (avgPnL >= 0) {
-        updateTrenchRadioUI('POSITION_UP');
-    } else {
-        updateTrenchRadioUI('POSITION_DOWN');
+    // Link trench radio state to audio
+    if (window.trenchRadio) {
+        window.trenchRadio.updatePositionPnL(avgPnL, true);
+        
+        let newState = 'SCANNING';
+        if (avgPnL >= 0) newState = 'POSITION_UP';
+        else newState = 'POSITION_DOWN';
+        
+        window.trenchRadio.setState(newState);
+        updateTrenchRadioUI(newState);
     }
 }
 
@@ -957,54 +960,5 @@ function updateTrenchRadioUI(state) {
     }
 }
 
-/**
- * Initialize Trench Radio UI controls
- */
-function initTrenchRadio() {
-    const toggleBtn = document.getElementById('trench-radio-toggle');
-    const volumeSlider = document.getElementById('trench-radio-volume');
-    const stateEl = document.getElementById('trench-radio-state');
-    const panel = document.getElementById('trench-radio-controls');
-    const iconOff = document.getElementById('radio-icon-off');
-    const iconOn = document.getElementById('radio-icon-on');
+// initTrenchRadio removed to avoid conflict with trench-radio.js logic
 
-    if (!toggleBtn || !volumeSlider) return;
-
-    // Toggle button
-    toggleBtn.addEventListener('click', () => {
-        if (!window.trenchRadio) return;
-
-        const isEnabled = window.trenchRadio.toggle();
-
-        // Update UI
-        toggleBtn.classList.toggle('active', isEnabled);
-        panel.classList.toggle('active', isEnabled);
-        iconOff.style.display = isEnabled ? 'none' : 'block';
-        iconOn.style.display = isEnabled ? 'block' : 'none';
-
-        if (isEnabled) {
-            stateEl.textContent = 'SCANNING';
-            stateEl.classList.add('scanning');
-        } else {
-            stateEl.textContent = 'OFF';
-            stateEl.classList.remove('scanning', 'position-up', 'position-down', 'crash');
-        }
-    });
-
-    // Volume slider
-    volumeSlider.addEventListener('input', (e) => {
-        if (!window.trenchRadio) return;
-        const volume = parseInt(e.target.value) / 100;
-        window.trenchRadio.setVolume(volume);
-    });
-
-    // Initialize volume from slider
-    if (window.trenchRadio) {
-        window.trenchRadio.setVolume(parseInt(volumeSlider.value) / 100);
-    }
-}
-
-// Initialize Trench Radio when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    initTrenchRadio();
-});
