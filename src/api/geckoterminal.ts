@@ -251,6 +251,7 @@ export class GeckoTerminalClient {
       priceChange24h: parseFloat(attr.price_change_percentage?.h24 || '0'),
       volume24h: parseFloat(attr.volume_usd?.h24 || '0'),
       volume1h: parseFloat(attr.volume_usd?.h1 || '0'),
+      volume5m: 0, // GeckoTerminal doesn't provide 5m volume
       liquidity: parseFloat(attr.reserve_in_usd || '0'),
       marketCap: parseFloat(attr.fdv_usd || '0'), // Using FDV as proxy for MC
       fdv: parseFloat(attr.fdv_usd || '0'),
