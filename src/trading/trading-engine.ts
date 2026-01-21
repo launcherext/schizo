@@ -791,7 +791,22 @@ export class TradingEngine {
         }
       }
       if (actualAmount <= 0) {
-        logger.warn({ mint }, 'No tokens in wallet to sell');
+        logger.warn({ mint }, 'No tokens in wallet to sell - recording sync sell to close position');
+        // Record a sync sell to close this position in the DB
+        await this.db.trades.insert({
+          signature: `sync-sell-${mint.slice(0, 8)}-${Date.now()}`,
+          timestamp: Date.now(),
+          type: 'SELL',
+          tokenMint: mint,
+          tokenSymbol: 'UNKNOWN',
+          amountTokens: amount, // Close out the DB amount
+          amountSol: 0, // Unknown - sold manually
+          pricePerToken: 0,
+          metadata: {
+            isSync: true,
+            note: 'Position closed - tokens sold manually or transferred out',
+          },
+        });
         return null;
       }
     } catch (error) {

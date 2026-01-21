@@ -188,6 +188,10 @@ function handleEvent(event) {
       // Claude's random commentary on tokens (voice only, but show in stream)
       highlightTokenCommentary(event.data.mint, event.data.commentary);
       break;
+    case 'SCHIZO_TOKEN_UPDATE':
+      // Live $SCHIZO token data from backend
+      updateSchizoTokenCard(event.data);
+      break;
   }
 }
 

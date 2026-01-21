@@ -65,7 +65,8 @@ export type AgentEvent =
   | RewardFailedEvent
   | ShillReceivedEvent
   | ShillRoastEvent
-  | ShillBuyEvent;
+  | ShillBuyEvent
+  | SchizoTokenUpdateEvent;
 
 /**
  * Token scan initiated (even if rejected)
@@ -494,5 +495,25 @@ export interface ShillBuyEvent extends BaseEvent {
     contractAddress: string;
     buySignature: string;
     positionSizeSol: number;
+  };
+}
+
+/**
+ * $SCHIZO token live data update
+ */
+export interface SchizoTokenUpdateEvent extends BaseEvent {
+  type: 'SCHIZO_TOKEN_UPDATE';
+  data: {
+    ca: string;
+    price: number;
+    priceChange24h: number;
+    priceChange1h: number;
+    marketCap: number;
+    volume24h: number;
+    liquidity: number;
+    holders?: number;
+    live: boolean;
+    dexUrl?: string;
+    imageUrl?: string;
   };
 }
