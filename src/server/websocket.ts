@@ -124,6 +124,47 @@ export function createWebSocketServer(
       data: { message: 'Connected to $SCHIZO agent' },
     }));
 
+    // Send initial data (recent trades and positions)
+    if (tradingEngine) {
+      // Send recent trades
+      try {
+        const recentTrades = tradingEngine.getRecentTrades(20);
+        ws.send(JSON.stringify({
+          type: 'INITIAL_TRADES',
+          timestamp: Date.now(),
+          data: { trades: recentTrades },
+        }));
+      } catch (error) {
+        logger.error({ error }, 'Error sending initial trades');
+      }
+
+      // Send current positions with prices
+      (async () => {
+        try {
+          const positions = await tradingEngine.getOpenPositionsWithPrices();
+          ws.send(JSON.stringify({
+            type: 'POSITIONS_UPDATE',
+            timestamp: Date.now(),
+            data: {
+              positions: positions.map(p => ({
+                tokenMint: p.tokenMint,
+                tokenSymbol: p.tokenSymbol,
+                tokenName: p.tokenName,
+                entryAmountSol: p.entryAmountSol,
+                entryAmountTokens: p.entryAmountTokens,
+                entryPrice: p.entryPrice,
+                entryTimestamp: p.entryTimestamp,
+                currentPrice: p.currentPrice,
+                unrealizedPnLPercent: p.unrealizedPnLPercent,
+              })),
+            },
+          }));
+        } catch (error) {
+          logger.error({ error }, 'Error sending initial positions');
+        }
+      })();
+    }
+
     // Handle incoming messages (chat)
     ws.on('message', async (data: Buffer) => {
       try {

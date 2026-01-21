@@ -734,10 +734,24 @@ h2 {
     font-size: 1em;
 }
 
+.holding-name {
+    font-size: 0.8em;
+    color: rgba(140, 219, 199, 0.7);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .holding-ca {
-    font-size: 0.75em;
-    color: rgba(140, 219, 199, 0.5);
+    font-size: 0.7em;
+    color: rgba(140, 219, 199, 0.4);
     font-family: monospace;
+    cursor: pointer;
+}
+
+.holding-ca:hover {
+    color: #8cdbc7;
 }
 
 .holding-right {

@@ -54,6 +54,12 @@ function handleEvent(event) {
     case 'CONNECTED':
       addToFeed('🟢 Connected to agent', 'system');
       break;
+    case 'INITIAL_TRADES':
+      // Load recent trades on connect/reconnect
+      if (event.data.trades && event.data.trades.length > 0) {
+        loadInitialTrades(event.data.trades);
+      }
+      break;
     case 'ANALYSIS_START':
       // Silent - the ANALYSIS_THOUGHT events show the live analysis
       break;
@@ -444,6 +450,19 @@ function addToTradesTable(trade) {
   }
 }
 
+// Load initial trades from server (on connect/reconnect)
+function loadInitialTrades(trades) {
+  const tbody = document.querySelector('#trades tbody');
+
+  // Clear existing trades
+  tbody.innerHTML = '';
+
+  // Add trades in reverse order (oldest first, so newest ends up at top)
+  trades.slice().reverse().forEach(trade => {
+    addToTradesTable(trade);
+  });
+}
+
 // Update status indicator
 function updateStatus(status, connected) {
   const statusEl = document.getElementById('status');
@@ -754,7 +773,10 @@ function updateHoldings(positions) {
         holdingEl.className = 'holding-item';
         holdingEl.onclick = () => openChart(pos.tokenMint);
 
+        // Use actual symbol if available, fallback to truncated mint
         const symbol = pos.tokenSymbol || pos.tokenMint.slice(0, 6);
+        // Use name if available, otherwise show CA
+        const name = pos.tokenName || formatMint(pos.tokenMint);
         const pnlPercent = pos.unrealizedPnLPercent || 0;
         const pnlClass = pnlPercent >= 0 ? 'profit' : 'loss';
         const pnlSign = pnlPercent >= 0 ? '+' : '';
@@ -762,10 +784,11 @@ function updateHoldings(positions) {
 
         holdingEl.innerHTML = `
             <div class="holding-left">
-                <div class="holding-icon">💰</div>
+                <div class="holding-icon" style="font-size: 1.2em;">$</div>
                 <div class="holding-info">
                     <span class="holding-symbol">${symbol}</span>
-                    <span class="holding-ca">${formatMint(pos.tokenMint)}</span>
+                    <span class="holding-name">${name}</span>
+                    <span class="holding-ca clickable-ca" data-ca="${pos.tokenMint}" title="Click to copy CA">${formatMint(pos.tokenMint)}</span>
                 </div>
             </div>
             <div class="holding-right">
@@ -774,6 +797,15 @@ function updateHoldings(positions) {
                 <span class="holding-entry">Entry: ${entryAge}</span>
             </div>
         `;
+
+        // Add click handler for CA copy
+        const caElement = holdingEl.querySelector('.clickable-ca');
+        if (caElement) {
+            caElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyToClipboard(pos.tokenMint, caElement);
+            });
+        }
 
         container.appendChild(holdingEl);
     });

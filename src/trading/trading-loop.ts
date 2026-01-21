@@ -17,6 +17,7 @@ import { EntertainmentMode, type TokenContext, type EntertainmentDecision } from
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
 import { geckoTerminal } from '../api/geckoterminal.js';
 import { getBirdeyeClient, type BirdeyeToken } from '../api/birdeye.js';
+import { getMoralisClient, type MoralisToken, type TrendingToken, MoralisClient } from '../api/moralis.js';
 import { agentEvents } from '../events/emitter.js';
 import { logger } from '../lib/logger.js';
 
@@ -159,6 +160,28 @@ export class TradingLoop {
       logger.warn('BIRDEYE_API_KEY not configured - trending token scanning disabled');
     }
 
+    // Scan Moralis trending tokens every 60 seconds (offset by 15s from Birdeye)
+    const moralisClient = getMoralisClient();
+    if (moralisClient) {
+      logger.info('📊 Moralis integration enabled - scanning trending tokens');
+
+      // Initial scan after 20 seconds (offset from Birdeye)
+      setTimeout(() => {
+        this.scanMoralisTrending().catch(error => {
+          logger.error({ error }, 'Error in initial Moralis trending scan');
+        });
+      }, 20000);
+
+      // Then scan every 60 seconds
+      setInterval(() => {
+        this.scanMoralisTrending().catch(error => {
+          logger.error({ error }, 'Error scanning Moralis trending tokens');
+        });
+      }, 60000);
+    } else {
+      logger.warn('MORALIS_API_KEY not configured - Moralis trending scanning disabled');
+    }
+
     // Scan DexScreener Boosts (Paid/Trending) every 60 seconds
     // Offset by 30 seconds from Birdeye if active
     setTimeout(() => {
@@ -267,6 +290,126 @@ export class TradingLoop {
     // Skip tokens that dumped hard (down >50% in 24h)
     if (token.priceChange24h < -50) {
       return { passes: false, reason: `Dumping: ${token.priceChange24h.toFixed(1)}%` };
+    }
+
+    // Suspicious patterns
+    const suspiciousPatterns = [/test/i, /rug/i, /scam/i, /fake/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        return { passes: false, reason: `Suspicious name: ${token.symbol}` };
+      }
+    }
+
+    return { passes: true };
+  }
+
+  /**
+   * Scan trending tokens from Moralis API
+   * Replaces/supplements Birdeye for token discovery
+   */
+  private async scanMoralisTrending(): Promise<void> {
+    const moralisClient = getMoralisClient();
+    if (!moralisClient) {
+      // Moralis not initialized
+      return;
+    }
+
+    logger.debug('Scanning trending tokens from Moralis...');
+
+    try {
+      // Get trending tokens and top gainers from Moralis
+      const [trending, gainers] = await Promise.all([
+        moralisClient.getTrendingTokens({ limit: 15, minLiquidity: 5000 }),
+        moralisClient.getTopGainers({ limit: 10, timeFrame: '1h' }),
+      ]);
+
+      const allTokens = [...trending, ...gainers];
+      let addedCount = 0;
+
+      for (const token of allTokens) {
+        // Skip if already seen recently (within last 30 mins)
+        const lastSeen = this.seenTokens.get(token.tokenAddress);
+        if (lastSeen && Date.now() - lastSeen < 30 * 60 * 1000) continue;
+
+        // Quick filter for Moralis tokens
+        const filterResult = this.passesMoralisTrendingFilter(token);
+        if (!filterResult.passes) {
+          logger.debug({
+            address: token.tokenAddress,
+            symbol: token.symbol,
+            reason: filterResult.reason
+          }, 'Moralis token rejected by filter');
+          continue;
+        }
+
+        this.seenTokens.set(token.tokenAddress, Date.now());
+        addedCount++;
+
+        logger.info({
+          address: token.tokenAddress,
+          symbol: token.symbol,
+          name: token.name,
+          price: token.priceUsd,
+          priceChange24h: token.priceChange24h?.toFixed(1) + '%',
+          volume24h: token.volume24h,
+          liquidity: token.liquidity,
+          securityScore: token.securityScore,
+        }, '📊 Trending token from Moralis!');
+
+        // Analyze and trade - convert Moralis token to BirdeyeToken format for compatibility
+        const birdeyeCompatible: BirdeyeToken = {
+          address: token.tokenAddress,
+          symbol: token.symbol,
+          name: token.name,
+          decimals: token.decimals ?? 9, // Most Solana tokens use 9 decimals
+          price: token.priceUsd,
+          priceChange24h: token.priceChange24h ?? 0,
+          priceChange1h: token.priceChange1h ?? 0,
+          volume24h: token.volume24h ?? 0,
+          liquidity: token.liquidity ?? 0,
+          marketCap: token.marketCap ?? 0,
+          logoURI: token.logo,
+        };
+
+        await this.analyzeAndTrade(token.tokenAddress, birdeyeCompatible);
+
+        // Small delay to prevent rate limit spam
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (addedCount > 0) {
+        logger.info({ addedCount }, '📊 Processed Moralis trending tokens');
+      }
+
+    } catch (error) {
+      logger.error({ error }, 'Failed to scan Moralis trending tokens');
+    }
+  }
+
+  /**
+   * Filter for Moralis trending tokens
+   */
+  private passesMoralisTrendingFilter(token: TrendingToken | MoralisToken): { passes: boolean; reason?: string } {
+    // Minimum liquidity ($5k)
+    const MIN_LIQUIDITY = 5000;
+    if ((token.liquidity ?? 0) < MIN_LIQUIDITY) {
+      return { passes: false, reason: `Low liquidity: $${(token.liquidity ?? 0).toFixed(0)}` };
+    }
+
+    // Minimum volume ($1k in 24h)
+    const MIN_VOLUME = 1000;
+    if ((token.volume24h ?? 0) < MIN_VOLUME) {
+      return { passes: false, reason: `Low volume: $${(token.volume24h ?? 0).toFixed(0)}` };
+    }
+
+    // Skip tokens that dumped hard (down >50% in 24h)
+    if ((token.priceChange24h ?? 0) < -50) {
+      return { passes: false, reason: `Dumping: ${(token.priceChange24h ?? 0).toFixed(1)}%` };
+    }
+
+    // Security score filter (if available) - skip risky tokens
+    if (token.securityScore !== undefined && token.securityScore < 30) {
+      return { passes: false, reason: `Low security score: ${token.securityScore}` };
     }
 
     // Suspicious patterns
@@ -534,13 +677,14 @@ export class TradingLoop {
   }
 
   /**
-   * Emit positions update event for dashboard
+   * Emit positions update event for dashboard (with real-time prices)
    */
   private async emitPositionsUpdate(): Promise<void> {
     if (!this.tradingEngine) return;
 
     try {
-      const positions = await this.tradingEngine.getOpenPositions();
+      // Use getOpenPositionsWithPrices for real-time PnL
+      const positions = await this.tradingEngine.getOpenPositionsWithPrices();
 
       agentEvents.emit({
         type: 'POSITIONS_UPDATE',
@@ -549,6 +693,7 @@ export class TradingLoop {
           positions: positions.map(p => ({
             tokenMint: p.tokenMint,
             tokenSymbol: p.tokenSymbol,
+            tokenName: p.tokenName,
             entryAmountSol: p.entryAmountSol,
             entryAmountTokens: p.entryAmountTokens,
             entryPrice: p.entryPrice,
@@ -1049,7 +1194,7 @@ export class TradingLoop {
         const isEntertainmentApproved = !!(entertainmentDecision && entertainmentDecision.shouldTrade);
         const signature = await this.tradingEngine.executeBuy(
           mint,
-          undefined,                        // tokenMetadata - will fetch fresh if needed
+          { symbol, name, liquidity, marketCapSol },  // Pass token metadata for storage
           isEntertainmentApproved,          // skipEvaluation - bypass re-evaluation
           isEntertainmentApproved ? decision.positionSizeSol : undefined  // overridePositionSol
         );

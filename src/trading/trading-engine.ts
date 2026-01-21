@@ -51,6 +51,7 @@ export interface TradingConfig {
 export interface OpenPosition {
   tokenMint: string;
   tokenSymbol?: string;
+  tokenName?: string;
   entryAmountSol: number;
   entryAmountTokens: number;
   entryPrice: number; // SOL per token at entry
@@ -447,7 +448,7 @@ export class TradingEngine {
    */
   async executeBuy(
     mint: string,
-    tokenMetadata?: { liquidity?: number; marketCapSol?: number },
+    tokenMetadata?: { liquidity?: number; marketCapSol?: number; symbol?: string; name?: string },
     skipEvaluation?: boolean,
     overridePositionSol?: number
   ): Promise<string | null> {
@@ -560,6 +561,7 @@ export class TradingEngine {
         timestamp: Date.now(),
         type: 'BUY',
         tokenMint: mint,
+        tokenSymbol: tokenMetadata?.symbol,
         amountTokens: tokensReceived,
         amountSol: actualSol,
         pricePerToken,
@@ -567,6 +569,7 @@ export class TradingEngine {
           requestedSol: positionSizeSol,
           actualSol,
           method: useJupiter ? 'Jupiter' : 'PumpPortal',
+          tokenName: tokenMetadata?.name,
         },
       });
 
@@ -1047,6 +1050,7 @@ export class TradingEngine {
     const positions = new Map<string, {
       tokenMint: string;
       tokenSymbol?: string;
+      tokenName?: string;
       totalSolSpent: number;
       totalTokensBought: number;
       totalSolReceived: number;
@@ -1062,6 +1066,7 @@ export class TradingEngine {
       const current = positions.get(trade.tokenMint) || {
         tokenMint: trade.tokenMint,
         tokenSymbol: trade.tokenSymbol,
+        tokenName: trade.metadata?.tokenName as string | undefined,
         totalSolSpent: 0,
         totalTokensBought: 0,
         totalSolReceived: 0,
@@ -1109,6 +1114,7 @@ export class TradingEngine {
       openPositions.push({
         tokenMint: pos.tokenMint,
         tokenSymbol: pos.tokenSymbol,
+        tokenName: pos.tokenName,
         entryAmountSol: entrySol,
         entryAmountTokens: netTokens,
         entryPrice,
@@ -1117,6 +1123,38 @@ export class TradingEngine {
     }
 
     return openPositions;
+  }
+
+  /**
+   * Get open positions with current prices and PnL
+   * Fetches live prices from PumpPortal for each position
+   */
+  async getOpenPositionsWithPrices(): Promise<OpenPosition[]> {
+    const positions = await this.getOpenPositions();
+    const positionsWithPrices: OpenPosition[] = [];
+
+    for (const position of positions) {
+      try {
+        // Get current price from PumpPortal
+        const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
+        const currentPrice = tokenInfo.price;
+
+        // Calculate P&L percentage
+        const pnlPercent = ((currentPrice - position.entryPrice) / position.entryPrice) * 100;
+
+        positionsWithPrices.push({
+          ...position,
+          currentPrice,
+          unrealizedPnLPercent: pnlPercent,
+        });
+      } catch (error) {
+        // If we can't get price, include position without price data
+        logger.debug({ mint: position.tokenMint, error }, 'Could not fetch current price for position');
+        positionsWithPrices.push(position);
+      }
+    }
+
+    return positionsWithPrices;
   }
 
   /**
@@ -1211,5 +1249,29 @@ export class TradingEngine {
     }
 
     return exitSignatures;
+  }
+
+  /**
+   * Get recent trades for dashboard display
+   */
+  getRecentTrades(limit: number = 20): Array<{
+    signature: string;
+    timestamp: number;
+    type: 'BUY' | 'SELL';
+    mint: string;
+    amount: number;
+    tokenSymbol?: string;
+  }> {
+    const trades = this.db.trades.getRecent(limit);
+    return trades
+      .filter((t: { metadata?: { isBuyback?: boolean } }) => !t.metadata?.isBuyback)
+      .map((t: { signature: string; timestamp: number; type: 'BUY' | 'SELL'; tokenMint: string; amountSol: number; tokenSymbol?: string }) => ({
+        signature: t.signature,
+        timestamp: t.timestamp,
+        type: t.type,
+        mint: t.tokenMint,
+        amount: t.amountSol,
+        tokenSymbol: t.tokenSymbol,
+      }));
   }
 }

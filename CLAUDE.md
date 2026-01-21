@@ -561,6 +561,149 @@ HELIUS_TIER=developer  # free|developer|business|professional
 
 ---
 
+## Learning & Intelligence Components
+
+### 1. BundleDetector (`src/analysis/bundle-detector.ts`)
+Detects coordinated/manipulated trading patterns.
+
+**Detection Methods:**
+- Timing clusters (transactions within 30s window)
+- Amount similarity (low variance = bots)
+- Same-block detection (Jito bundles)
+- Wallet concentration analysis
+
+**Usage:**
+```typescript
+import { BundleDetector } from './analysis/bundle-detector.js';
+
+const detector = new BundleDetector();
+const analysis = detector.analyze(transactions);
+
+if (analysis.isBundled) {
+  console.log('Bundle detected!', analysis.flags);
+  // Flags: TIMING_CLUSTER, SIMILAR_AMOUNTS, SAME_BLOCK, CONCENTRATED
+}
+```
+
+### 2. SmartMoneyCopier (`src/trading/smart-money-copier.ts`)
+Proactively watches profitable wallets and copies their trades.
+
+**Key Difference from SmartMoneyTracker:**
+- SmartMoneyTracker: Token detected → check who's buying
+- SmartMoneyCopier: Watch wallets → copy when they buy
+
+**Usage:**
+```typescript
+import { SmartMoneyCopier } from './trading/smart-money-copier.js';
+
+const copier = new SmartMoneyCopier(helius, {
+  minWalletPnl: 10,      // 10 SOL minimum profit
+  minWinRate: 0.5,       // 50% win rate
+  maxTradeAge: 60000,    // Copy within 1 minute
+  maxCopySize: 0.1,      // 0.1 SOL max per copy
+});
+
+// Add wallets to watch
+copier.addWallet({
+  address: 'wallet-address',
+  label: 'Whale #1',
+  pnlSol: 500,
+  winRate: 0.72,
+  totalTrades: 150,
+});
+
+// Listen for signals
+copier.onSignal((signal) => {
+  console.log('Copy trade signal!', signal.trade.tokenMint);
+  // Execute trade with signal.suggestedSize
+});
+
+copier.start();
+```
+
+### 3. LearningEngine (`src/analysis/learning-engine.ts`)
+Tracks trade outcomes and learns which features predict success.
+
+**What It Learns:**
+- Which features correlate with wins (smart money, heat, holder count, etc.)
+- Confidence calibration (is "high confidence" actually high win rate?)
+- Feature weights that adjust over time
+
+**Usage:**
+```typescript
+import { LearningEngine, TradeLesson } from './analysis/learning-engine.js';
+
+const learner = new LearningEngine(db);
+
+// After a trade closes, record the lesson
+await learner.recordLesson({
+  id: 'trade-123',
+  tokenMint: 'mint-address',
+  features: {
+    bondingCurveProgress: 35,
+    heatMetric: 67,
+    smartMoneyCount: 2,
+    holderCount: 150,
+    // ... all features at entry time
+  },
+  outcome: 'win',
+  pnlPercent: 45,
+  confidenceAtEntry: 75,
+});
+
+// Use learned weights to score new tokens
+const { adjustment, reasons, warnings } = learner.scoreFeatures(newTokenFeatures);
+// adjustment: -30 to +30 points to add to base confidence
+
+// Get insights
+const insights = learner.getInsights();
+// { bestFeatures: [...], worstFeatures: [...], calibrationIssues: [...] }
+```
+
+### 4. MomentumScanner (`src/analysis/momentum-scanner.ts`)
+Detects early pump signals using heat metrics.
+
+**Key Metrics:**
+- Heat: `(1min_volume / 5min_volume) * 100`
+- Buy pressure: Buy/Sell ratio
+- Consecutive buys
+- Price steps
+
+**Phases:**
+- Cold: < 33% heat
+- Building: 33-48% heat
+- Hot: 48-100% heat
+- Peak: 100%+ heat (caution!)
+
+**Usage:**
+```typescript
+import { MomentumScanner } from './analysis/momentum-scanner.js';
+
+const scanner = new MomentumScanner();
+
+// Feed trades as they come in
+scanner.addTrade(tokenMint, {
+  timestamp: Date.now(),
+  type: 'buy',
+  solAmount: 0.5,
+  tokenAmount: 1000000,
+  pricePerToken: 0.0000005,
+  signature: 'sig...',
+});
+
+// Analyze momentum
+const momentum = scanner.analyze(tokenMint);
+// {
+//   score: 72,
+//   heatMetric: 55,
+//   phase: 'hot',
+//   recommendation: 'buy',
+//   alerts: [{ type: 'heat', message: 'HOT: Heat at 55%' }]
+// }
+```
+
+---
+
 ## MCP Server (Optional)
 
 The Helius MCP server can be added for direct Claude access to blockchain data.

@@ -301,7 +301,9 @@ export class SniperPipeline {
         // Execute via Trading Engine
         this.tradingEngine.executeBuy(token.mint, {
              marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
-             liquidity: result.metadata?.liquidity
+             liquidity: result.metadata?.liquidity,
+             symbol: token.symbol,
+             name: token.name
         });
       }
 

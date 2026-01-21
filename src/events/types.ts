@@ -332,6 +332,7 @@ export interface PositionsUpdateEvent extends BaseEvent {
     positions: Array<{
       tokenMint: string;
       tokenSymbol?: string;
+      tokenName?: string;
       entryAmountSol: number;
       entryAmountTokens: number;
       entryPrice: number;
