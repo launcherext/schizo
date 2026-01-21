@@ -1297,6 +1297,16 @@ export class TradingLoop {
           logger.info({ mint, signature }, 'Trade executed successfully');
         } else {
           logger.info({ mint }, 'Trade execution skipped (Circuit breaker or Engine rejection)');
+
+          // Queue failure commentary when trade fails after announcement (Fix 2)
+          if (entertainmentDecision?.shouldTrade && this.commentarySystem) {
+            this.commentarySystem.queueCommentary('TRADE_RESULT', {
+              symbol,
+              name,
+              tradeType: 'BUY',
+              customPrompt: `The ${symbol} buy failed. Trade got rejected. Moving on.`,
+            });
+          }
         }
       } else {
         logger.info({ mint, reasons: decision.reasons }, 'Trade rejected');

@@ -19,7 +19,8 @@
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:station.jup.ag)",
       "WebFetch(domain:mcp.so)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(railway logs:*)"
     ]
   }
 }

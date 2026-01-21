@@ -462,6 +462,18 @@ export class TradingEngine {
   ): Promise<string | null> {
     logger.info({ mint, skipEvaluation }, 'Executing buy trade');
 
+    // CRITICAL: Prevent duplicate buys - check if we already hold this token
+    const openPositions = await this.getOpenPositions();
+    const existingPosition = openPositions.find(p => p.tokenMint === mint);
+    if (existingPosition) {
+      logger.warn({
+        mint,
+        symbol: existingPosition.tokenSymbol,
+        existingAmountSol: existingPosition.entryAmountSol,
+      }, 'BLOCKED: Already holding this token - duplicate buy prevented');
+      return null;
+    }
+
     // HARD BLOCK: Pump.fun Mayhem Mode tokens (2 billion supply)
     // These are extremely high-risk tokens - NEVER trade them
     try {

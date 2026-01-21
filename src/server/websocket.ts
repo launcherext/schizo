@@ -152,6 +152,7 @@ export function createWebSocketServer(
                 tokenMint: p.tokenMint,
                 tokenSymbol: p.tokenSymbol,
                 tokenName: p.tokenName,
+                tokenImage: p.tokenImage,
                 entryAmountSol: p.entryAmountSol,
                 entryAmountTokens: p.entryAmountTokens,
                 entryPrice: p.entryPrice,
@@ -163,6 +164,47 @@ export function createWebSocketServer(
           }));
         } catch (error) {
           logger.error({ error }, 'Error sending initial positions');
+        }
+      })();
+
+      // Send initial stats on connect (Fix 4: PnL not showing on page load)
+      (async () => {
+        try {
+          const stats = await tradingEngine.getStats();
+          const allTrades = tradingEngine.getRecentTrades(100);
+
+          // Calculate win rate from completed trades
+          let wins = 0, total = 0;
+          const positionMap = new Map<string, { amountSol: number }>();
+          for (const trade of allTrades) {
+            if (trade.type === 'BUY') {
+              positionMap.set(trade.mint, { amountSol: trade.amount });
+            } else if (trade.type === 'SELL') {
+              const buyTrade = positionMap.get(trade.mint);
+              if (buyTrade) {
+                total++;
+                if (trade.amount > buyTrade.amountSol) wins++;
+                positionMap.delete(trade.mint);
+              }
+            }
+          }
+          const winRate = total > 0 ? (wins / total) * 100 : 0;
+
+          ws.send(JSON.stringify({
+            type: 'STATS_UPDATE',
+            timestamp: Date.now(),
+            data: {
+              todayTrades: stats.todayTrades,
+              openPositions: stats.openPositions,
+              realizedPnL: stats.realizedPnL,
+              unrealizedPnL: stats.unrealizedPnL,
+              dailyPnL: stats.dailyPnL,
+              winRate,
+              balance: 0, // Will be updated by trading loop with actual wallet balance
+            },
+          }));
+        } catch (error) {
+          logger.error({ error }, 'Error sending initial stats');
         }
       })();
     }
@@ -211,6 +253,7 @@ export function createWebSocketServer(
               tokenMint: p.tokenMint,
               tokenSymbol: p.tokenSymbol,
               tokenName: p.tokenName,
+              tokenImage: p.tokenImage,
               entryAmountSol: p.entryAmountSol,
               entryAmountTokens: p.entryAmountTokens,
               entryPrice: p.entryPrice,
