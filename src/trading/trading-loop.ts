@@ -1194,7 +1194,7 @@ export class TradingLoop {
         const isEntertainmentApproved = !!(entertainmentDecision && entertainmentDecision.shouldTrade);
         const signature = await this.tradingEngine.executeBuy(
           mint,
-          { symbol, name, liquidity, marketCapSol },  // Pass token metadata for storage
+          { symbol, name, liquidity, marketCapSol, imageUrl },  // Pass token metadata for storage
           isEntertainmentApproved,          // skipEvaluation - bypass re-evaluation
           isEntertainmentApproved ? decision.positionSizeSol : undefined  // overridePositionSol
         );

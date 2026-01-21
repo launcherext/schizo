@@ -765,7 +765,12 @@ function updateHoldings(positions) {
     if (positions.length === 0) {
         container.innerHTML = `
             <div class="holdings-empty">
-                <div class="holdings-empty-icon">📭</div>
+                <div class="holdings-empty-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                        <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                    </svg>
+                </div>
                 <div>No active holdings</div>
                 <div style="font-size: 0.85em; opacity: 0.7;">Positions will appear here when trades are executed</div>
             </div>
@@ -788,9 +793,15 @@ function updateHoldings(positions) {
         const pnlSign = pnlPercent >= 0 ? '+' : '';
         const entryAge = getTimeAgo(pos.entryTimestamp);
 
+        // Show actual token image if available, otherwise fallback to $ icon
+        const imageHtml = pos.tokenImage
+            ? `<img src="${pos.tokenImage}" alt="${symbol}" class="holding-token-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+               <div class="holding-icon-fallback" style="display:none;">$</div>`
+            : `<div class="holding-icon-fallback">$</div>`;
+
         holdingEl.innerHTML = `
             <div class="holding-left">
-                <div class="holding-icon" style="font-size: 1.2em;">$</div>
+                <div class="holding-icon">${imageHtml}</div>
                 <div class="holding-info">
                     <span class="holding-symbol">${symbol}</span>
                     <span class="holding-name">${name}</span>

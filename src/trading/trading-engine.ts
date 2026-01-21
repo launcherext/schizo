@@ -53,6 +53,7 @@ export interface OpenPosition {
   tokenMint: string;
   tokenSymbol?: string;
   tokenName?: string;
+  tokenImage?: string; // Token image URL
   entryAmountSol: number;
   entryAmountTokens: number;
   entryPrice: number; // SOL per token at entry
@@ -453,7 +454,7 @@ export class TradingEngine {
    */
   async executeBuy(
     mint: string,
-    tokenMetadata?: { liquidity?: number; marketCapSol?: number; symbol?: string; name?: string },
+    tokenMetadata?: { liquidity?: number; marketCapSol?: number; symbol?: string; name?: string; imageUrl?: string },
     skipEvaluation?: boolean,
     overridePositionSol?: number
   ): Promise<string | null> {
@@ -575,6 +576,7 @@ export class TradingEngine {
           actualSol,
           method: useJupiter ? 'Jupiter' : 'PumpPortal',
           tokenName: tokenMetadata?.name,
+          tokenImage: tokenMetadata?.imageUrl,
         },
       });
 
@@ -1071,6 +1073,7 @@ export class TradingEngine {
       tokenMint: string;
       tokenSymbol?: string;
       tokenName?: string;
+      tokenImage?: string;
       totalSolSpent: number;
       totalTokensBought: number;
       totalSolReceived: number;
@@ -1087,6 +1090,7 @@ export class TradingEngine {
         tokenMint: trade.tokenMint,
         tokenSymbol: trade.tokenSymbol,
         tokenName: trade.metadata?.tokenName as string | undefined,
+        tokenImage: trade.metadata?.tokenImage as string | undefined,
         totalSolSpent: 0,
         totalTokensBought: 0,
         totalSolReceived: 0,
@@ -1135,6 +1139,7 @@ export class TradingEngine {
         tokenMint: pos.tokenMint,
         tokenSymbol: pos.tokenSymbol,
         tokenName: pos.tokenName,
+        tokenImage: pos.tokenImage,
         entryAmountSol: entrySol,
         entryAmountTokens: netTokens,
         entryPrice,

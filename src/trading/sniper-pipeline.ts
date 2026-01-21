@@ -303,7 +303,8 @@ export class SniperPipeline {
              marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
              liquidity: result.metadata?.liquidity,
              symbol: token.symbol,
-             name: token.name
+             name: token.name,
+             imageUrl: token.imageUrl,
         });
       }
 

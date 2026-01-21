@@ -333,6 +333,7 @@ export interface PositionsUpdateEvent extends BaseEvent {
       tokenMint: string;
       tokenSymbol?: string;
       tokenName?: string;
+      tokenImage?: string;
       entryAmountSol: number;
       entryAmountTokens: number;
       entryPrice: number;
