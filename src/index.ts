@@ -53,6 +53,12 @@ async function main(): Promise<void> {
     db = createDatabase(dbPath);
     const dbWithRepos = createDatabaseWithRepositories(db);
 
+    // Clear stale sync trades on startup
+    const deletedCount = dbWithRepos.trades.clearSyncTrades();
+    if (deletedCount > 0) {
+      log.info({ deletedCount }, 'Cleared stale sync trades from database');
+    }
+
     // Historical IMPOSTOR trade - CLOSED (user sold manually at +73%)
     // Buy entry
     const historicalBuy = {

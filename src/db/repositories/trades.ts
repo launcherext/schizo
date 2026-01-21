@@ -109,6 +109,16 @@ class TradeRepository {
   }
 
   /**
+   * Clear all sync trades (auto-generated position recovery records).
+   * Call this on startup to clear stale position data.
+   * @returns Number of trades deleted
+   */
+  clearSyncTrades(): number {
+    const result = this.db.prepare("DELETE FROM trades WHERE signature LIKE 'sync-%'").run();
+    return result.changes;
+  }
+
+  /**
    * Map a database row to a Trade object.
    */
   private mapRow(row: Record<string, unknown>): Trade {
