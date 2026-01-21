@@ -64,6 +64,10 @@ function handleEvent(event) {
       // Silent - the ANALYSIS_THOUGHT events show the live analysis
       break;
     case 'POSITIONS_UPDATE':
+      console.log('📊 POSITIONS_UPDATE received:', event.data.positions.length, 'positions');
+      if (event.data.positions.length > 0) {
+        console.log('First position:', event.data.positions[0]);
+      }
       updateHoldings(event.data.positions);
       // Update Trench Radio based on position state
       updateTrenchRadioFromPositions(event.data.positions);
@@ -845,6 +849,7 @@ function initPanelTabs() {
 let currentHoldings = [];
 
 function updateHoldings(positions) {
+    console.log('🔄 updateHoldings called with', positions.length, 'positions');
     currentHoldings = positions;
     const container = document.getElementById('holdings-stream');
     const countEl = document.getElementById('holdings-count');
@@ -861,6 +866,7 @@ function updateHoldings(positions) {
 
     // Show empty state if no holdings
     if (positions.length === 0) {
+        console.log('⚠️ No positions to display');
         container.innerHTML = `
             <div class="holdings-empty">
                 <div class="holdings-empty-icon">
