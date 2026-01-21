@@ -974,12 +974,13 @@ function updateTrenchRadioFromPositions(positions) {
     positions.forEach(pos => {
         if (pos.unrealizedPnLPercent !== undefined) {
             const weight = pos.entryAmountSol || 1;
-            totalPnL += pos.unrealizedPnLPercent * weight;
+            // Convert percentage to decimal (30% -> 0.30) and multiply by position size
+            totalPnL += (pos.unrealizedPnLPercent / 100) * weight;
             totalWeight += weight;
         }
     });
 
-    const avgPnL = totalWeight > 0 ? totalPnL / totalWeight : 0;
+    const avgPnL = totalWeight > 0 ? (totalPnL / totalWeight) * 100 : 0; // Convert back to percentage
 
     // Link trench radio state to audio
     if (window.trenchRadio) {
