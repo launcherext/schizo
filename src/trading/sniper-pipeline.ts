@@ -185,14 +185,17 @@ export class SniperPipeline {
   private async validateAndExecute(queued: QueuedToken): Promise<void> {
     const { token } = queued;
 
-    // Emit ANALYSIS_START for frontend "Currently Analyzing" display
+    // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
     agentEvents.emit({
-      type: 'ANALYSIS_START',
+      type: 'ANALYSIS_THOUGHT',
       timestamp: Date.now(),
       data: { 
         mint: token.mint,
         symbol: token.symbol,
         name: token.name,
+        marketCapSol: token.marketCapSol,
+        stage: 'scanning',
+        thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
       }
     });
 
@@ -202,6 +205,21 @@ export class SniperPipeline {
     const result = await this.validator.validate(token.mint);
 
     if (result.passes) {
+      // Emit validation success for frontend
+      agentEvents.emit({
+        type: 'ANALYSIS_THOUGHT',
+        timestamp: Date.now(),
+        data: {
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name,
+          liquidity: result.metadata?.liquidity,
+          marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
+          stage: 'safety',
+          thought: `${token.symbol} has $${result.metadata?.liquidity?.toLocaleString() || '?'} liquidity. Looking good so far...`
+        }
+      });
+
       logger.info({
         mint: token.mint,
         symbol: token.symbol,
@@ -217,30 +235,66 @@ export class SniperPipeline {
         data: {
           ...result.metadata!,
           source: 'SNIPER_PIPELINE'
-        } as any // Cast to any to bypass strict type check for now
+        } as any
       });
 
       // 4. The Executor (Helius via TradingEngine)
       if (this.config.enableTrading && this.tradingEngine) {
         if (this.tokenSafety) {
-            // Safety check overlap (double check just in case)
+            // Safety check
             const safety = await this.tokenSafety.analyze(token.mint);
             if (!safety.isSafe) {
+                // Emit rejection
+                agentEvents.emit({
+                  type: 'ANALYSIS_THOUGHT',
+                  timestamp: Date.now(),
+                  data: {
+                    mint: token.mint,
+                    symbol: token.symbol,
+                    stage: 'decision',
+                    thought: `NOPE. ${token.symbol} has ${safety.risks.join(', ')}. Hard pass.`,
+                    details: { isSafe: false, risks: safety.risks, shouldTrade: false }
+                  }
+                });
                 logger.warn({ mint: token.mint, risks: safety.risks }, '❌ Safety check failed after validation');
                 return;
             }
         }
 
+        // Emit decision to buy
+        agentEvents.emit({
+          type: 'ANALYSIS_THOUGHT',
+          timestamp: Date.now(),
+          data: {
+            mint: token.mint,
+            symbol: token.symbol,
+            stage: 'decision',
+            thought: `${token.symbol} passes all checks. BUYING.`,
+            details: { shouldTrade: true }
+          }
+        });
+
         // Execute via Trading Engine
         this.tradingEngine.executeBuy(token.mint, {
-             // Pass known data to speed up engine (approx 170 USD/SOL)
              marketCapSol: result.metadata?.marketCap ? result.metadata.marketCap / 170 : 0,
              liquidity: result.metadata?.liquidity
         });
       }
 
     } else {
-      // Validation failed
+      // Validation failed - emit rejection
+      agentEvents.emit({
+        type: 'ANALYSIS_THOUGHT',
+        timestamp: Date.now(),
+        data: {
+          mint: token.mint,
+          symbol: token.symbol,
+          stage: 'decision',
+          thought: `${token.symbol} rejected: ${result.reason}. Moving on.`,
+          details: { shouldTrade: false, reasons: [result.reason || 'Unknown'] }
+        }
+      });
+
       logger.debug({
         mint: token.mint,
         symbol: token.symbol,
