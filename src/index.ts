@@ -233,15 +233,17 @@ async function main(): Promise<void> {
       wallet?.publicKey // Pass wallet public key for balance tracking
     );
 
-    // Initialize Copy Trader
-    let copyTrader: any = null; // using any to avoid import cycles if not strict
-    const copyTradeWallet = process.env.COPY_TRADE_WALLET;
-    if (copyTradeWallet && wallet) {
-      log.info({ copyTradeWallet }, 'Initializing Private Copy Trader...');
+    // Initialize Copy Trader (supports multiple wallets)
+    let copyTrader: any = null;
+    const copyTradeWallets = process.env.COPY_TRADE_WALLETS || process.env.COPY_TRADE_WALLET;
+    if (copyTradeWallets && wallet) {
+      const walletList = copyTradeWallets.split(',').map(w => w.trim()).filter(w => w.length > 0);
+      log.info({ walletCount: walletList.length }, 'Initializing Private Copy Trader...');
+      
       const { CopyTrader } = await import('./trading/copy-trader.js');
       copyTrader = new CopyTrader(
         {
-          walletAddress: copyTradeWallet,
+          walletAddresses: walletList,
           pollIntervalMs: 2000,
           enabled: true
         },

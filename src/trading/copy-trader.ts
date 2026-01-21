@@ -6,25 +6,26 @@ import { agentEvents } from '../events/emitter.js';
 const logger = createLogger('copy-trader');
 
 export interface CopyTraderConfig {
-  walletAddress: string;
-  pollIntervalMs: number; // Kept for fallback polling
+  walletAddresses: string[];  // Changed to array for multiple wallets
+  pollIntervalMs: number;
   enabled: boolean;
 }
 
 /**
- * CopyTrader - Watches a specific wallet and copies their trades
+ * CopyTrader - Watches multiple wallets and copies their trades
  * Uses WebSocket subscription for real-time detection
+ * "Schizo copy trades" - blindly follows trusted wallets with high confidence
  */
 export class CopyTrader {
   private config: CopyTraderConfig;
   private helius: HeliusClient;
   private connection: Connection;
   private isRunning: boolean = false;
-  private subscriptionId: number | null = null;
+  private subscriptionIds: Map<string, number> = new Map(); // wallet -> subscriptionId
   private fallbackIntervalId?: NodeJS.Timeout;
-  private lastSignature: string | null = null;
+  private lastSignatures: Map<string, string | null> = new Map(); // wallet -> lastSignature
   private isProcessing = false;
-  private processedSignatures = new Set<string>(); // Prevent duplicate processing
+  private processedSignatures = new Set<string>();
 
   constructor(
     config: CopyTraderConfig,
@@ -36,13 +37,13 @@ export class CopyTrader {
     this.connection = connection;
 
     logger.info({ 
-      wallet: this.config.walletAddress, 
+      wallets: this.config.walletAddresses.length,
       enabled: this.config.enabled 
-    }, 'CopyTrader initialized (WebSocket mode)');
+    }, `CopyTrader initialized with ${this.config.walletAddresses.length} wallets (WebSocket mode)`);
   }
 
   /**
-   * Start watching the target wallet via WebSocket
+   * Start watching all target wallets via WebSocket
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -50,45 +51,53 @@ export class CopyTrader {
       return;
     }
 
-    if (!this.config.enabled || !this.config.walletAddress) {
-      logger.info('CopyTrader disabled or no wallet configured');
+    if (!this.config.enabled || this.config.walletAddresses.length === 0) {
+      logger.info('CopyTrader disabled or no wallets configured');
       return;
     }
 
     this.isRunning = true;
-    logger.info(`🔌 Starting CopyTrader WebSocket for: ${this.config.walletAddress}`);
 
-    // Subscribe to logs for the target wallet
-    try {
-      const walletPubkey = new PublicKey(this.config.walletAddress);
-      
-      this.subscriptionId = this.connection.onLogs(
-        walletPubkey,
-        (logs: Logs) => this.handleLogNotification(logs),
-        'confirmed'
-      );
+    // Subscribe to each wallet
+    for (const walletAddress of this.config.walletAddresses) {
+      try {
+        const walletPubkey = new PublicKey(walletAddress);
+        
+        const subscriptionId = this.connection.onLogs(
+          walletPubkey,
+          (logs: Logs) => this.handleLogNotification(logs, walletAddress),
+          'confirmed'
+        );
 
-      logger.info({ subscriptionId: this.subscriptionId }, '✅ WebSocket subscription active');
-    } catch (error) {
-      logger.error({ error }, 'Failed to subscribe to wallet logs, falling back to polling');
-      this.startFallbackPolling();
+        this.subscriptionIds.set(walletAddress, subscriptionId);
+        this.lastSignatures.set(walletAddress, null);
+
+        logger.info({ 
+          wallet: walletAddress.slice(0, 8) + '...', 
+          subscriptionId 
+        }, '✅ WebSocket subscription active');
+
+      } catch (error) {
+        logger.error({ wallet: walletAddress, error }, 'Failed to subscribe to wallet');
+      }
     }
 
-    // Also start fallback polling as backup (less frequent)
+    logger.info(`🎯 CopyTrader watching ${this.subscriptionIds.size} wallets`);
+
+    // Start fallback polling
     this.startFallbackPolling();
   }
 
   /**
-   * Start fallback polling (slower interval as backup)
+   * Start fallback polling for all wallets
    */
   private startFallbackPolling(): void {
     if (this.fallbackIntervalId) return;
 
-    // Poll every 30 seconds as a fallback (not the primary method)
     const fallbackInterval = Math.max(this.config.pollIntervalMs * 6, 30000);
     
     this.fallbackIntervalId = setInterval(() => {
-      this.pollWallet().catch(err => {
+      this.pollAllWallets().catch(err => {
         logger.error({ error: err }, 'Error in CopyTrader fallback poll');
       });
     }, fallbackInterval);
@@ -97,34 +106,45 @@ export class CopyTrader {
   }
 
   /**
+   * Poll all wallets for new transactions
+   */
+  private async pollAllWallets(): Promise<void> {
+    for (const walletAddress of this.config.walletAddresses) {
+      await this.pollWallet(walletAddress);
+    }
+  }
+
+  /**
    * Handle real-time log notification from WebSocket
    */
-  private async handleLogNotification(logs: Logs): Promise<void> {
+  private async handleLogNotification(logs: Logs, walletAddress: string): Promise<void> {
     if (logs.err) {
       logger.debug({ signature: logs.signature }, 'Ignoring failed transaction');
       return;
     }
 
-    // Skip if already processed
     if (this.processedSignatures.has(logs.signature)) {
       return;
     }
     this.processedSignatures.add(logs.signature);
 
     // Limit cache size
-    if (this.processedSignatures.size > 1000) {
+    if (this.processedSignatures.size > 2000) {
       const entries = Array.from(this.processedSignatures);
-      this.processedSignatures = new Set(entries.slice(-500));
+      this.processedSignatures = new Set(entries.slice(-1000));
     }
 
-    logger.info({ signature: logs.signature }, '⚡ Real-time transaction detected!');
+    logger.info({ 
+      signature: logs.signature, 
+      wallet: walletAddress.slice(0, 8) + '...' 
+    }, '⚡ Real-time transaction detected!');
 
-    // Check if it looks like a swap (common program logs)
+    // Check if it looks like a swap
     const isLikelySwap = logs.logs.some(log => 
       log.includes('Instruction: Swap') || 
-      log.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') || // Raydium
-      log.includes('Program JUP') || // Jupiter
-      log.includes('pump') // Pump.fun
+      log.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') ||
+      log.includes('Program JUP') ||
+      log.includes('pump')
     );
 
     if (!isLikelySwap) {
@@ -132,27 +152,25 @@ export class CopyTrader {
       return;
     }
 
-    // Analyze the transaction
-    await this.analyzeTransactionBySignature(logs.signature);
+    await this.analyzeTransactionBySignature(logs.signature, walletAddress);
   }
 
   /**
-   * Stop watching
+   * Stop watching all wallets
    */
   stop(): void {
     if (!this.isRunning) return;
     
     this.isRunning = false;
 
-    // Unsubscribe from WebSocket
-    if (this.subscriptionId !== null) {
-      this.connection.removeOnLogsListener(this.subscriptionId).catch(err => {
-        logger.warn({ error: err }, 'Failed to remove logs listener');
+    // Unsubscribe from all WebSocket subscriptions
+    for (const [wallet, subscriptionId] of this.subscriptionIds) {
+      this.connection.removeOnLogsListener(subscriptionId).catch(err => {
+        logger.warn({ error: err, wallet }, 'Failed to remove logs listener');
       });
-      this.subscriptionId = null;
     }
+    this.subscriptionIds.clear();
 
-    // Stop fallback polling
     if (this.fallbackIntervalId) {
       clearInterval(this.fallbackIntervalId);
       this.fallbackIntervalId = undefined;
@@ -162,14 +180,14 @@ export class CopyTrader {
   }
 
   /**
-   * Fallback poll for new transactions (slower, as backup)
+   * Fallback poll for a single wallet
    */
-  private async pollWallet(): Promise<void> {
+  private async pollWallet(walletAddress: string): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
     try {
-      const response = await this.helius.getTransactionsForAddress(this.config.walletAddress, {
+      const response = await this.helius.getTransactionsForAddress(walletAddress, {
         limit: 5
       });
 
@@ -177,30 +195,31 @@ export class CopyTrader {
         return;
       }
 
-      // Filter for new transactions
+      const lastSig = this.lastSignatures.get(walletAddress);
+
       for (const tx of response.data) {
         if (this.processedSignatures.has(tx.signature)) continue;
-        if (tx.signature === this.lastSignature) break;
+        if (tx.signature === lastSig) break;
 
         this.processedSignatures.add(tx.signature);
-        await this.analyzeTransaction(tx);
+        await this.analyzeTransaction(tx, walletAddress);
       }
 
       if (response.data.length > 0) {
-        this.lastSignature = response.data[0].signature;
+        this.lastSignatures.set(walletAddress, response.data[0].signature);
       }
 
     } catch (error) {
-      logger.error({ error }, 'Failed to poll copy trade wallet');
+      logger.error({ error, wallet: walletAddress }, 'Failed to poll wallet');
     } finally {
       this.isProcessing = false;
     }
   }
 
   /**
-   * Analyze transaction by signature (for WebSocket path)
+   * Analyze transaction by signature (WebSocket path)
    */
-  private async analyzeTransactionBySignature(signature: string): Promise<void> {
+  private async analyzeTransactionBySignature(signature: string, walletAddress: string): Promise<void> {
     try {
       const parsed = await this.connection.getParsedTransaction(signature, {
         maxSupportedTransactionVersion: 0,
@@ -209,16 +228,16 @@ export class CopyTrader {
 
       if (!parsed || !parsed.meta) return;
 
-      await this.processTransaction(signature, parsed);
+      await this.processTransaction(signature, parsed, walletAddress);
     } catch (error) {
       logger.warn({ error, signature }, 'Failed to parse transaction from WebSocket');
     }
   }
 
   /**
-   * Analyze a transaction from Helius response (for polling path)
+   * Analyze a transaction from Helius response (polling path)
    */
-  private async analyzeTransaction(tx: TransactionResult): Promise<void> {
+  private async analyzeTransaction(tx: TransactionResult, walletAddress: string): Promise<void> {
     if (!tx.success || tx.type !== 'SWAP') {
       return;
     }
@@ -231,7 +250,7 @@ export class CopyTrader {
 
       if (!parsed || !parsed.meta) return;
 
-      await this.processTransaction(tx.signature, parsed);
+      await this.processTransaction(tx.signature, parsed, walletAddress);
     } catch (error) {
       logger.warn({ error, signature: tx.signature }, 'Failed to parse potential copy trade');
     }
@@ -240,13 +259,12 @@ export class CopyTrader {
   /**
    * Process a parsed transaction to detect buy signals
    */
-  private async processTransaction(signature: string, parsed: any): Promise<void> {
+  private async processTransaction(signature: string, parsed: any, walletAddress: string): Promise<void> {
     const preTokenBalances = parsed.meta.preTokenBalances || [];
     const postTokenBalances = parsed.meta.postTokenBalances || [];
     const accountKeys = parsed.transaction.message.accountKeys;
     
-    const walletPubkey = this.config.walletAddress;
-    const walletIndex = accountKeys.findIndex((k: any) => k.pubkey.toBase58() === walletPubkey);
+    const walletIndex = accountKeys.findIndex((k: any) => k.pubkey.toBase58() === walletAddress);
 
     if (walletIndex === -1) return;
 
@@ -265,12 +283,12 @@ export class CopyTrader {
 
     const involvedMints = new Set<string>();
     [...preTokenBalances, ...postTokenBalances].forEach(b => {
-      if (b.owner === walletPubkey) involvedMints.add(b.mint);
+      if (b.owner === walletAddress) involvedMints.add(b.mint);
     });
 
     for (const mint of involvedMints) {
-      const pre = getBalance(preTokenBalances, mint, walletPubkey);
-      const post = getBalance(postTokenBalances, mint, walletPubkey);
+      const pre = getBalance(preTokenBalances, mint, walletAddress);
+      const post = getBalance(postTokenBalances, mint, walletAddress);
       if (post > pre) {
         boughtMint = mint;
         break;
@@ -283,7 +301,8 @@ export class CopyTrader {
       logger.info({ 
         signature, 
         mint: boughtMint, 
-        solSpent: Math.abs(solChange).toFixed(4)
+        solSpent: Math.abs(solChange).toFixed(4),
+        sourceWallet: walletAddress.slice(0, 8) + '...'
       }, '🎯 COPY TRADE BUY SIGNAL (Real-time)');
 
       agentEvents.emit({
@@ -291,7 +310,7 @@ export class CopyTrader {
         timestamp: Date.now(),
         data: {
            mint: boughtMint,
-           sourceWallet: this.config.walletAddress,
+           sourceWallet: walletAddress,
            signature,
            solSpent: Math.abs(solChange)
         }
@@ -299,4 +318,3 @@ export class CopyTrader {
     }
   }
 }
-
