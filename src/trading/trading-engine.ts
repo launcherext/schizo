@@ -633,7 +633,14 @@ export class TradingEngine {
     // Check if trading is allowed
     const canTrade = await this.canTrade();
     if (!canTrade) {
-      logger.warn('Trading blocked by circuit breaker');
+      const stats = await this.getStats();
+      logger.error({ 
+        mint,
+        circuitBreakerActive: stats.circuitBreakerActive,
+        circuitBreakerReason: stats.circuitBreakerReason,
+        openPositions: stats.openPositions,
+        maxOpenPositions: this.config.maxOpenPositions
+      }, '🚫 TRADE BLOCKED BY CIRCUIT BREAKER');
       return null;
     }
 
