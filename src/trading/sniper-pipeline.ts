@@ -121,11 +121,12 @@ export class SniperPipeline {
       retryCount: 0,
     });
 
-    logger.debug({ 
+    logger.info({ 
       mint: token.mint, 
       symbol: token.symbol,
-      queueSize: this.queue.length 
-    }, 'Token queued for delayed validation');
+      queueSize: this.queue.length,
+      validateAfter: new Date(now + this.config.validationDelayMs).toISOString()
+    }, '📥 Token queued for delayed validation');
   }
 
   /**
@@ -134,6 +135,13 @@ export class SniperPipeline {
   private async processQueue(): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
+
+    // Log queue status every cycle for debugging
+    if (this.queue.length > 0) {
+      const now = Date.now();
+      const readyCount = this.queue.filter(t => t.validateAfter <= now).length;
+      logger.info({ queueSize: this.queue.length, readyForValidation: readyCount }, '⏰ Queue check');
+    }
 
     try {
       const now = Date.now();
@@ -176,6 +184,19 @@ export class SniperPipeline {
    */
   private async validateAndExecute(queued: QueuedToken): Promise<void> {
     const { token } = queued;
+
+    // Emit ANALYSIS_START for frontend "Currently Analyzing" display
+    agentEvents.emit({
+      type: 'ANALYSIS_START',
+      timestamp: Date.now(),
+      data: { 
+        mint: token.mint,
+        symbol: token.symbol,
+        name: token.name,
+      }
+    });
+
+    logger.info({ mint: token.mint, symbol: token.symbol }, '🔍 Validating token via DexScreener...');
 
     // 3. The Validator (DexScreener)
     const result = await this.validator.validate(token.mint);
