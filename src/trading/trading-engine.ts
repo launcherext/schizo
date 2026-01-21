@@ -663,7 +663,17 @@ export class TradingEngine {
 
     // Check if token has graduated (tradeable on Jupiter/Raydium)
     let useJupiter = false;
-    if (this.jupiter) {
+    
+    // CRITICAL: Non-pump.fun tokens (doesn't end with "pump") are always graduated
+    // These come from GeckoTerminal/Birdeye and should NEVER use PumpPortal
+    const isPumpFunToken = mint.endsWith('pump');
+    
+    if (!isPumpFunToken) {
+      // Token is not from pump.fun - must use Jupiter
+      useJupiter = true;
+      logger.info({ mint }, 'Non-pump.fun token detected - using Jupiter');
+    } else if (this.jupiter) {
+      // pump.fun token - check if it graduated to Raydium
       try {
         useJupiter = await this.jupiter.hasGraduated(mint);
         if (useJupiter) {
@@ -672,6 +682,16 @@ export class TradingEngine {
       } catch (error) {
         logger.debug({ mint, error }, 'Jupiter graduation check failed - using PumpPortal');
       }
+    }
+    
+    // Validate we have the right client for this token type
+    if (useJupiter && !this.jupiter) {
+      logger.error({ mint }, 'Token requires Jupiter but Jupiter client not available');
+      return null;
+    }
+    if (!useJupiter && !this.pumpPortal) {
+      logger.error({ mint }, 'Token requires PumpPortal but client not available');
+      return null;
     }
 
     // Execute trade via Jupiter (graduated) or PumpPortal (bonding curve)

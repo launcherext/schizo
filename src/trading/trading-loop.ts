@@ -1242,7 +1242,7 @@ export class TradingLoop {
           name,
           symbol,
           priceUsd: metadata?.priceUsd,
-          volumeUsd24h: metadata?.volume1h ? metadata.volume1h * 24 : birdeyeToken?.volume24h,
+          volumeUsd5m: metadata?.volume5m || 0, // Use 5-minute volume for most recent activity
           liquiditySol: (metadata?.liquidity ?? birdeyeToken?.liquidity ?? 0) / 170, // Convert USD to SOL approx
           holderCount: metadata?.buys5m, // Use buys as proxy for holders
           createdAt: metadata?.ageMinutes ? Date.now() - (metadata.ageMinutes * 60 * 1000) : undefined,

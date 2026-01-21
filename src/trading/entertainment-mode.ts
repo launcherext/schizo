@@ -16,7 +16,7 @@ export interface TokenContext {
   name?: string;
   symbol?: string;
   priceUsd?: number;
-  volumeUsd24h?: number;
+  volumeUsd5m?: number;        // 5-minute volume (most recent activity)
   liquiditySol?: number;
   holderCount?: number;
   createdAt?: number;
@@ -52,6 +52,7 @@ export interface EntertainmentConfig {
   // Volume/hype detection
   minVolumeForHype: number;     // USD volume to consider "hype" (default: 10000)
   minHolderCountForHype: number; // Holder count for legitimacy (default: 50)
+  minVolumeRequired: number;    // Minimum volume to trade at all (default: 500)
 }
 
 /**
@@ -79,9 +80,10 @@ export const DEFAULT_ENTERTAINMENT_CONFIG: EntertainmentConfig = {
   cooldownMs: 2 * 60 * 1000,          // 2 minutes
   maxTradesPerHour: 12,
 
-  // Hype detection thresholds
-  minVolumeForHype: 10000,            // $10k volume
+  // Hype detection thresholds (5-minute window)
+  minVolumeForHype: 1000,             // $1k volume in 5m
   minHolderCountForHype: 50,          // 50 holders
+  minVolumeRequired: 100,             // $100 minimum volume in 5m (shows recent activity)
 };
 
 /**
@@ -165,6 +167,21 @@ export class EntertainmentMode {
     // Check for degen moment (random ape)
     const isDegenMoment = this.checkDegenMoment();
 
+    // Volume filter: Require minimum volume UNLESS it's a true degen moment
+    // This prevents buying completely dead tokens in normal flow
+    const hasMinVolume = (context.volumeUsd5m || 0) >= this.config.minVolumeRequired;
+    if (!hasMinVolume && !isDegenMoment) {
+      return {
+        shouldTrade: false,
+        positionSizeSol: 0,
+        reason: `No recent volume ($${context.volumeUsd5m?.toFixed(0) || '0'} in 5m < $${this.config.minVolumeRequired} required)`,
+        isDegenMoment: false,
+        isHypeTrade: false,
+        timePressure,
+        currentRiskThreshold,
+      };
+    }
+
     // Check for risky auth (mint/freeze authority)
     const hasRiskyAuth = context.hasMinAuthorities || context.hasFreezeAuth;
 
@@ -216,7 +233,7 @@ export class EntertainmentMode {
       return {
         shouldTrade: true,
         positionSizeSol: position,
-        reason: `HYPE detected - volume: $${context.volumeUsd24h?.toFixed(0) || 'N/A'}, holders: ${context.holderCount || 'N/A'}`,
+        reason: `HYPE detected - 5m volume: $${context.volumeUsd5m?.toFixed(0) || 'N/A'}, holders: ${context.holderCount || 'N/A'}`,
         isDegenMoment: false,
         isHypeTrade: true,
         timePressure,
@@ -469,7 +486,7 @@ export class EntertainmentMode {
    * Detect if token has hype (volume + holders)
    */
   private detectHype(context: TokenContext): boolean {
-    const hasVolume = (context.volumeUsd24h || 0) >= this.config.minVolumeForHype;
+    const hasVolume = (context.volumeUsd5m || 0) >= this.config.minVolumeForHype;
     const hasHolders = (context.holderCount || 0) >= this.config.minHolderCountForHype;
 
     // Need both volume AND holders for hype (avoid wash trading)
@@ -497,11 +514,11 @@ export class EntertainmentMode {
       else if (context.holderCount >= 20) score += 0.05;
     }
 
-    // Volume bonus (up to +0.15)
-    if (context.volumeUsd24h) {
-      if (context.volumeUsd24h >= 50000) score += 0.15;
-      else if (context.volumeUsd24h >= 10000) score += 0.1;
-      else if (context.volumeUsd24h >= 1000) score += 0.05;
+    // Volume bonus (up to +0.15) - 5m volume thresholds
+    if (context.volumeUsd5m) {
+      if (context.volumeUsd5m >= 2000) score += 0.15;    // $2k in 5m
+      else if (context.volumeUsd5m >= 500) score += 0.1;  // $500 in 5m
+      else if (context.volumeUsd5m >= 100) score += 0.05; // $100 in 5m
     }
 
     // Age penalty for very new tokens (less than 1 hour)

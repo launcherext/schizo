@@ -78,6 +78,7 @@ export interface TokenMetadata {
   priceChange24h: number;
   volume24h: number;
   volume1h: number;
+  volume5m: number;     // 5-minute volume
   liquidity: number;
   marketCap: number;
   fdv: number;
@@ -262,6 +263,7 @@ export class DexScreenerClient {
       priceChange24h: pair.priceChange?.h24 || 0,
       volume24h: pair.volume?.h24 || 0,
       volume1h: pair.volume?.h1 || 0,
+      volume5m: pair.volume?.m5 || 0,
       liquidity: pair.liquidity?.usd || 0,
       marketCap: pair.marketCap || 0,
       fdv: pair.fdv || 0,

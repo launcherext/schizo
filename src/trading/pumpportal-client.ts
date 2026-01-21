@@ -397,16 +397,23 @@ export class PumpPortalClient {
       publicKey: this.wallet.publicKey.toBase58(),
       action,
       mint,
-      amount: amount.toString(), // Ensure amount is a string
-      denominatedInSol: true, // Use boolean instead of string
-      slippage: Math.round(slippage * 100), // Convert to integer percentage (0.05 -> 5)
+      amount,
+      denominatedInSol: 'true', // Must be string per API docs
+      slippage: Math.round(slippage * 100), // Integer 1-100
       priorityFee,
       pool: 'pump',
     };
 
     logger.debug({ priorityFee, isUrgent }, 'Using dynamic priority fee');
 
-    logger.debug({ payload }, 'Requesting transaction from PumpPortal');
+    logger.info({ 
+      action,
+      mint, 
+      amount, 
+      slippage: payload.slippage,
+      priorityFee,
+      publicKey: payload.publicKey.slice(0, 8) + '...'
+    }, 'Submitting trade to PumpPortal');
 
     const response = await fetch(url, {
       method: 'POST',
@@ -416,6 +423,15 @@ export class PumpPortalClient {
 
     if (!response.ok) {
       const errorText = await response.text();
+      logger.error({
+        action,
+        mint,
+        amount,
+        slippage: payload.slippage,
+        status: response.status,
+        error: errorText,
+        url
+      }, 'PumpPortal API error - full details');
       throw new Error(`PumpPortal API error: ${response.status} ${errorText}`);
     }
 
