@@ -398,7 +398,7 @@ export class PumpPortalClient {
       action,
       mint,
       amount,
-      denominatedInSol: 'true', // Must be string per API docs
+      denominatedInSol: action === 'buy' ? 'true' : 'false', // Buy in SOL, Sell in tokens
       slippage: Math.round(slippage * 100), // Integer 1-100
       priorityFee,
       pool: 'pump',
@@ -410,6 +410,7 @@ export class PumpPortalClient {
       action,
       mint, 
       amount, 
+      denominatedInSol: payload.denominatedInSol,
       slippage: payload.slippage,
       priorityFee,
       publicKey: payload.publicKey.slice(0, 8) + '...'
