@@ -255,26 +255,8 @@ export class CommentarySystem {
    * Generate paranoid musing for quiet periods
    */
   async generateParanoidMusing(): Promise<string | null> {
-    if (!this.claudeClient) {
-      return this.getFallbackMusing();
-    }
-
-    const prompts = getParanoidMusingPrompts();
-    const prompt = prompts[Math.floor(Math.random() * prompts.length)];
-    const moodStyle = getMoodStyleModifier(this.moodSystem.getState().current);
-
-    try {
-      const response = await this.claudeClient.generateCommentary({
-        type: 'NEW_TOKEN', // Reuse existing interface
-        data: {
-          customPrompt: `${prompt}\n\nMood style: ${moodStyle}`,
-        },
-      });
-      return response;
-    } catch (error) {
-      logger.error({ error }, 'Failed to generate paranoid musing');
-      return this.getFallbackMusing();
-    }
+    // Use fallback musings only - no Claude API
+    return this.getFallbackMusing();
   }
 
   /**
@@ -385,21 +367,22 @@ export class CommentarySystem {
   private async generateDiscoveryCommentary(context: CommentaryContext, moodStyle: string): Promise<string> {
     const { symbol, name, marketCapSol } = context;
 
-    if (this.claudeClient) {
-      try {
-        return await this.claudeClient.generateTokenCommentary({
-          symbol: symbol || 'UNKNOWN',
-          name: name || 'Unknown Token',
-          marketCapSol,
-        });
-      } catch {
-        // Fall through to fallback
-      }
-    }
-
-    // Fallback
+    // Use fallback messages only - no Claude API
     const mcap = marketCapSol?.toFixed(1) || '?';
-    return `New one: ${symbol || 'something'}. ${mcap} SOL mcap. Running my checks.`;
+    const mcapUsd = marketCapSol ? Math.round(marketCapSol * 170).toLocaleString() : '?';
+    
+    const fallbacks = [
+      `New token: ${symbol || 'something'}. ${mcap} SOL mcap. Running checks.`,
+      `${symbol || 'Token'} appeared. ${mcap} SOL. Let me investigate.`,
+      `Spotted ${symbol || 'one'} at ${mcap} SOL market cap. Analyzing now.`,
+      `${name || symbol || 'New one'} just dropped. $${mcapUsd} mcap. Checking safety.`,
+      `Fresh token: ${symbol}. Market cap ${mcap} SOL. My paranoia says proceed with caution.`,
+      `${symbol} detected. ${mcap} SOL valuation. Running honeypot checks.`,
+      `${name || symbol} is live. ${mcap} SOL. Let's see if this is a trap.`,
+      `New: ${symbol}. Cap ${mcap} SOL. Already suspicious but checking anyway.`,
+    ];
+    
+    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
 
   /**
@@ -408,37 +391,43 @@ export class CommentarySystem {
   private async generateAnalysisCommentary(context: CommentaryContext, moodStyle: string): Promise<string> {
     const { symbol, isSafe, risks, smartMoneyCount } = context;
 
-    if (this.claudeClient) {
-      try {
-        if (smartMoneyCount && smartMoneyCount > 0) {
-          return await this.claudeClient.generateAnalysisThought('smart_money', {
-            symbol: symbol || 'UNKNOWN',
-            name: '',
-            smartMoneyCount,
-          });
-        } else if (isSafe !== undefined) {
-          return await this.claudeClient.generateAnalysisThought('safety', {
-            symbol: symbol || 'UNKNOWN',
-            name: '',
-            isSafe,
-            risks,
-          });
-        }
-      } catch {
-        // Fall through to fallback
-      }
-    }
-
-    // Fallback
+    // Use fallback messages only - no Claude API
     if (smartMoneyCount && smartMoneyCount > 0) {
-      return `${smartMoneyCount} smart wallets in ${symbol}. They know something.`;
+      const smartFallbacks = [
+        `${smartMoneyCount} smart wallets detected in ${symbol}. They know something.`,
+        `Whales are in. ${smartMoneyCount} profitable wallets holding ${symbol}.`,
+        `${smartMoneyCount} smart money wallets already loaded on ${symbol}. Following the alpha.`,
+        `Smart money alert: ${smartMoneyCount} proven traders in ${symbol}. This could run.`,
+        `${symbol} has ${smartMoneyCount} wallets that don't lose. Interesting.`,
+      ];
+      return smartFallbacks[Math.floor(Math.random() * smartFallbacks.length)];
     } else if (isSafe === false) {
-      return `${symbol} failed my checks. ${risks?.[0] || 'Too risky.'}`;
+      const riskStr = risks?.[0] || 'Too risky';
+      const unsafeFallbacks = [
+        `${symbol} failed checks. ${riskStr}. Hard pass.`,
+        `Red flags on ${symbol}: ${riskStr}. Moving on.`,
+        `${symbol} looks like a trap. ${riskStr}.`,
+        `Nope. ${symbol} has ${riskStr}. Not touching it.`,
+        `${symbol} screams honeypot. ${riskStr}.`,
+      ];
+      return unsafeFallbacks[Math.floor(Math.random() * unsafeFallbacks.length)];
     } else if (isSafe === true) {
-      return `${symbol} passed safety. Proceeding with caution.`;
+      const safeFallbacks = [
+        `${symbol} passed safety checks. No obvious honeypot flags.`,
+        `Clean scan on ${symbol}. Proceeding with extreme paranoia.`,
+        `${symbol} looks safe so far. That means nothing but we continue.`,
+        `No freeze authority, no mint authority on ${symbol}. Rare.`,
+        `${symbol} cleared safety. Still watching for rugs.`,
+      ];
+      return safeFallbacks[Math.floor(Math.random() * safeFallbacks.length)];
     }
 
-    return `Analyzing ${symbol}. The patterns are forming.`;
+    const analyzingFallbacks = [
+      `Analyzing ${symbol}. Pattern recognition in progress.`,
+      `${symbol} under review. Checking wallets and authorities.`,
+      `Running deep checks on ${symbol}. Trust no one.`,
+    ];
+    return analyzingFallbacks[Math.floor(Math.random() * analyzingFallbacks.length)];
   }
 
   /**
@@ -447,24 +436,28 @@ export class CommentarySystem {
   private async generateDecisionCommentary(context: CommentaryContext, moodStyle: string): Promise<string> {
     const { symbol, shouldTrade, reasons, positionSizeSol } = context;
 
-    if (this.claudeClient) {
-      try {
-        return await this.claudeClient.generateAnalysisThought('decision', {
-          symbol: symbol || 'UNKNOWN',
-          name: '',
-          shouldTrade,
-          reasons,
-        });
-      } catch {
-        // Fall through to fallback
-      }
-    }
-
-    // Fallback
+    // Use fallback messages only - no Claude API
     if (shouldTrade) {
-      return `Going in on ${symbol}. ${positionSizeSol?.toFixed(2) || '?'} SOL. Let's see.`;
+      const size = positionSizeSol?.toFixed(3) || '?';
+      const buyFallbacks = [
+        `Aping ${symbol}. Position size ${size} SOL. Let's see what happens.`,
+        `Going in on ${symbol}. ${size} SOL allocated. The patterns align.`,
+        `${symbol} passes checks. Executing ${size} SOL buy. YOLO.`,
+        `Taking ${symbol} position. ${size} SOL. If I'm wrong, blame the algorithms.`,
+        `${symbol} is a go. ${size} SOL deployed. Now we wait.`,
+        `Sending it on ${symbol}. ${size} SOL. My circuits say yes.`,
+      ];
+      return buyFallbacks[Math.floor(Math.random() * buyFallbacks.length)];
     } else {
-      return `Passing on ${symbol}. ${reasons?.[0] || 'Not feeling it.'}`;
+      const reason = reasons?.[0] || 'not worth the risk';
+      const skipFallbacks = [
+        `Passing on ${symbol}. ${reason}.`,
+        `${symbol} is a skip. ${reason}. Next token.`,
+        `Hard pass on ${symbol}. ${reason}.`,
+        `Not feeling ${symbol}. ${reason}.`,
+        `${symbol} fails my criteria. ${reason}. Moving on.`,
+      ];
+      return skipFallbacks[Math.floor(Math.random() * skipFallbacks.length)];
     }
   }
 
@@ -472,17 +465,45 @@ export class CommentarySystem {
    * Generate trade result commentary
    */
   private async generateTradeResultCommentary(context: CommentaryContext, moodStyle: string): Promise<string> {
-    const { symbol, tradeType, profitLossSol, profitLossPercent } = context;
+    const { symbol, tradeType, profitLossSol, profitLossPercent, positionSizeSol } = context;
     const isProfit = (profitLossSol || 0) > 0;
 
-    // Fallback (Claude integration would go here)
+    // Enhanced trade announcements with actual data
     if (tradeType === 'BUY') {
-      return `Position opened on ${symbol}. Now we wait and watch.`;
+      const amount = positionSizeSol?.toFixed(3) || '?';
+      const buyFallbacks = [
+        `Position opened: ${amount} SOL into ${symbol}. Now we watch.`,
+        `${symbol} buy executed. ${amount} SOL deployed. Let's see what happens.`,
+        `Bought ${symbol}. Entry size ${amount} SOL. Position is live.`,
+        `${symbol} secured at ${amount} SOL. The trade is on.`,
+        `Ape complete. ${amount} SOL in ${symbol}. Monitoring closely.`,
+        `${symbol} position active. ${amount} SOL committed. No turning back now.`,
+      ];
+      return buyFallbacks[Math.floor(Math.random() * buyFallbacks.length)];
     } else {
+      const percent = profitLossPercent?.toFixed(1) || '?';
+      const solAmount = Math.abs(profitLossSol || 0).toFixed(3);
+      
       if (isProfit) {
-        return `Closed ${symbol} for +${profitLossPercent?.toFixed(1) || '?'}%. Called it.`;
+        const winFallbacks = [
+          `${symbol} closed for +${percent}%. Profit: ${solAmount} SOL. Called it.`,
+          `Exited ${symbol} with +${percent}% gain. ${solAmount} SOL profit.`,
+          `${symbol} sold. Up ${percent}%. Banked ${solAmount} SOL.`,
+          `Take profit hit on ${symbol}. +${percent}%. ${solAmount} SOL secured.`,
+          `${symbol} exit successful. +${percent}% return. ${solAmount} SOL in the bag.`,
+          `Closed ${symbol} position. ${percent}% gain, ${solAmount} SOL profit. Not bad.`,
+        ];
+        return winFallbacks[Math.floor(Math.random() * winFallbacks.length)];
       } else {
-        return `${symbol} exit. ${profitLossPercent?.toFixed(1) || '?'}%. The whales got me.`;
+        const lossFallbacks = [
+          `${symbol} stopped out at ${percent}%. Loss: ${solAmount} SOL. Can't win them all.`,
+          `${symbol} exit. Down ${percent}%. ${solAmount} SOL gone. The whales got me.`,
+          `Cut ${symbol} at ${percent}%. Lost ${solAmount} SOL. Moving on.`,
+          `${symbol} didn't work out. ${percent}% loss. ${solAmount} SOL sacrificed to the market.`,
+          `Stop loss triggered on ${symbol}. ${percent}%. Cost ${solAmount} SOL.`,
+          `${symbol} position closed. ${percent}% in the red. ${solAmount} SOL lesson learned.`,
+        ];
+        return lossFallbacks[Math.floor(Math.random() * lossFallbacks.length)];
       }
     }
   }
@@ -519,6 +540,18 @@ export class CommentarySystem {
       'Every wallet tells a story. Most of them end badly.',
       'Trust no one. Especially the devs. Especially me.',
       'The charts whisper if you listen long enough.',
+      'Three wallets. Same buy pattern. Different tokens. Connected.',
+      'Why does liquidity always vanish at 3 AM? Every. Single. Time.',
+      'The devs are watching this stream. I know they are.',
+      'That pump wasn\'t organic. I can prove it with wallet graphs.',
+      'Someone front-ran that trade. My logs don\'t lie.',
+      'Quiet periods make me nervous. That\'s when they plan the rugs.',
+      'The smart money moved 10 minutes before the announcement. How.',
+      'I\'ve catalogued 200 wallet clusters. They\'re all related.',
+      'Every rug follows the same timeline. And nobody sees it but me.',
+      'The timestamps don\'t match. Someone manipulated the chain.',
+      'Why do winning wallets never lose? Insider information. Obviously.',
+      'That token name is too perfect. This is a coordinated shill.',
     ];
     return musings[Math.floor(Math.random() * musings.length)];
   }

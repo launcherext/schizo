@@ -201,6 +201,59 @@ export class VoiceNarrator {
   }
 
   /**
+   * Replace acronyms with pronounceable versions for TTS
+   */
+  private replaceAcronyms(text: string): string {
+    const acronymMap: Record<string, string> = {
+      // Crypto currencies - use phonetic spellings
+      ' SOL': ' soul',        // Solana
+      'SOL ': 'soul ',
+      'SOL.': 'soul.',
+      'SOL,': 'soul,',
+      'SOL?': 'soul?',
+      'SOL!': 'soul!',
+      
+      ' USDC': ' U-S-D-C',    // USD Coin
+      'USDC ': 'U-S-D-C ',
+      
+      ' BTC': ' bitcoin',     // Bitcoin
+      'BTC ': 'bitcoin ',
+      
+      ' ETH': ' ethereum',    // Ethereum
+      'ETH ': 'ethereum ',
+      
+      ' USDT': ' tether',     // Tether
+      'USDT ': 'tether ',
+      
+      // Common trading terms
+      ' mcap': ' market cap',
+      'mcap ': 'market cap ',
+      
+      ' P&L': ' profit and loss',
+      'P&L ': 'profit and loss ',
+      
+      ' NFT': ' N-F-T',
+      'NFT ': 'N-F-T ',
+      
+      ' DeFi': ' dee-fi',
+      'DeFi ': 'dee-fi ',
+      
+      ' APY': ' A-P-Y',
+      'APY ': 'A-P-Y ',
+      
+      ' TVL': ' T-V-L',
+      'TVL ': 'T-V-L ',
+    };
+
+    let result = text;
+    for (const [acronym, replacement] of Object.entries(acronymMap)) {
+      result = result.replace(new RegExp(acronym, 'g'), replacement);
+    }
+    
+    return result;
+  }
+
+  /**
    * Clean text for speech - remove asterisk actions and other non-speech content
    */
   private cleanTextForSpeech(text: string): string {
@@ -209,6 +262,9 @@ export class VoiceNarrator {
     
     // Remove emojis and graphic symbols
     cleaned = cleaned.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
+    
+    // Replace acronyms with pronounceable versions
+    cleaned = this.replaceAcronyms(cleaned);
     
     // Remove multiple spaces
     cleaned = cleaned.replace(/\s+/g, ' ').trim();

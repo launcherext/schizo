@@ -334,46 +334,9 @@ export class MarketWatcher {
   private async performObservation(): Promise<void> {
     logger.debug('Performing observation cycle...');
 
-    // Generate commentary on recent activity if enabled
-    if (this.config.commentaryEnabled && this.claude && this.observations.length > 0) {
-      const recentObs = this.observations.slice(-5);
-
-      if (recentObs.length >= 3) {
-        try {
-          // Pick a random recent observation to comment on
-          const obs = recentObs[Math.floor(Math.random() * recentObs.length)];
-
-          const event: MarketEvent = {
-            type: this.mapObservationToEventType(obs.type),
-            data: {
-              description: obs.description,
-              token: obs.token,
-              ...obs.metadata,
-            },
-            timestamp: obs.timestamp,
-          };
-
-          const commentary = await this.claude.generateCommentary(event);
-
-          // Emit commentary event
-          agentEvents.emit({
-            type: 'SCHIZO_COMMENTARY',
-            timestamp: Date.now(),
-            data: {
-              commentary,
-              observation: { type: obs.type, description: obs.description },
-            },
-          });
-
-          // Voice if enabled
-          if (this.config.voiceEnabled && this.narrator) {
-            await this.narrator.say(commentary);
-          }
-        } catch (error) {
-          logger.error({ error }, 'Error generating commentary');
-        }
-      }
-    }
+    // Commentary disabled to reduce Claude API usage
+    // index.ts handles voice via event handlers instead
+    logger.debug('Observation cycle complete (commentary disabled)');
   }
 
   /**
@@ -387,50 +350,8 @@ export class MarketWatcher {
       return;
     }
 
-    if (!this.claude) {
-      logger.debug('No Claude client, skipping learning');
-      return;
-    }
-
-    try {
-      // Get recent observations
-      const recentObs = this.observations.slice(-20);
-
-      // Generate learning insights
-      const insight = await this.claude.generateLearningObservation(recentObs);
-
-      // Store insight as a pattern
-      const pattern: LearnedPattern = {
-        id: `pattern-${Date.now()}`,
-        type: 'CORRELATION',
-        description: insight,
-        confidence: 0.5, // Start with medium confidence
-        occurrences: 1,
-        lastSeen: Date.now(),
-        examples: recentObs.map(o => o.description).slice(0, 3),
-      };
-
-      this.learnedPatterns.push(pattern);
-
-      // Emit learning event
-      agentEvents.emit({
-        type: 'SCHIZO_LEARNING',
-        timestamp: Date.now(),
-        data: {
-          insight,
-          pattern: { id: pattern.id, type: pattern.type, description: pattern.description },
-        },
-      });
-
-      // Voice the learning if enabled
-      if (this.config.voiceEnabled && this.narrator) {
-        await this.narrator.say(insight);
-      }
-
-      logger.info({ insight: insight.slice(0, 100) }, 'Learning insight generated');
-    } catch (error) {
-      logger.error({ error }, 'Error in learning cycle');
-    }
+    // Learning disabled to reduce Claude API usage
+    logger.debug('Learning cycle skipped (Claude API disabled for routine learning)');
   }
 
   /**
@@ -494,38 +415,19 @@ export class MarketWatcher {
    * Generate a market summary
    */
   async generateMarketSummary(): Promise<string> {
-    if (!this.claude) {
-      return 'No AI client available for summary generation.';
-    }
-
     const stats = this.getStats();
-    const recentObs = this.getRecentObservations(10);
+    const recentObs = this.getRecentObservations(5);
 
-    const context = `
-Market Summary Request:
+    // Generate basic summary without Claude API
+    const summary = `Market Summary:
 - Tokens tracked: ${stats.tokensTracked}
 - Observations: ${stats.observationCount}
 - Patterns learned: ${stats.patternsLearned}
-- Wins: ${stats.wins}
-- Losses: ${stats.losses}
+- Wins: ${stats.wins} | Losses: ${stats.losses}
 
 Recent activity:
-${recentObs.map(o => `- ${o.description}`).join('\n')}
+${recentObs.map(o => `• ${o.description}`).join('\n')}`;
 
-Provide a paranoid market summary in your style.
-    `;
-
-    try {
-      const insight = await this.claude.generateLearningObservation([{
-        type: 'PATTERN',
-        description: context,
-        timestamp: Date.now(),
-      }]);
-
-      return insight;
-    } catch (error) {
-      logger.error({ error }, 'Error generating market summary');
-      return 'The patterns are there... but my circuits are overloaded.';
-    }
+    return summary;
   }
 }

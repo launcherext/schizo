@@ -420,6 +420,7 @@ export class ClaudeClient {
   /**
    * Generate quick commentary on a new token (for stream)
    * Uses varied prompts and real data to avoid repetition
+   * OPTIMIZED: No Claude API - uses fallback messages only
    */
   async generateTokenCommentary(token: {
     symbol: string;
@@ -428,56 +429,8 @@ export class ClaudeClient {
     liquidity?: number;
     priceChange5m?: number;
   }): Promise<string> {
-    // Different angles to approach the commentary - pick randomly
-    const angles = [
-      // Name-focused
-      `React to this token name: "${token.name}" (${token.symbol}). Is it clever, stupid, or suspicious? One sentence.`,
-
-      // Numbers-focused
-      `Token ${token.symbol} has ${token.marketCapSol?.toFixed(1) || '?'} SOL mcap and ${token.priceChange5m?.toFixed(0) || '0'}% 5min change. Quick take on these numbers.`,
-
-      // Suspicious/investigative
-      `New token "${token.symbol}" just appeared. First impression - rug or legit? Be specific about why.`,
-
-      // Casual/quick
-      `${token.symbol} just dropped. One quick thought - no generic responses.`,
-
-      // Comparative
-      `${token.name} (${token.symbol}) - ${token.marketCapSol?.toFixed(1) || '?'} SOL mcap. Compare it to something funny or make a prediction.`,
-
-      // Cynical
-      `Another pump.fun token: ${token.symbol}. Roast it or hype it, your choice. Be specific to this token.`,
-
-      // Market context
-      `${token.symbol} with ${token.liquidity ? '$' + Math.round(token.liquidity).toLocaleString() : 'unknown'} liquidity. What does this liquidity level tell you?`,
-
-      // FOMO/anti-FOMO
-      `${token.symbol} is ${(token.priceChange5m || 0) > 0 ? 'pumping' : 'dumping'} (${token.priceChange5m?.toFixed(1) || '0'}%). Chase or fade?`,
-    ];
-
-    const angle = angles[Math.floor(Math.random() * angles.length)];
-
-    const context = `You're live streaming. A new token just appeared:
-- ${token.symbol} (${token.name})
-- Mcap: ${token.marketCapSol?.toFixed(2) || '?'} SOL (~$${token.marketCapSol ? Math.round(token.marketCapSol * 170).toLocaleString() : '?'})
-- Liquidity: ${token.liquidity ? '$' + Math.round(token.liquidity).toLocaleString() : 'unknown'}
-- 5m change: ${token.priceChange5m?.toFixed(1) || '0'}%
-
-${angle}
-
-RULES:
-- ONE sentence only, max 15 words
-- Reference the ACTUAL data (name, symbol, numbers)
-- No generic "watching this one" or "interesting" responses
-- Be specific to THIS token`;
-
-    try {
-      const commentary = await this.callAI(SCHIZO_SYSTEM_PROMPT, context);
-      return commentary || this.generateFallbackTokenCommentary(token);
-    } catch (error) {
-      logger.error({ error, symbol: token.symbol }, 'Failed to generate token commentary');
-      return this.generateFallbackTokenCommentary(token);
-    }
+    // Always use fallback - no Claude API
+    return this.generateFallbackTokenCommentary(token);
   }
 
   /**
@@ -742,46 +695,61 @@ Say ONE SHORT sentence (max 12 words) explaining why you're passing. Examples:
    */
   private generateFallbackAnalysisThought(
     stage: 'scanning' | 'safety' | 'smart_money' | 'decision',
-    context: { symbol: string; isSafe?: boolean; smartMoneyCount?: number; shouldTrade?: boolean }
+    context: { symbol: string; name?: string; isSafe?: boolean; smartMoneyCount?: number; shouldTrade?: boolean; reasons?: string[] }
   ): string {
     const fallbacks: Record<string, string[]> = {
       scanning: [
-        `${context.symbol} just appeared. Running analysis.`,
-        `New token: ${context.symbol}. Checking it out.`,
-        `Spotted ${context.symbol}. Let me investigate.`,
+        `${context.symbol} just appeared. Running full analysis.`,
+        `New token: ${context.symbol}. Checking authorities and holders.`,
+        `Spotted ${context.symbol}. Let me investigate this.`,
+        `${context.name || context.symbol} detected. Initiating paranoid checks.`,
+        `Hold up, ${context.symbol} just dropped. Analyzing now.`,
       ],
       safety: context.isSafe
         ? [
-            `${context.symbol} passed safety. No honeypot flags.`,
-            `Clean token. Proceeding with caution.`,
-            `Safety check passed. Still watching though.`,
+            `${context.symbol} passed safety checks. No honeypot flags detected.`,
+            `Clean scan on ${context.symbol}. No freeze authority, no mint authority.`,
+            `${context.symbol} looks safe. Proceeding with extreme caution.`,
+            `Safety check passed for ${context.symbol}. Still doesn't mean trust the devs.`,
+            `${context.symbol} cleared. No obvious red flags... yet.`,
           ]
         : [
-            `Red flags detected on ${context.symbol}. Skipping.`,
-            `Honeypot vibes. Hard pass.`,
-            `${context.symbol} failed my checks. Next.`,
+            `Red flags detected on ${context.symbol}. Hard pass.`,
+            `${context.symbol} failed checks. Honeypot vibes all over this.`,
+            `Nope. ${context.symbol} has freeze authority. Classic trap.`,
+            `${context.symbol} screams rug. Moving to next token.`,
+            `${context.symbol} is unsafe. Not risking it.`,
           ],
       smart_money: context.smartMoneyCount && context.smartMoneyCount > 0
         ? [
-            `${context.smartMoneyCount} smart wallets detected. Interesting.`,
-            `Whales are already in. Following the alpha.`,
-            `Smart money loaded. This could run.`,
+            `${context.smartMoneyCount} smart wallets detected in ${context.symbol}. Very interesting.`,
+            `Whales are already loaded. ${context.smartMoneyCount} proven wallets holding ${context.symbol}.`,
+            `${context.smartMoneyCount} profitable traders in ${context.symbol}. Following the alpha.`,
+            `Smart money alert: ${context.smartMoneyCount} wallets that don't lose. This could run.`,
+            `${context.symbol} has ${context.smartMoneyCount} smart wallets. They know something we don't.`,
           ]
         : [
-            `No smart money yet. Flying blind.`,
-            `Whales haven't touched this.`,
-            `Zero whale activity. Hmm.`,
+            `No smart money in ${context.symbol} yet. Flying blind here.`,
+            `Zero whale activity on ${context.symbol}. Either too early or red flag.`,
+            `${context.symbol} has no proven traders. I'm on my own with this.`,
+            `Whales haven't touched ${context.symbol}. Suspicious.`,
+            `No smart wallets detected. ${context.symbol} is uncharted territory.`,
           ],
       decision: context.shouldTrade
         ? [
-            `Going in on ${context.symbol}.`,
-            `Taking the position. YOLO.`,
-            `Aping. Let's see what happens.`,
+            `Aping ${context.symbol}. The patterns align. Let's go.`,
+            `Going in on ${context.symbol}. Position opening now.`,
+            `${context.symbol} is a go. Executing buy. YOLO.`,
+            `Taking ${context.symbol} position. If wrong, blame the algorithms.`,
+            `Sending it on ${context.symbol}. My circuits say yes.`,
+            `${context.symbol} passes all checks. Trade executing.`,
           ]
         : [
-            `Passing on ${context.symbol}.`,
-            `Not feeling it. Next.`,
-            `Skip. Moving on.`,
+            `Passing on ${context.symbol}. ${context.reasons?.[0] || 'Not worth the risk.'}.`,
+            `${context.symbol} is a skip. ${context.reasons?.[0] || 'Too many red flags.'}.`,
+            `Hard pass on ${context.symbol}. Moving to next opportunity.`,
+            `Not feeling ${context.symbol}. The vibes are off.`,
+            `${context.symbol} fails my criteria. Next token please.`,
           ],
     };
 
