@@ -273,7 +273,7 @@ export class PumpPortalClient {
           action: 'claim',
           mint: mint,
           publicKey: this.wallet.publicKey.toBase58(),
-          denominatedInSol: 'true',
+          denominatedInSol: true, // Use boolean
           amount: 100, // Required by schema but ignored for claims
           slippage: 1, // Required by schema but ignored for claims
           priorityFee: 0.005,
@@ -397,9 +397,9 @@ export class PumpPortalClient {
       publicKey: this.wallet.publicKey.toBase58(),
       action,
       mint,
-      amount,
-      denominatedInSol: 'true',
-      slippage: slippage * 100, // Convert 0.05 to 5 (percent)
+      amount: amount.toString(), // Ensure amount is a string
+      denominatedInSol: true, // Use boolean instead of string
+      slippage: Math.round(slippage * 100), // Convert to integer percentage (0.05 -> 5)
       priorityFee,
       pool: 'pump',
     };
