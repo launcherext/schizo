@@ -346,22 +346,23 @@ function updateStats(stats) {
   // Format PnL values with sign
   const formatPnL = (val) => (val >= 0 ? '+' : '') + val.toFixed(3);
   
-  // Display breakdown with better styling
+  // Display breakdown: Compact vertical stack with grid
+  // R: +0.000
+  // U: +0.000
+  // T: +0.000
   pnlElement.innerHTML = `
-    <div class="pnl-breakdown">
-      <div class="pnl-item">
-        <span class="pnl-label">REALIZED</span>
-        <span class="pnl-value ${realizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(realizedPnL)}</span>
+    <div class="pnl-compact">
+      <div class="pnl-row">
+        <span class="pnl-label-small">R:</span>
+        <span class="pnl-value-small ${realizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(realizedPnL)}</span>
       </div>
-      <div class="pnl-divider">•</div>
-      <div class="pnl-item">
-        <span class="pnl-label">UNREALIZED</span>
-        <span class="pnl-value ${unrealizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(unrealizedPnL)}</span>
+      <div class="pnl-row">
+        <span class="pnl-label-small">U:</span>
+        <span class="pnl-value-small ${unrealizedPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(unrealizedPnL)}</span>
       </div>
-      <div class="pnl-divider">•</div>
-      <div class="pnl-item">
-        <span class="pnl-label">TOTAL</span>
-        <span class="pnl-value ${totalPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(totalPnL)} <span class="pnl-unit">SOL</span></span>
+      <div class="pnl-row total-row">
+        <span class="pnl-label-small">T:</span>
+        <span class="pnl-value-small ${totalPnL >= 0 ? 'positive' : 'negative'}">${formatPnL(totalPnL)}</span>
       </div>
     </div>
   `;
