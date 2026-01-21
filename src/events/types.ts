@@ -66,7 +66,8 @@ export type AgentEvent =
   | ShillReceivedEvent
   | ShillRoastEvent
   | ShillBuyEvent
-  | SchizoTokenUpdateEvent;
+  | SchizoTokenUpdateEvent
+  | WalletTransactionEvent;
 
 /**
  * Token scan initiated (even if rejected)
@@ -515,5 +516,30 @@ export interface SchizoTokenUpdateEvent extends BaseEvent {
     live: boolean;
     dexUrl?: string;
     imageUrl?: string;
+  };
+}
+
+/**
+ * Real-time wallet transaction from Helius webhook
+ */
+export interface WalletTransactionEvent extends BaseEvent {
+  type: 'WALLET_TRANSACTION';
+  data: {
+    signature: string;
+    slot: number;
+    timestamp: number;
+    type: 'TRANSFER' | 'SWAP' | 'TOKEN_MINT' | 'TOKEN_BURN' | 'UNKNOWN';
+    description: string;
+    accountData: Array<{
+      account: string;
+      nativeBalanceChange: number;
+      tokenBalanceChanges?: Array<{
+        mint: string;
+        rawTokenAmount: {
+          tokenAmount: string;
+          decimals: number;
+        };
+      }>;
+    }>;
   };
 }

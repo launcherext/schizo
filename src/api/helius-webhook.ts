@@ -74,10 +74,21 @@ export async function handleHeliusWebhook(
             timestamp: event.timestamp,
             data: {
               signature: event.signature,
-              mint: transfer.mint,
-              type: isSell ? 'SELL' : 'BUY',
-              amount: transfer.tokenAmount,
               slot: event.slot,
+              timestamp: event.timestamp,
+              type: isSell ? 'TRANSFER' : 'TRANSFER',
+              description: `${isSell ? 'Sell' : 'Buy'} ${transfer.tokenAmount} tokens`,
+              accountData: [{
+                account: walletAddress,
+                nativeBalanceChange: 0,
+                tokenBalanceChanges: [{
+                  mint: transfer.mint,
+                  rawTokenAmount: {
+                    tokenAmount: transfer.tokenAmount.toString(),
+                    decimals: 6,
+                  },
+                }],
+              }],
             },
           });
         }

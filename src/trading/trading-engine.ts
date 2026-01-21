@@ -905,24 +905,60 @@ export class TradingEngine {
         }, 'Jupiter sell executed');
       } else {
         // Use PumpPortal for bonding curve tokens - use actualAmount (wallet balance) not DB amount
-        signature = await this.pumpPortal.sell({
-          mint,
-          amount: actualAmount,
-          slippage: this.config.slippageTolerance,
-        });
+        try {
+          signature = await this.pumpPortal.sell({
+            mint,
+            amount: actualAmount,
+            slippage: this.config.slippageTolerance,
+          });
 
-        // Parse the confirmed transaction to get actual amounts
-        const parsedTx = await this.txParser.waitAndParse(
-          signature,
-          this.walletAddress,
-          mint,
-          'sell',
-          30000 // 30 second timeout
-        );
+          // Parse the confirmed transaction to get actual amounts
+          const parsedTx = await this.txParser.waitAndParse(
+            signature,
+            this.walletAddress,
+            mint,
+            'sell',
+            30000 // 30 second timeout
+          );
 
-        actualTokens = parsedTx.tokenAmount || amount;
-        solReceived = parsedTx.solAmount || 0;
-        pricePerToken = parsedTx.pricePerToken;
+          actualTokens = parsedTx.tokenAmount || amount;
+          solReceived = parsedTx.solAmount || 0;
+          pricePerToken = parsedTx.pricePerToken;
+        } catch (pumpError: any) {
+          // Check if token graduated mid-trade (BondingCurveComplete error 0x1775/6005)
+          const errorMsg = pumpError?.message || String(pumpError);
+          if (errorMsg.includes('BondingCurveComplete') || errorMsg.includes('0x1775') || errorMsg.includes('6005')) {
+            logger.warn({ mint, error: errorMsg }, '🔄 Token graduated during hold - retrying via Jupiter');
+            
+            if (!this.jupiter) {
+              logger.error({ mint }, 'Jupiter client not available - cannot sell graduated token');
+              throw pumpError;
+            }
+            
+            // Retry via Jupiter DEX
+            const result = await this.jupiter.sell(
+              mint,
+              actualAmount,
+              6, // Assuming 6 decimals for pump.fun tokens
+              { slippageBps: this.config.slippageTolerance * 10000 }
+            );
+
+            signature = result.signature;
+            actualTokens = result.inputAmount;
+            solReceived = result.outputAmount;
+            pricePerToken = solReceived / actualTokens;
+
+            logger.info({
+              mint,
+              signature,
+              method: 'Jupiter (fallback)',
+              priceImpact: result.priceImpactPct,
+            }, '✅ Graduated token sold via Jupiter fallback');
+          } else {
+            // Different error - re-throw
+            throw pumpError;
+          }
+        }
       }
 
       // Record trade in database
