@@ -11,9 +11,9 @@ $SCHIZO is a paranoid AI trading agent for Solana memecoins that combines deep w
 - Decimal phases (e.g., 2.1): Urgent insertions if needed
 
 - [x] **Phase 1: Foundation & Security** - Secure wallet management, persistent state, and rate-limited API client
-- [ ] **Phase 2: Analysis & Token Safety** - Forensic wallet analysis and token risk assessment
-- [ ] **Phase 3: Trading & Economic Loop** - Trade execution, risk management, fee claiming, and buybacks
-- [ ] **Phase 4: Personality & Streaming** - Claude personality, TTS narration, web dashboard, and live streaming
+- [x] **Phase 2: Analysis & Token Safety** - Forensic wallet analysis and token risk assessment
+- [x] **Phase 3: Trading & Economic Loop** - Trade execution, risk management, fee claiming, and buybacks
+- [ ] **Phase 4: Personality & Streaming** - Entertainment mode, mood system, commentary timing, and live streaming
 
 ## Phase Details
 
@@ -48,9 +48,9 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Foundation types, HeliusClient.getAsset, and AnalysisCacheRepository
-- [ ] 02-02-PLAN.md — TokenSafetyAnalyzer for honeypot detection (ANAL-01)
-- [ ] 02-03-PLAN.md — WalletAnalyzer with P&L calculation (ANAL-02)
-- [ ] 02-04-PLAN.md — SmartMoneyTracker for profitable wallet identification (ANAL-03)
+- [x] 02-02-PLAN.md — TokenSafetyAnalyzer for honeypot detection (ANAL-01)
+- [x] 02-03-PLAN.md — WalletAnalyzer with P&L calculation (ANAL-02)
+- [x] 02-04-PLAN.md — SmartMoneyTracker for profitable wallet identification (ANAL-03)
 
 ### Phase 3: Trading & Economic Loop
 **Goal**: Agent can execute trades with risk management and sustain itself through fee claiming and buybacks
@@ -62,29 +62,32 @@ Plans:
   3. Stop-loss and take-profit rules execute automatically when thresholds hit
   4. Agent auto-claims pump.fun creator fees on schedule
   5. Profits trigger automatic $SCHIZO token buybacks
-**Plans**: TBD
+**Plans**: 4 plans in 2 waves
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
-- [ ] 03-03: TBD
+- [x] 03-01-PLAN.md — PumpPortal client with trade execution
+- [x] 03-02-PLAN.md — Trading engine with risk management
+- [x] 03-03-PLAN.md — Fee claiming and buyback system
+- [x] 03-04-PLAN.md — Economic flywheel integration
 
-### Phase 4: Personality & Streaming
-**Goal**: Agent has a distinctive paranoid personality and streams its reasoning live to the public
+### Phase 4: Personality & Streaming (ENTERTAINMENT MODE)
+**Goal**: Agent trades frequently (3-5/hour), has visible moods, and speaks at narrative beats
 **Depends on**: Phase 3
 **Requirements**: PERS-01, PERS-02, PERS-03, PERS-04, PERS-05
 **Success Criteria** (what must be TRUE):
-  1. All agent outputs reflect paranoid degen personality (consistent voice across sessions)
-  2. Agent streams live reasoning to pump.fun token page
-  3. Web dashboard shows real-time analysis, positions, trades, and P&L
-  4. Agent narrates its reasoning via TTS voice output
-  5. Streamable terminal view shows agent activity in action
-**Plans**: TBD
+  1. Agent trades 3-5 times per hour with micro positions (0.01-0.05 SOL)
+  2. Mood system shows confident/paranoid/restless states based on results
+  3. Commentary happens at narrative beats with 15-20 second minimum gaps
+  4. Time pressure builds during quiet periods, lowering risk thresholds
+  5. Random degen moments occasionally trigger impulsive trades
+  6. Frontend displays current mood and trading activity
+**Plans**: 4 plans in 2 waves
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md — Mood System (tracks emotional state, affects trading)
+- [ ] 04-02-PLAN.md — Entertainment Mode (relaxed thresholds, micro bets, time pressure)
+- [ ] 04-03-PLAN.md — Commentary System (timing control, narrative beats)
+- [ ] 04-04-PLAN.md — Integration (wire all systems into trading loop)
 
 ## Progress
 
@@ -94,13 +97,12 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Security | 5/5 | Complete | 2026-01-20 |
-| 2. Analysis & Token Safety | 1/4 | In Progress | - |
-| 3. Trading & Economic Loop | 0/3 | Not started | - |
-| 4. Personality & Streaming | 0/3 | Not started | - |
+| 2. Analysis & Token Safety | 4/4 | Complete | 2026-01-20 |
+| 3. Trading & Economic Loop | 4/4 | Complete | 2026-01-20 |
+| 4. Personality & Streaming | 0/4 | Ready | - |
 
 ---
 *Roadmap created: 2026-01-20*
-*Phase 1 planned: 2026-01-20*
-*Phase 2 planned: 2026-01-20*
+*Phase 4 replanned: 2026-01-20 (Entertainment Mode focus)*
 *Depth: Quick (4 phases)*
 *Coverage: 17/17 v1 requirements mapped*
