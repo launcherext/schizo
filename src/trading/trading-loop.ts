@@ -324,12 +324,15 @@ export class TradingLoop {
 
   /**
    * Scan trending tokens from Moralis API
-   * Replaces/supplements Birdeye for token discovery
+   * Falls back to GeckoTerminal if Moralis quota is exhausted
    */
   private async scanMoralisTrending(): Promise<void> {
     const moralisClient = getMoralisClient();
+
+    // If no Moralis client or previous failures, use GeckoTerminal directly
     if (!moralisClient) {
-      // Moralis not initialized
+      logger.debug('No Moralis client - using GeckoTerminal fallback');
+      await this.scanGeckoTerminalFallback();
       return;
     }
 
@@ -340,7 +343,15 @@ export class TradingLoop {
       const [trending, gainers] = await Promise.all([
         moralisClient.getTrendingTokens({ limit: 15, minLiquidity: 5000 }),
         moralisClient.getTopGainers({ limit: 10, timeFrame: '1h' }),
-      ]);
+      ]).catch(async (error) => {
+        // Moralis quota exhausted - fall back to GeckoTerminal
+        if (error.message?.includes('quota') || error.message?.includes('blocked') || error.message?.includes('401')) {
+          logger.warn('Moralis quota exhausted - falling back to GeckoTerminal');
+          await this.scanGeckoTerminalFallback();
+          return [[], []]; // Return empty to skip rest of function
+        }
+        throw error; // Re-throw other errors
+      });
 
       const allTokens = [...trending, ...gainers];
       let addedCount = 0;
@@ -504,6 +515,61 @@ export class TradingLoop {
 
     } catch (error) {
         logger.error({ error }, 'Failed to scan DexScreener boosts');
+    }
+  }
+
+  /**
+   * GeckoTerminal fallback when Moralis quota is exhausted
+   * Uses both trending and new pools for discovery
+   */
+  private async scanGeckoTerminalFallback(): Promise<void> {
+    logger.info('🦎 GeckoTerminal fallback scan (Moralis quota exhausted)');
+
+    try {
+      // Get both trending pools and new pools for better coverage
+      const [trending, newPools, gainers] = await Promise.all([
+        geckoTerminal.getTrendingPools(15),
+        geckoTerminal.getNewPools(10),
+        geckoTerminal.getTopGainers('1h', 10),
+      ]);
+
+      const allTokens = [...trending, ...newPools, ...gainers];
+      let addedCount = 0;
+
+      for (const token of allTokens) {
+        // Skip invalid mints
+        if (token.mint === 'unknown') continue;
+
+        // Skip if already seen recently
+        const lastSeen = this.seenTokens.get(token.mint);
+        if (lastSeen && Date.now() - lastSeen < 30 * 60 * 1000) continue;
+
+        // Basic filter
+        if (token.liquidity < 5000) continue;
+        if (token.volume1h < 1000) continue;
+
+        this.seenTokens.set(token.mint, Date.now());
+        this.tokenMetadataCache.set(token.mint, token);
+
+        logger.info({
+          address: token.mint,
+          symbol: token.symbol,
+          liquidity: token.liquidity,
+          priceChange1h: token.priceChange1h?.toFixed(1) + '%',
+        }, '🦎 Token from GeckoTerminal fallback');
+
+        await this.analyzeAndTrade(token.mint);
+        addedCount++;
+
+        // Rate limiting
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (addedCount > 0) {
+        logger.info({ addedCount }, '🦎 Processed GeckoTerminal fallback tokens');
+      }
+    } catch (error) {
+      logger.error({ error }, 'GeckoTerminal fallback scan failed');
     }
   }
 
