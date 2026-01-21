@@ -604,18 +604,26 @@ export class TradingEngine {
     skipEvaluation?: boolean,
     overridePositionSol?: number
   ): Promise<string | null> {
-    logger.info({ mint, skipEvaluation }, 'Executing buy trade');
+    logger.info({ 
+      mint, 
+      symbol: tokenMetadata?.symbol,
+      skipEvaluation, 
+      overridePositionSol,
+      marketCapSol: tokenMetadata?.marketCapSol 
+    }, '🎯 TRADE ATTEMPT STARTED');
 
     // CRITICAL: Prevent duplicate buys - check if we already hold this token
     const openPositions = await this.getOpenPositions();
     const existingPosition = openPositions.find(p => p.tokenMint === mint);
     if (existingPosition) {
-      logger.warn({
+      logger.error({
         mint,
         symbol: existingPosition.tokenSymbol,
         existingAmountSol: existingPosition.entryAmountSol,
-      }, 'BLOCKED: Already holding this token - duplicate buy prevented');
+      }, '🚫 TRADE BLOCKED: Already holding this token - duplicate buy prevented');
       return null;
+    } else {
+      logger.info({ mint, openPositionsCount: openPositions.length }, '✅ No existing position - proceeding');
     }
 
     // HARD BLOCK: Pump.fun Mayhem Mode tokens (2 billion supply)
@@ -643,6 +651,8 @@ export class TradingEngine {
       }, '🚫 TRADE BLOCKED BY CIRCUIT BREAKER');
       return null;
     }
+    
+    logger.info({ mint }, '✅ Circuit breaker check passed');
 
     let positionSizeSol = overridePositionSol || this.config.basePositionSol;
 
@@ -656,12 +666,15 @@ export class TradingEngine {
         shouldTrade: decision.shouldTrade,
         positionSize: decision.positionSizeSol,
         reasons: decision.reasons,
-      }, 'Trade decision');
+        smartMoneyCount: decision.smartMoneyCount
+      }, '🤔 Evaluation complete');
 
       if (!decision.shouldTrade) {
-        logger.warn({ mint, reasons: decision.reasons }, `⛔ Trade rejected: ${decision.reasons.join(', ')}`);
+        logger.error({ mint, reasons: decision.reasons }, `🚫 TRADE REJECTED BY EVALUATION: ${decision.reasons.join(', ')}`);
         return null;
       }
+      
+      logger.info({ mint, positionSizeSol: decision.positionSizeSol }, '✅ Evaluation passed - proceeding to execution');
 
       positionSizeSol = decision.positionSizeSol;
     } else {
@@ -678,7 +691,7 @@ export class TradingEngine {
     if (!isPumpFunToken) {
       // Token is not from pump.fun - must use Jupiter
       useJupiter = true;
-      logger.info({ mint }, 'Non-pump.fun token detected - using Jupiter');
+      logger.info({ mint }, '🦅 Non-pump.fun token detected - routing to Jupiter');
     } else if (this.jupiter) {
       // pump.fun token - check if it graduated to Raydium
       try {
@@ -702,6 +715,13 @@ export class TradingEngine {
     }
 
     // Execute trade via Jupiter (graduated) or PumpPortal (bonding curve)
+    logger.info({ 
+      mint, 
+      useJupiter, 
+      positionSizeSol,
+      client: useJupiter ? 'Jupiter' : 'PumpPortal'
+    }, '💸 Executing trade now...');
+    
     try {
       let signature: string;
       let tokensReceived: number;
