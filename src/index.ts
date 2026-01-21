@@ -116,7 +116,7 @@ async function main(): Promise<void> {
       CONSERVATIVE: { maxTopHolderPercent: 20, maxTop10HoldersPercent: 40, minHolderCount: 50 },
       BALANCED: { maxTopHolderPercent: 30, maxTop10HoldersPercent: 50, minHolderCount: 20 },
       AGGRESSIVE: { maxTopHolderPercent: 40, maxTop10HoldersPercent: 60, minHolderCount: 10 },
-      ENTERTAINMENT: { maxTopHolderPercent: 70, maxTop10HoldersPercent: 90, minHolderCount: 5 }, // Very permissive
+      ENTERTAINMENT: { maxTopHolderPercent: 99, maxTop10HoldersPercent: 100, minHolderCount: 1 }, // Effectively disabled - full degen mode
     };
     
     const tokenSafety = new TokenSafetyAnalyzer(
