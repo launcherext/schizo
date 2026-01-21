@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-20)
 ## Current Position
 
 Phase: 4 of 4 (Personality & Streaming)
-Plan: 1 of 3 in Phase 4
+Plan: 2 of 3 in Phase 4
 Status: In progress
-Last activity: 2026-01-20 - Completed 04-01-PLAN.md (Mood System)
+Last activity: 2026-01-20 - Completed 04-02-PLAN.md (Entertainment Mode)
 
-Progress: [#############-] 87% (13/15 plans)
+Progress: [##############-] 93% (14/15 plans)
 
 ## Performance Metrics
 
@@ -30,7 +30,7 @@ Progress: [#############-] 87% (13/15 plans)
 | 1. Foundation & Security | 5/5 | 29 min | 6 min |
 | 2. Analysis & Token Safety | 4/4 | 44 min | 11 min |
 | 3. Trading & Economic Loop | 4/4 | - | - |
-| 4. Personality & Streaming | 1/3 | 4 min | 4 min |
+| 4. Personality & Streaming | 2/3 | 9 min | 4.5 min |
 
 **Recent Trend:**
 - Last 5 plans: 01-04 (8 min), 01-05 (5 min), 02-01 (15 min), 02-02 (10 min), 02-03 (10 min)
@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 | 6 mood types for trading psychology | 04-01 | Cover wins, losses, inactivity, random events, default |
 | Mood effects as multipliers | 04-01 | Trading engine can apply flexibly |
 | 5 min quiet period for restlessness | 04-01 | Build pressure to trade for entertainment |
+| 0.01-0.05 SOL micro bet range | 04-02 | Keep losses small while allowing frequent trading |
+| 8% degen chance for random apes | 04-02 | Add unpredictability and entertainment value |
+| 5-15 min time pressure window | 04-02 | Balance entertainment with not being too aggressive |
 
 ### Pending Todos
 
@@ -137,5 +140,5 @@ Ready for Phase 4: Personality & Streaming
 ## Session Continuity
 
 Last session: 2026-01-20
-Stopped at: Completed 04-01-PLAN.md (Mood System)
+Stopped at: Completed 04-02-PLAN.md (Entertainment Mode)
 Resume file: None
