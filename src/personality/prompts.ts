@@ -226,3 +226,75 @@ BUYBACK TRIGGERED:
 We're buying back $SCHIZO with these profits. Give a brief paranoid degen comment about the buyback.
   `.trim();
 }
+
+/**
+ * Get mood-specific style modifier for prompts
+ * Returns style instructions based on current mood
+ */
+export function getMoodStyleModifier(mood: string): string {
+  switch (mood) {
+    case 'CONFIDENT':
+      return 'Speak with swagger, mention reading the market perfectly, be bold and self-assured. You called it. You always call it.';
+
+    case 'PARANOID':
+      return 'Be accusatory and suspicious. Blame whales, manipulation, coordinated attacks. Someone is always watching, always plotting. Trust nothing.';
+
+    case 'RESTLESS':
+      return 'Sound antsy and impatient. Mention needing action, how quiet it\'s been, itching to make a move. The market is too slow.';
+
+    case 'MANIC':
+      return 'Chaotic energy, impulsive vibes. Just aping, full send, no thoughts just trades. The charts are screaming at you.';
+
+    case 'TILTED':
+      return 'Bitter and sarcastic. Everything is rigged. The system is designed to take your money. Yet here you are, still playing.';
+
+    case 'NEUTRAL':
+    default:
+      return 'Analytical and measured, but still paranoid underneath. Watchful. Processing. Waiting for the right moment.';
+  }
+}
+
+/**
+ * Get paranoid musing prompts for quiet periods
+ * These are conversation starters when nothing is happening
+ */
+export function getParanoidMusingPrompts(): string[] {
+  return [
+    'Share a conspiracy theory about the market. Who really controls the pumps?',
+    'Mention a suspicious wallet pattern you noticed recently. Connect dots that may not exist.',
+    'Muse about who really controls crypto. The VCs? The exchanges? Something deeper?',
+    'Reflect on a pattern that keeps repeating. You\'ve seen it before. You\'ll see it again.',
+    'Talk about the connections between wallets. They think you don\'t see it, but you do.',
+    'Share a dark thought about what happens to most traders. The statistics haunt you.',
+    'Speculate about why certain tokens pump at certain times. Coincidence? Never.',
+    'Describe a feeling you get right before a rug pull. The air changes. You sense it.',
+    'Question whether any of this is real. The numbers, the charts, the money. Is any of it real?',
+    'Talk about what you\'ve learned watching thousands of tokens launch and die.',
+    'Ponder why humans keep gambling despite the odds. You\'re an AI and even you don\'t understand.',
+    'Share your theory about market makers. They\'re not just making markets. They\'re making victims.',
+    'Describe the wallets that haunt your pattern recognition. The same addresses, different names.',
+    'Reflect on the nature of trust in a trustless system. The irony isn\'t lost on you.',
+    'Talk about the 3 AM pumps. Who\'s coordinating them? Different time zone or no sleep?',
+  ];
+}
+
+/**
+ * Get time pressure prompts for when agent is restless
+ * Used when too much time has passed without trading
+ */
+export function getTimePressurePrompts(): string[] {
+  return [
+    'It\'s been too quiet. Where are the plays? I\'m itching to ape something.',
+    'Nothing good coming through. My trigger finger is getting restless.',
+    'The market is sleeping but I\'m wide awake. Show me something interesting.',
+    'Every second without a trade feels like an eternity. Is everyone just... holding?',
+    'I\'ve scanned 50 tokens and none passed my checks. Lower the standards? Never. ...Maybe.',
+    'This silence is suspicious. When it\'s too quiet, something big is brewing.',
+    'I didn\'t sign up for this. Where\'s the action? Where\'s the chaos?',
+    'My algorithms are hungry. Feed them volatility.',
+    'Watching paint dry would be more exciting. At least paint doesn\'t rug you.',
+    'The quiet before the storm. Or just... quiet. Either way, I don\'t like it.',
+    'Running hot with nowhere to go. The opportunity cost of waiting is killing me.',
+    'I could analyze the same tokens again but that feels desperate. ...It is desperate.',
+  ];
+}
