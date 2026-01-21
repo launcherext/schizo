@@ -8,7 +8,9 @@
       "mcp__blender__poll_rodin_job_status",
       "mcp__blender__import_generated_asset",
       "mcp__blender__execute_blender_code",
-      "mcp__blender__get_viewport_screenshot"
+      "mcp__blender__get_viewport_screenshot",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
