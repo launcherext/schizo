@@ -35,7 +35,8 @@ export type AgentEvent =
   | TokenDiscoveredEvent
   | TokenCommentaryEvent
   | AnalysisThoughtEvent
-  | CopyTradeSignalEvent;
+  | CopyTradeSignalEvent
+  | MoodChangeEvent;
 
 /**
  * Copy trade signal detected
@@ -299,5 +300,18 @@ export interface AnalysisThoughtEvent extends BaseEvent {
       shouldTrade?: boolean;
       reasons?: string[];
     };
+  };
+}
+
+/**
+ * Mood changed
+ */
+export interface MoodChangeEvent extends BaseEvent {
+  type: 'MOOD_CHANGE';
+  data: {
+    previous: string;
+    current: string;
+    intensity: number;
+    trigger?: string;
   };
 }
