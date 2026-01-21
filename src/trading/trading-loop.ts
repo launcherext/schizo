@@ -15,6 +15,7 @@ import type { MoodSystem } from '../personality/mood-system.js';
 import type { CommentarySystem, NarrativeBeat } from '../personality/commentary-system.js';
 import { EntertainmentMode, type TokenContext, type EntertainmentDecision } from './entertainment-mode.js';
 import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
+import { geckoTerminal } from '../api/geckoterminal.js';
 import { getBirdeyeClient, type BirdeyeToken } from '../api/birdeye.js';
 import { agentEvents } from '../events/emitter.js';
 import { logger } from '../lib/logger.js';
@@ -157,6 +158,30 @@ export class TradingLoop {
       logger.warn('BIRDEYE_API_KEY not configured - trending token scanning disabled');
     }
 
+    // Scan DexScreener Boosts (Paid/Trending) every 60 seconds
+    // Offset by 30 seconds from Birdeye if active
+    setTimeout(() => {
+         this.scanDexScreenerBoosts().catch(e => logger.error(e));
+         
+         setInterval(() => {
+             this.scanDexScreenerBoosts().catch(e => logger.error(e));
+         }, 60000);
+    }, 30000);
+
+    logger.info('🚀 DexScreener Boost scanner scheduled (every 60s)');
+
+    // Scan GeckoTerminal Trending (Free/Public) every 60 seconds
+    // Offset by 45 seconds to interleave calls
+    setTimeout(() => {
+         this.scanGeckoTerminalTrending().catch(e => logger.error(e));
+         
+         setInterval(() => {
+             this.scanGeckoTerminalTrending().catch(e => logger.error(e));
+         }, 60000);
+    }, 45000);
+
+    logger.info('🦎 GeckoTerminal scanner scheduled (every 60s)');
+
     logger.info({ intervalMs: this.config.pollIntervalMs }, 'Trading loop started');
   }
 
@@ -281,6 +306,82 @@ export class TradingLoop {
   }
 
 
+
+  /**
+   * Scan boosted tokens from DexScreener (paid promotion = trending/established)
+   */
+  private async scanDexScreenerBoosts(): Promise<void> {
+    logger.debug('Scanning DexScreener boosted tokens...');
+
+    try {
+        const boosted = await dexscreener.getBoostedTokens();
+        let addedCount = 0;
+
+        for (const token of boosted) {
+             // Skip if already seen recently
+             const lastSeen = this.seenTokens.get(token.mint);
+             if (lastSeen && Date.now() - lastSeen < 30 * 60 * 1000) continue;
+
+             // Cache the metadata since we just fetched it
+             this.tokenMetadataCache.set(token.mint, token);
+             this.seenTokens.set(token.mint, Date.now());
+
+             // Analyze immediately using existing pipeline logic
+             // analyzeAndTrade handles the heavy lifting
+             await this.analyzeAndTrade(token.mint);
+             addedCount++;
+
+             // Small delay to prevent rate limit spam
+             await new Promise(r => setTimeout(r, 1000));
+        }
+
+        if (addedCount > 0) {
+            logger.info({ addedCount }, '🦅 Processed DexScreener boosted tokens');
+        }
+
+    } catch (error) {
+        logger.error({ error }, 'Failed to scan DexScreener boosts');
+    }
+  }
+
+  /**
+   * Scan trending pools from GeckoTerminal
+   */
+  private async scanGeckoTerminalTrending(): Promise<void> {
+    logger.debug('Scanning GeckoTerminal trending pools...');
+
+    try {
+        const pools = await geckoTerminal.getTrendingPools();
+        let addedCount = 0;
+
+        for (const token of pools) {
+             // Skip if already seen recently
+             const lastSeen = this.seenTokens.get(token.mint);
+             if (lastSeen && Date.now() - lastSeen < 30 * 60 * 1000) continue;
+
+             // Skip invalid mints
+             if (token.mint === 'unknown') continue;
+
+             // Cache the metadata
+             this.tokenMetadataCache.set(token.mint, token);
+             this.seenTokens.set(token.mint, Date.now());
+
+             // Analyze immediately 
+             await this.analyzeAndTrade(token.mint);
+             addedCount++;
+
+             // Small delay
+             await new Promise(r => setTimeout(r, 1000));
+        }
+
+        if (addedCount > 0) {
+            logger.info({ addedCount }, '🦎 Processed GeckoTerminal trending pools');
+        }
+
+    } catch (error) {
+        logger.error({ error }, 'Failed to scan GeckoTerminal trending');
+    }
+  }
 
   /**
    * Check if token has valid social links (Twitter, Website)

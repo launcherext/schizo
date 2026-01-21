@@ -11,6 +11,8 @@ export interface SniperPipelineConfig {
   validationDelayMs: number; // Will be auto-set by risk profile if default
   maxQueueSize: number;
   enableTrading: boolean;
+  maxRetries: number;
+  retryDelayMs: number;
 }
 
 const DEFAULT_CONFIG: SniperPipelineConfig = {
@@ -18,6 +20,8 @@ const DEFAULT_CONFIG: SniperPipelineConfig = {
   validationDelayMs: 0, // 0 = Auto-calculate based on risk
   maxQueueSize: 1000,
   enableTrading: false,
+  maxRetries: 3,
+  retryDelayMs: 5000,
 };
 
 export interface QueuedToken {
@@ -314,6 +318,25 @@ export class SniperPipeline {
           details: { shouldTrade: false, reasons: [result.reason || 'Unknown'] }
         }
       });
+
+      // RETRY LOGIC for Low Liquidity / No Data
+      // If the reason is "no data" or "low liquidity" (and it's $0), it might just be indexing lag.
+      if ((!result.metadata || result.metadata.liquidity === 0) && queued.retryCount < this.config.maxRetries) {
+          logger.warn({
+            mint: token.mint,
+            symbol: token.symbol,
+            retry: `${queued.retryCount + 1}/${this.config.maxRetries}`,
+            reason: result.reason
+          }, `⚠️ Validation failed (${result.reason}). Retrying in ${this.config.retryDelayMs/1000}s...`);
+
+          // Re-queue with delay
+          this.queue.push({
+              ...queued,
+              retryCount: queued.retryCount + 1,
+              validateAfter: Date.now() + this.config.retryDelayMs
+          });
+          return;
+      }
 
       logger.warn({
         mint: token.mint,
