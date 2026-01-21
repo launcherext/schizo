@@ -559,6 +559,25 @@ const results = await moralis.searchTokens('BONK', 10);
 
 // Get single token
 const token = await moralis.getToken(tokenAddress);
+
+// === DEX Integration Endpoints ===
+
+// Get token bonding status (is it on bonding curve or graduated?)
+const status = await moralis.getTokenBondingStatus(tokenAddress);
+// Returns: { status: 'bonding' | 'graduated' | 'unknown', bondingProgress?, graduatedAt? }
+
+// Get tokens currently in bonding phase (new opportunities)
+const bondingTokens = await moralis.getBondingTokens('pumpfun', 20);
+
+// Get recently graduated tokens (moved to Raydium/Jupiter)
+const graduatedTokens = await moralis.getGraduatedTokens('pumpfun', 20);
+
+// Get newest tokens from an exchange
+const newTokens = await moralis.getNewTokens('pumpfun', 20);
+
+// Get swap history for a token (analyze trading patterns)
+const swaps = await moralis.getTokenSwaps(tokenAddress, 50);
+// Returns: [{ signature, timestamp, type: 'buy'|'sell', solAmount, tokenAmount, wallet }]
 ```
 
 ### Response Format

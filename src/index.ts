@@ -25,6 +25,7 @@ import { SniperPipeline } from './trading/sniper-pipeline.js';
 import { agentEvents } from './events/emitter.js';
 import { detectSillyName } from './personality/name-analyzer.js';
 import type { RiskProfile } from './trading/types.js';
+import { LearningEngine } from './analysis/learning-engine.js';
 
 const log = createLogger('main');
 let db: ReturnType<typeof createDatabase> | null = null;
@@ -173,6 +174,10 @@ async function main(): Promise<void> {
     const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;
     log.info({ riskProfile }, 'Loading Risk Profile');
 
+    // Initialize Learning Engine (learns from trade outcomes)
+    const learningEngine = new LearningEngine(dbWithRepos);
+    log.info('Learning Engine initialized - will learn from trade outcomes');
+
     // Initialize Trading Engine (if we have PumpPortal)
     let tradingEngine: TradingEngine | undefined;
     let tradingLoop: TradingLoop | undefined;
@@ -199,9 +204,11 @@ async function main(): Promise<void> {
         connection,
         wallet.publicKey.toBase58(),
         helius,
-        claude
+        claude,
+        undefined, // jupiter - will be set later if available
+        learningEngine
       );
-      log.info('Trading Engine initialized with smart money detection & transaction parsing');
+      log.info('Trading Engine initialized with smart money detection, transaction parsing & learning');
     } else {
       log.warn('Trading Engine not available - wallet not configured');
     }

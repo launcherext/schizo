@@ -338,6 +338,136 @@ export class MoralisClient {
   }
 
   /**
+   * Get token bonding status
+   * Returns whether token is in bonding phase, graduated, or unknown
+   */
+  async getTokenBondingStatus(tokenAddress: string): Promise<{
+    status: 'bonding' | 'graduated' | 'unknown';
+    exchange?: string;
+    bondingProgress?: number;
+    graduatedAt?: string;
+  }> {
+    try {
+      const response = await this.request<{
+        status: string;
+        exchange?: string;
+        bondingProgress?: number;
+        graduatedAt?: string;
+      }>(`/token/mainnet/${tokenAddress}/bonding-status`);
+
+      return {
+        status: response.status === 'bonding' ? 'bonding'
+          : response.status === 'graduated' ? 'graduated'
+          : 'unknown',
+        exchange: response.exchange,
+        bondingProgress: response.bondingProgress,
+        graduatedAt: response.graduatedAt,
+      };
+    } catch (error) {
+      logger.debug({ tokenAddress, error }, 'Failed to get bonding status');
+      return { status: 'unknown' };
+    }
+  }
+
+  /**
+   * Get tokens currently in bonding phase on an exchange
+   * Useful for finding new opportunities
+   */
+  async getBondingTokens(exchange: 'pumpfun' | 'meteora' = 'pumpfun', limit: number = 20): Promise<MoralisToken[]> {
+    try {
+      const response = await this.request<MoralisResponse<MoralisToken>>(
+        `/token/mainnet/exchange/${exchange}/bonding`,
+        { limit }
+      );
+
+      logger.info({ exchange, count: response.result?.length ?? 0 }, 'Fetched bonding tokens');
+      return response.result || [];
+    } catch (error) {
+      logger.error({ exchange, error }, 'Failed to fetch bonding tokens');
+      return [];
+    }
+  }
+
+  /**
+   * Get recently graduated tokens from an exchange
+   * These have moved from bonding curve to DEX (Raydium/Jupiter tradeable)
+   */
+  async getGraduatedTokens(exchange: 'pumpfun' | 'meteora' = 'pumpfun', limit: number = 20): Promise<MoralisToken[]> {
+    try {
+      const response = await this.request<MoralisResponse<MoralisToken>>(
+        `/token/mainnet/exchange/${exchange}/graduated`,
+        { limit }
+      );
+
+      logger.info({ exchange, count: response.result?.length ?? 0 }, 'Fetched graduated tokens');
+      return response.result || [];
+    } catch (error) {
+      logger.error({ exchange, error }, 'Failed to fetch graduated tokens');
+      return [];
+    }
+  }
+
+  /**
+   * Get new tokens from an exchange
+   * Returns the most recently created tokens
+   */
+  async getNewTokens(exchange: 'pumpfun' | 'meteora' | 'raydium' = 'pumpfun', limit: number = 20): Promise<MoralisToken[]> {
+    try {
+      const response = await this.request<MoralisResponse<MoralisToken>>(
+        `/token/mainnet/exchange/${exchange}/new`,
+        { limit }
+      );
+
+      logger.info({ exchange, count: response.result?.length ?? 0 }, 'Fetched new tokens');
+      return response.result || [];
+    } catch (error) {
+      logger.error({ exchange, error }, 'Failed to fetch new tokens');
+      return [];
+    }
+  }
+
+  /**
+   * Get swaps/trades for a token
+   * Useful for analyzing trading patterns
+   */
+  async getTokenSwaps(tokenAddress: string, limit: number = 50): Promise<Array<{
+    signature: string;
+    timestamp: number;
+    type: 'buy' | 'sell';
+    solAmount: number;
+    tokenAmount: number;
+    wallet: string;
+  }>> {
+    try {
+      interface SwapResponse {
+        signature: string;
+        blockTime: number;
+        side: string;
+        solAmount: number;
+        tokenAmount: number;
+        wallet: string;
+      }
+
+      const response = await this.request<{ result: SwapResponse[] }>(
+        `/token/mainnet/${tokenAddress}/swaps`,
+        { limit }
+      );
+
+      return (response.result || []).map(swap => ({
+        signature: swap.signature,
+        timestamp: swap.blockTime * 1000,
+        type: swap.side === 'buy' ? 'buy' : 'sell',
+        solAmount: swap.solAmount,
+        tokenAmount: swap.tokenAmount,
+        wallet: swap.wallet,
+      }));
+    } catch (error) {
+      logger.debug({ tokenAddress, error }, 'Failed to fetch token swaps');
+      return [];
+    }
+  }
+
+  /**
    * Convert Moralis token to format compatible with trading loop
    */
   static toTradingLoopFormat(token: MoralisToken | TrendingToken): {

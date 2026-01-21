@@ -1259,6 +1259,9 @@ export class TradingEngine {
               },
             });
 
+            // Record trade lesson for learning engine
+            await this.recordTradeLesson(position, currentPrice, Date.now(), pnlPercent);
+
             // Calculate profit and trigger buyback if profitable
             const profitSol = position.entryAmountSol * pnlPercent;
             if (profitSol > 0) {
@@ -1320,15 +1323,15 @@ export class TradingEngine {
       // Ignore errors
     }
 
-    // Get token info from PumpPortal for bonding curve progress
+    // Get token info from PumpPortal
     let bondingProgress = 0;
     let tokenAgeMins = 0;
+    let holderCount = 0;
     try {
       const tokenInfo = await this.pumpPortal.getTokenInfo(mint);
-      bondingProgress = tokenInfo.bondingCurve?.progress ?? 0;
-      if (tokenInfo.createdAt) {
-        tokenAgeMins = Math.floor((Date.now() - tokenInfo.createdAt) / 60000);
-      }
+      holderCount = tokenInfo.holderCount ?? 0;
+      // Bonding progress and age would need extended API - estimate from liquidity
+      bondingProgress = Math.min(100, (tokenInfo.liquidity / 85) * 100); // 85 SOL = 100%
     } catch {
       // Ignore errors
     }
@@ -1346,7 +1349,7 @@ export class TradingEngine {
       buyVolume5m: 0,
       sellVolume5m: 0,
       heatMetric: 0, // Would need MomentumScanner
-      holderCount: 0, // Would need API call
+      holderCount,
       topHolderPercent: holderConcentration.topHolderPercent,
       top10HoldersPercent: holderConcentration.top10Percent,
       smartMoneyCount,
