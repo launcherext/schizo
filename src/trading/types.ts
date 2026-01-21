@@ -42,4 +42,4 @@ export type TradeAction = 'buy' | 'sell';
 /**
  * Risk Profile definition
  */
-export type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
+export type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE' | 'ENTERTAINMENT';

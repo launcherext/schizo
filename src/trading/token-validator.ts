@@ -58,18 +58,21 @@ export class TokenValidator {
         CONSERVATIVE: 15000,
         BALANCED: 5000,
         AGGRESSIVE: 1500,
+        ENTERTAINMENT: 500, // Very low threshold for micro bets
       };
-      
+
       const maxAgeMinutes = {
         CONSERVATIVE: 15,
         BALANCED: 8,
         AGGRESSIVE: 3,
+        ENTERTAINMENT: 60, // Allow older tokens for entertainment
       };
 
       const minBuyPressure = {
         CONSERVATIVE: 1.8,
         BALANCED: 1.3,
-        AGGRESSIVE: 1.05
+        AGGRESSIVE: 1.05,
+        ENTERTAINMENT: 0.8, // Lower threshold - just needs some activity
       };
 
       // Determine active thresholds
