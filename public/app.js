@@ -130,8 +130,11 @@ function handleEvent(event) {
     case 'VOICE_AUDIO':
       playVoiceAudio(event.data);
       break;
-    case 'TOKEN_DISCOVERED':
-      addToTokenStream(event.data);
+    case 'ANALYSIS_THOUGHT':
+      // Only show tokens entering analysis (scanning stage)
+      if (event.data.stage === 'scanning') {
+        addToAnalysisStream(event.data);
+      }
       break;
     case 'TOKEN_COMMENTARY':
       // Claude's random commentary on tokens (voice only, but show in stream)
@@ -143,8 +146,8 @@ function handleEvent(event) {
 // Current token being viewed
 let currentToken = null;
 
-// Add token to the streaming list
-function addToTokenStream(token) {
+// Add token to the analysis stream (tokens SCHIZO is considering)
+function addToAnalysisStream(token) {
   if (isTokensPaused) return;
 
   currentToken = token;
@@ -152,21 +155,28 @@ function addToTokenStream(token) {
   const container = document.getElementById('token-stream');
   if (!container) return;
 
+  // Check if this token is already in the stream (by mint)
+  const existingEl = document.getElementById(`token-${token.mint}`);
+  if (existingEl) {
+    // Update existing element with flash
+    existingEl.classList.add('token-new');
+    setTimeout(() => existingEl.classList.remove('token-new'), 2000);
+    return;
+  }
+
   const tokenEl = document.createElement('div');
-  tokenEl.className = 'token-stream-item';
+  tokenEl.className = 'token-stream-item analyzing';
   tokenEl.id = `token-${token.mint}`;
-  tokenEl.onclick = () => openChart(token.mint, token.dexUrl);
+  tokenEl.onclick = () => openChart(token.mint);
 
   const priceChangeClass = (token.priceChange5m || 0) >= 0 ? 'price-up' : 'price-down';
   const priceChangeSign = (token.priceChange5m || 0) >= 0 ? '+' : '';
-  const priceDisplay = token.priceUsd
-    ? (token.priceUsd < 0.0001 ? token.priceUsd.toExponential(2) : '$' + token.priceUsd.toFixed(6))
-    : 'New';
-  const mcapDisplay = token.marketCap ? '$' + formatNumber(token.marketCap) : (token.marketCapSol ? token.marketCapSol.toFixed(1) + ' SOL' : '-');
+  const mcapDisplay = token.marketCapSol ? token.marketCapSol.toFixed(1) + ' SOL' : '-';
+  const liquidityDisplay = token.liquidity ? '$' + formatNumber(token.liquidity) : '-';
 
   tokenEl.innerHTML = `
     <div class="token-stream-left">
-      ${token.imageUrl ? `<img src="${token.imageUrl}" alt="${token.symbol}" class="token-stream-img">` : '<div class="token-stream-img-placeholder">?</div>'}
+      <div class="token-stream-img-placeholder analyzing-pulse">👁️</div>
       <div class="token-stream-info">
         <span class="token-stream-symbol">${token.symbol || 'UNK'}</span>
         <span class="token-stream-name">${(token.name || 'Unknown').slice(0, 20)}</span>
@@ -174,10 +184,11 @@ function addToTokenStream(token) {
       </div>
     </div>
     <div class="token-stream-right">
-      <span class="token-stream-price">${priceDisplay}</span>
+      <span class="token-stream-price">${liquidityDisplay}</span>
       <span class="token-stream-mcap">${mcapDisplay}</span>
       <span class="token-stream-change ${priceChangeClass}">${priceChangeSign}${(token.priceChange5m || 0).toFixed(1)}%</span>
     </div>
+    <div class="analysis-thought" title="SCHIZO's thought">${truncateThought(token.thought)}</div>
   `;
 
   // Add click handler for CA copy (stop propagation to not trigger chart open)
@@ -192,14 +203,20 @@ function addToTokenStream(token) {
   // Add to top of stream
   container.insertBefore(tokenEl, container.firstChild);
 
-  // Limit to 20 items
-  while (container.children.length > 20) {
+  // Limit to 15 items (fewer since they have more content)
+  while (container.children.length > 15) {
     container.removeChild(container.lastChild);
   }
 
   // Flash effect for new token
   tokenEl.classList.add('token-new');
   setTimeout(() => tokenEl.classList.remove('token-new'), 2000);
+}
+
+// Truncate long thoughts for display
+function truncateThought(thought) {
+  if (!thought) return '';
+  return thought.length > 80 ? thought.slice(0, 77) + '...' : thought;
 }
 
 // Highlight token when Claude comments on it

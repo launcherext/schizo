@@ -1431,6 +1431,51 @@ td a:hover {
     color: #f87171;
 }
 
+/* Analyzing state */
+.token-stream-item.analyzing {
+    flex-wrap: wrap;
+    border-color: rgba(255, 159, 107, 0.3);
+    background: rgba(255, 159, 107, 0.05);
+}
+
+.token-stream-item.analyzing:hover {
+    border-color: rgba(255, 159, 107, 0.5);
+    background: rgba(255, 159, 107, 0.1);
+}
+
+.analyzing-pulse {
+    animation: eyePulse 1.5s ease-in-out infinite;
+    font-size: 1.2em !important;
+}
+
+@keyframes eyePulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.6;
+        transform: scale(1.1);
+    }
+}
+
+/* SCHIZO's thought bubble */
+.analysis-thought {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: rgba(255, 159, 107, 0.1);
+    border-left: 2px solid rgba(255, 159, 107, 0.5);
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: rgba(255, 159, 107, 0.9);
+    font-style: italic;
+    line-height: 1.3;
+}
+
 /* Token commentary bubble */
 .token-commentary-bubble {
     position: absolute;
@@ -1565,6 +1610,7 @@ td a:hover {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
 }
+
 /* Fixed About Button - Bottom Right */
 .about-btn-fixed {
     position: fixed;
@@ -1601,6 +1647,7 @@ td a:hover {
     .about-btn-fixed span {
         display: none;
     }
+
     .about-btn-fixed {
         padding: 10px;
         border-radius: 50%;
