@@ -198,12 +198,12 @@ export class ScoringEngine {
   private async countSmartMoney(mint: string): Promise<{ count: number; wallets: string[] }> {
     try {
       const response = await this.helius.getTokenHolders(mint, 20);
-      if (!response.data || response.data.length === 0) {
+      if (!response.holders || response.holders.length === 0) {
         return { count: 0, wallets: [] };
       }
 
       const smartWallets: string[] = [];
-      for (const holder of response.data) {
+      for (const holder of response.holders) {
         const isSmartMoney = await this.smartMoney.isSmartMoney(holder.owner);
         if (isSmartMoney) {
           smartWallets.push(holder.owner);
@@ -227,12 +227,12 @@ export class ScoringEngine {
   }> {
     try {
       const response = await this.helius.getTokenHolders(mint, 20);
-      if (!response.data || response.data.length === 0) {
+      if (!response.holders || response.holders.length === 0) {
         return { topHolderPercent: 0, top10Percent: 0, isConcentrated: false };
       }
 
       // Filter out LP program addresses
-      const nonLpHolders = response.data.filter(h => !LP_PROGRAM_ADDRESSES.has(h.owner));
+      const nonLpHolders = response.holders.filter(h => !LP_PROGRAM_ADDRESSES.has(h.owner));
 
       if (nonLpHolders.length === 0) {
         return { topHolderPercent: 0, top10Percent: 0, isConcentrated: false };
