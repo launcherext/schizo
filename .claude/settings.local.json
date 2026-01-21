@@ -17,7 +17,9 @@
       "WebFetch(domain:hub.jup.ag)",
       "WebFetch(domain:docs.birdeye.so)",
       "WebFetch(domain:www.npmjs.com)",
-      "WebFetch(domain:station.jup.ag)"
+      "WebFetch(domain:station.jup.ag)",
+      "WebFetch(domain:mcp.so)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

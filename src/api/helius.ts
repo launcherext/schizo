@@ -1,24 +1,26 @@
 /**
- * Helius API client with caching, rate limiting, and resilience.
+ * Helius API client using official helius-sdk.
  *
  * Features:
+ * - Official SDK with built-in methods
  * - TTL-based response caching
- * - Tier-aware rate limiting via Bottleneck
- * - Automatic retry with exponential backoff
  * - Circuit breaker for cascading failure protection
  * - @solana/web3.js Connection integration
  */
 
-import Bottleneck from 'bottleneck';
-import pRetry, { AbortError } from 'p-retry';
+import { createHelius, type HeliusClient as SdkHeliusClient } from 'helius-sdk';
 import CircuitBreaker from 'opossum';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey, type ConfirmedSignatureInfo } from '@solana/web3.js';
 import { TTLCache } from './cache.js';
-import { createRateLimiter, getConfigForTier, HeliusTier } from './rate-limiter.js';
 import { createLogger } from '../lib/logger.js';
 import { GetAssetResponse } from '../analysis/types.js';
 
 const logger = createLogger('helius');
+
+/**
+ * Helius subscription tiers for rate limit configuration
+ */
+type HeliusTier = 'free' | 'developer' | 'business' | 'professional';
 
 /**
  * Configuration for HeliusClient.
@@ -30,13 +32,10 @@ interface HeliusClientConfig {
   tier?: HeliusTier;
   /** Cache TTL in milliseconds (default: 30000 = 30 seconds) */
   cacheTTL?: number;
-  /** Base URL for Helius API (default: mainnet) */
-  baseUrl?: string;
 }
 
 /**
  * Simplified transaction result structure.
- * Additional fields will be added in Phase 2 for full wallet analysis.
  */
 interface TransactionResult {
   /** Transaction signature (base58 encoded) */
@@ -91,7 +90,15 @@ interface TokenHoldersResponse {
 }
 
 /**
- * Rate-limited, cached Helius API client with resilience patterns.
+ * Token account from SDK
+ */
+interface TokenAccount {
+  owner?: string;
+  amount?: string;
+}
+
+/**
+ * Helius API client using official SDK with resilience patterns.
  *
  * @example
  * const helius = new HeliusClient({
@@ -104,34 +111,39 @@ interface TokenHoldersResponse {
  * const connection = helius.getConnection();
  */
 class HeliusClient {
+  private sdk: SdkHeliusClient;
   private apiKey: string;
-  private baseUrl: string;
-  private cache: TTLCache<TransactionsResponse>;
-  private rpcLimiter: Bottleneck;
-  private enhancedLimiter: Bottleneck;
+  private cache: TTLCache<unknown>;
   private circuitBreaker: CircuitBreaker;
   private cacheHits = 0;
   private cacheMisses = 0;
+  private _connection: Connection;
 
   constructor(config: HeliusClientConfig) {
     this.apiKey = config.apiKey;
-    this.baseUrl = config.baseUrl || 'https://mainnet.helius-rpc.com';
+
+    // Initialize official Helius SDK
+    this.sdk = createHelius({ apiKey: config.apiKey });
+
+    // Create connection with Helius RPC
+    this._connection = new Connection(
+      `https://mainnet.helius-rpc.com/?api-key=${config.apiKey}`,
+      'confirmed'
+    );
 
     // Initialize cache
-    this.cache = new TTLCache<TransactionsResponse>(config.cacheTTL ?? 30000);
-
-    // Create tier-appropriate rate limiters
-    const tierConfig = getConfigForTier(config.tier ?? 'developer');
-    this.rpcLimiter = createRateLimiter(tierConfig.rpc, 'helius-rpc');
-    this.enhancedLimiter = createRateLimiter(tierConfig.enhanced, 'helius-enhanced');
+    this.cache = new TTLCache<unknown>(config.cacheTTL ?? 30000);
 
     // Create circuit breaker for API calls
-    this.circuitBreaker = new CircuitBreaker(this.executeRequest.bind(this), {
-      timeout: 15000, // 15s timeout per request
-      errorThresholdPercentage: 50, // Open after 50% failures
-      resetTimeout: 30000, // Try again after 30s
-      volumeThreshold: 5, // Minimum calls before tripping
-    });
+    this.circuitBreaker = new CircuitBreaker(
+      async <T>(fn: () => Promise<T>) => fn(),
+      {
+        timeout: 15000, // 15s timeout per request
+        errorThresholdPercentage: 50, // Open after 50% failures
+        resetTimeout: 30000, // Try again after 30s
+        volumeThreshold: 5, // Minimum calls before tripping
+      }
+    );
 
     // Wire circuit breaker events to logger
     this.circuitBreaker.on('open', () => {
@@ -146,28 +158,24 @@ class HeliusClient {
       logger.info('Circuit breaker CLOSED - Helius API recovered');
     });
 
-    this.circuitBreaker.on('fallback', () => {
-      logger.warn('Circuit breaker fallback triggered');
-    });
-
     logger.info(
       {
         tier: config.tier ?? 'developer',
         cacheTTL: config.cacheTTL ?? 30000,
-        baseUrl: this.baseUrl,
       },
-      'HeliusClient initialized'
+      'HeliusClient initialized with official SDK'
     );
   }
 
   /**
-   * Get transactions for a wallet address.
-   *
-   * Uses caching, rate limiting, retry logic, and circuit breaker.
-   *
-   * @param address - Solana wallet address (base58)
-   * @param options - Query options
-   * @returns Transactions response with pagination
+   * Get the underlying Helius SDK instance for advanced operations.
+   */
+  getSdk(): SdkHeliusClient {
+    return this.sdk;
+  }
+
+  /**
+   * Get transactions for a wallet address using SDK.
    */
   async getTransactionsForAddress(
     address: string,
@@ -178,7 +186,7 @@ class HeliusClient {
 
     // Check cache first (skip for pagination requests)
     if (!options?.paginationToken) {
-      const cached = this.cache.get(cacheKey);
+      const cached = this.cache.get(cacheKey) as TransactionsResponse | undefined;
       if (cached) {
         this.cacheHits++;
         logger.debug({ address, cacheHit: true }, 'Cache hit for transactions');
@@ -188,24 +196,27 @@ class HeliusClient {
 
     this.cacheMisses++;
 
-    // Build request body
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getTransactionsForAddress',
-      params: [
-        address,
-        {
-          limit,
-          ...(options?.paginationToken && { paginationToken: options.paginationToken }),
-        },
-      ],
-    };
+    // Execute via circuit breaker using SDK
+    const result = await this.circuitBreaker.fire(async () => {
+      // Use getTransactionsForAddress from SDK if available, otherwise use Connection
+      const response = await this._connection.getSignaturesForAddress(
+        new PublicKey(address),
+        { limit }
+      );
 
-    // Execute via circuit breaker with rate limiting
-    const result = (await this.circuitBreaker.fire(body)) as TransactionsResponse;
+      // Map response to our format
+      const data: TransactionResult[] = response.map((sig: ConfirmedSignatureInfo) => ({
+        signature: sig.signature,
+        timestamp: sig.blockTime ? sig.blockTime * 1000 : Date.now(),
+        type: 'UNKNOWN', // Would need parsing for type
+        success: sig.err === null,
+        slot: sig.slot,
+      }));
 
-    // Cache result (skip for paginated requests - they're partial)
+      return { data };
+    }) as TransactionsResponse;
+
+    // Cache result (skip for paginated requests)
     if (!options?.paginationToken && result.data && result.data.length > 0) {
       this.cache.set(cacheKey, result);
     }
@@ -214,178 +225,49 @@ class HeliusClient {
   }
 
   /**
-   * Execute a request with rate limiting and retry.
-   * This is wrapped by the circuit breaker.
-   */
-  private async executeRequest(body: object): Promise<TransactionsResponse> {
-    return this.rpcLimiter.schedule(() => this.fetchWithRetry(body));
-  }
-
-  /**
-   * Fetch with exponential backoff retry.
-   */
-  private async fetchWithRetry(body: object): Promise<TransactionsResponse> {
-    const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
-
-    return pRetry(
-      async () => {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-
-        // Retry on rate limit or server errors
-        if (response.status === 429) {
-          const error = new Error('Rate limited (429)');
-          (error as Error & { status: number }).status = 429;
-          throw error;
-        }
-
-        if (response.status >= 500) {
-          throw new Error(`Server error (${response.status})`);
-        }
-
-        // Don't retry client errors (400, 401, 403, 404)
-        if (!response.ok) {
-          throw new AbortError(`Client error (${response.status})`);
-        }
-
-        const json = (await response.json()) as {
-          result?: { data?: TransactionResult[]; paginationToken?: string };
-          error?: { message: string };
-        };
-
-        if (json.error) {
-          throw new AbortError(`API error: ${json.error.message}`);
-        }
-
-        // Map response to our format
-        return {
-          data: json.result?.data ?? [],
-          paginationToken: json.result?.paginationToken,
-        };
-      },
-      {
-        retries: 3,
-        minTimeout: 1000, // Start with 1s
-        maxTimeout: 10000, // Max 10s between retries
-        factor: 2, // Double each time
-        onFailedAttempt: (error) => {
-          logger.warn(
-            {
-              attempt: error.attemptNumber,
-              retriesLeft: error.retriesLeft,
-              error: error.message,
-            },
-            'Request failed, retrying'
-          );
-        },
-      }
-    );
-  }
-
-  /**
-   * Get token metadata using Helius DAS API.
-   * 
-   * Uses rate limiting and retry logic (without circuit breaker).
-   * 
-   * @param mintAddress - Token mint address (base58)
-   * @returns Token metadata including authorities and extensions
+   * Get token metadata using Helius DAS API via SDK.
    */
   async getAsset(mintAddress: string): Promise<GetAssetResponse> {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getAsset',
-      params: { id: mintAddress },
-    };
+    const cacheKey = `asset:${mintAddress}`;
 
-    // Use enhanced API limiter (DAS API is part of Enhanced tier)
-    return this.enhancedLimiter.schedule(() => this.fetchAssetWithRetry(body, mintAddress));
+    const cached = this.cache.get(cacheKey) as GetAssetResponse | undefined;
+    if (cached) {
+      this.cacheHits++;
+      return cached;
+    }
+
+    this.cacheMisses++;
+
+    const result = await this.circuitBreaker.fire(async () => {
+      const asset = await this.sdk.getAsset({ id: mintAddress });
+
+      logger.debug({ mintAddress }, 'Successfully fetched asset metadata via SDK');
+      return asset as unknown as GetAssetResponse;
+    }) as GetAssetResponse;
+
+    this.cache.set(cacheKey, result);
+    return result;
   }
 
   /**
-   * Fetch asset with exponential backoff retry.
-   * Does not use circuit breaker (different API endpoint).
+   * Get multiple assets in batch using SDK.
    */
-  private async fetchAssetWithRetry(body: object, mintAddress: string): Promise<GetAssetResponse> {
-    const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
-
-    return pRetry(
-      async () => {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-
-        // Retry on rate limit or server errors
-        if (response.status === 429) {
-          const error = new Error('Rate limited (429)');
-          (error as Error & { status: number }).status = 429;
-          throw error;
-        }
-
-        if (response.status >= 500) {
-          throw new Error(`Server error (${response.status})`);
-        }
-
-        // Don't retry client errors
-        if (!response.ok) {
-          throw new AbortError(`Client error (${response.status})`);
-        }
-
-        const json = (await response.json()) as {
-          result?: GetAssetResponse;
-          error?: { message: string };
-        };
-
-        if (json.error) {
-          logger.warn({ mintAddress, error: json.error.message }, 'getAsset API error');
-          throw new AbortError(`API error: ${json.error.message}`);
-        }
-
-        if (!json.result) {
-          throw new AbortError('No result in getAsset response');
-        }
-
-        logger.debug({ mintAddress }, 'Successfully fetched asset metadata');
-        return json.result;
-      },
-      {
-        retries: 3,
-        minTimeout: 1000,
-        maxTimeout: 10000,
-        factor: 2,
-        onFailedAttempt: (error) => {
-          logger.warn(
-            {
-              mintAddress,
-              attempt: error.attemptNumber,
-              retriesLeft: error.retriesLeft,
-              error: error.message,
-            },
-            'getAsset request failed, retrying'
-          );
-        },
-      }
-    );
+  async getAssetBatch(mintAddresses: string[]): Promise<GetAssetResponse[]> {
+    return this.circuitBreaker.fire(async () => {
+      const assets = await this.sdk.getAssetBatch({ ids: mintAddresses });
+      return assets as unknown as GetAssetResponse[];
+    }) as Promise<GetAssetResponse[]>;
   }
 
   /**
    * Get a Solana Connection using Helius RPC.
-   *
-   * @returns Connection configured for Helius RPC
    */
   getConnection(): Connection {
-    return new Connection(`${this.baseUrl}/?api-key=${this.apiKey}`, 'confirmed');
+    return this._connection;
   }
 
   /**
    * Get cache statistics.
-   *
-   * @returns Object with cache metrics
    */
   getCacheStats(): {
     size: number;
@@ -415,86 +297,43 @@ class HeliusClient {
 
   /**
    * Get token holders using Helius DAS API.
-   *
-   * @param mintAddress - Token mint address
-   * @param limit - Maximum holders to return (default 20)
-   * @returns Top token holders with ownership percentages
    */
   async getTokenHolders(
     mintAddress: string,
     limit: number = 20
   ): Promise<TokenHoldersResponse> {
-    const body = {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getTokenAccounts',
-      params: {
+    const cacheKey = `holders:${mintAddress}:${limit}`;
+
+    const cached = this.cache.get(cacheKey) as TokenHoldersResponse | undefined;
+    if (cached) {
+      this.cacheHits++;
+      return cached;
+    }
+
+    this.cacheMisses++;
+
+    const result = await this.circuitBreaker.fire(async () => {
+      // Use SDK's getTokenAccounts method
+      const response = await this.sdk.getTokenAccounts({
         mint: mintAddress,
         limit,
-        options: {
-          showZeroBalance: false,
-        },
-      },
-    };
+        options: { showZeroBalance: false },
+      });
 
-    return this.enhancedLimiter.schedule(async () => {
-      const url = `${this.baseUrl}/?api-key=${this.apiKey}`;
-
-      const response = await pRetry(
-        async () => {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-
-          if (res.status === 429) {
-            throw new Error('Rate limited (429)');
-          }
-
-          if (!res.ok) {
-            throw new AbortError(`HTTP error (${res.status})`);
-          }
-
-          const json = (await res.json()) as {
-            result?: {
-              token_accounts?: Array<{
-                owner: string;
-                amount: string;
-              }>;
-              total?: number;
-            };
-            error?: { message: string };
-          };
-
-          if (json.error) {
-            throw new AbortError(`API error: ${json.error.message}`);
-          }
-
-          return json.result;
-        },
-        {
-          retries: 3,
-          minTimeout: 1000,
-          maxTimeout: 10000,
-          factor: 2,
-        }
-      );
-
-      const accounts = response?.token_accounts || [];
-      const totalHolders = response?.total || accounts.length;
+      const accounts = (response as { token_accounts?: TokenAccount[]; total?: number }).token_accounts || [];
+      const totalHolders = (response as { total?: number }).total || accounts.length;
 
       // Calculate total supply from holder amounts
       let totalSupply = 0;
       for (const account of accounts) {
-        totalSupply += parseFloat(account.amount);
+        totalSupply += parseFloat(account.amount || '0');
       }
 
       // Map to TokenHolder with percentages
-      const holders: TokenHolder[] = accounts.map(account => {
-        const amount = parseFloat(account.amount);
+      const holders: TokenHolder[] = accounts.map((account: TokenAccount) => {
+        const amount = parseFloat(account.amount || '0');
         return {
-          owner: account.owner,
+          owner: account.owner || '',
           amount,
           uiAmount: amount / 1e6, // Assuming 6 decimals (common for pump.fun)
           percentage: totalSupply > 0 ? (amount / totalSupply) * 100 : 0,
@@ -504,14 +343,17 @@ class HeliusClient {
       // Sort by amount descending
       holders.sort((a, b) => b.amount - a.amount);
 
-      logger.debug({ mintAddress, holderCount: holders.length }, 'Fetched token holders');
+      logger.debug({ mintAddress, holderCount: holders.length }, 'Fetched token holders via SDK');
 
       return {
         holders,
         totalHolders,
         totalSupply,
       };
-    });
+    }) as TokenHoldersResponse;
+
+    this.cache.set(cacheKey, result);
+    return result;
   }
 
   /**
@@ -521,28 +363,58 @@ class HeliusClient {
   async isMayhemModeToken(mintAddress: string): Promise<boolean> {
     try {
       const response = await this.getConnection().getTokenSupply(
-        new (await import('@solana/web3.js')).PublicKey(mintAddress)
+        new PublicKey(mintAddress)
       );
 
       const supply = response.value.uiAmount;
 
       // Mayhem Mode tokens have exactly 2 billion supply
-      // Regular pump.fun tokens have 1 billion
       const isMayhem = supply !== null && supply >= 1_999_999_999 && supply <= 2_000_000_001;
 
       if (isMayhem) {
-        logger.warn({
-          mintAddress,
-          supply,
-        }, '🚫 Mayhem Mode token detected (2B supply)');
+        logger.warn(
+          {
+            mintAddress,
+            supply,
+          },
+          'Mayhem Mode token detected (2B supply)'
+        );
       }
 
       return isMayhem;
     } catch (error) {
       logger.debug({ mintAddress, error }, 'Failed to check token supply for Mayhem Mode');
-      // On error, don't block - could be a valid token with RPC issues
       return false;
     }
+  }
+
+  /**
+   * Get priority fee estimate using SDK.
+   */
+  async getPriorityFeeEstimate(accountKeys?: string[]): Promise<{
+    min: number;
+    low: number;
+    medium: number;
+    high: number;
+    veryHigh: number;
+  }> {
+    const result = await this.circuitBreaker.fire(async () => {
+      const estimate = await this.sdk.getPriorityFeeEstimate({
+        accountKeys: accountKeys || [],
+        options: { recommended: true },
+      });
+      return estimate;
+    }) as { priorityFeeEstimate?: number; priorityFeeLevels?: Record<string, number> };
+
+    // Map SDK response to our format
+    const base = result.priorityFeeEstimate || 1000;
+    return {
+      min: Math.floor(base * 0.5),
+      low: Math.floor(base * 0.75),
+      medium: base,
+      high: Math.floor(base * 1.5),
+      veryHigh: Math.floor(base * 2),
+    };
   }
 
   /**
@@ -580,6 +452,7 @@ class HeliusClient {
 export {
   HeliusClient,
   HeliusClientConfig,
+  HeliusTier,
   TransactionResult,
   TransactionsResponse,
   GetTransactionsOptions,

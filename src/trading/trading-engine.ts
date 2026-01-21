@@ -16,6 +16,7 @@ import { TransactionParser } from './transaction-parser.js';
 import type { HeliusClient } from '../api/helius.js';
 import { ScoringEngine, type TokenScore } from './scoring-engine.js';
 import type { RiskProfile } from './types.js';
+import { JupiterClient } from '../api/jupiter.js';
 
 /**
  * Known LP pool program addresses to exclude from holder concentration
@@ -109,6 +110,7 @@ export class TradingEngine {
   private txParser: TransactionParser;
   private walletAddress: string;
   private helius: HeliusClient;
+  private jupiter?: JupiterClient; // Optional Jupiter client for graduated tokens
 
   constructor(
     config: TradingConfig,
@@ -119,7 +121,8 @@ export class TradingEngine {
     connection: Connection,
     walletAddress: string,
     helius: HeliusClient,
-    claude?: ClaudeClient
+    claude?: ClaudeClient,
+    jupiter?: JupiterClient
   ) {
     this.config = config;
     this.pumpPortal = pumpPortal;
@@ -131,8 +134,9 @@ export class TradingEngine {
     this.helius = helius;
     this.txParser = new TransactionParser(connection);
     this.claude = claude;
+    this.jupiter = jupiter;
 
-    logger.info({ config, hasPersonality: !!claude }, 'Trading Engine initialized');
+    logger.info({ config, hasPersonality: !!claude, hasJupiter: !!jupiter }, 'Trading Engine initialized');
   }
 
   /**
@@ -492,37 +496,77 @@ export class TradingEngine {
       logger.info({ mint, positionSizeSol }, '🎰 Entertainment mode bypass - skipping re-evaluation');
     }
 
-    // Execute trade via PumpPortal
+    // Check if token has graduated (tradeable on Jupiter/Raydium)
+    let useJupiter = false;
+    if (this.jupiter) {
+      try {
+        useJupiter = await this.jupiter.hasGraduated(mint);
+        if (useJupiter) {
+          logger.info({ mint }, 'Token has graduated - using Jupiter for swap');
+        }
+      } catch (error) {
+        logger.debug({ mint, error }, 'Jupiter graduation check failed - using PumpPortal');
+      }
+    }
+
+    // Execute trade via Jupiter (graduated) or PumpPortal (bonding curve)
     try {
-      const signature = await this.pumpPortal.buy({
-        mint,
-        amount: positionSizeSol,
-        slippage: this.config.slippageTolerance,
-      });
+      let signature: string;
+      let tokensReceived: number;
+      let actualSol: number;
+      let pricePerToken: number;
 
-      // Parse the confirmed transaction to get actual amounts
-      const parsedTx = await this.txParser.waitAndParse(
-        signature,
-        this.walletAddress,
-        mint,
-        'buy',
-        30000 // 30 second timeout
-      );
+      if (useJupiter && this.jupiter) {
+        // Use Jupiter for graduated tokens
+        const result = await this.jupiter.buy(mint, positionSizeSol, {
+          slippageBps: Math.floor(this.config.slippageTolerance * 10000),
+        });
+        signature = result.signature;
+        tokensReceived = result.outputAmount;
+        actualSol = result.inputAmount;
+        pricePerToken = actualSol / tokensReceived;
 
-      // Record trade in database with ACTUAL amounts from parsed transaction
+        logger.info({
+          mint,
+          signature,
+          method: 'Jupiter',
+          priceImpact: result.priceImpactPct,
+        }, 'Jupiter buy executed');
+      } else {
+        // Use PumpPortal for bonding curve tokens
+        signature = await this.pumpPortal.buy({
+          mint,
+          amount: positionSizeSol,
+          slippage: this.config.slippageTolerance,
+        });
+
+        // Parse the confirmed transaction to get actual amounts
+        const parsedTx = await this.txParser.waitAndParse(
+          signature,
+          this.walletAddress,
+          mint,
+          'buy',
+          30000 // 30 second timeout
+        );
+
+        tokensReceived = parsedTx.tokenAmount;
+        actualSol = parsedTx.solAmount || positionSizeSol;
+        pricePerToken = parsedTx.pricePerToken;
+      }
+
+      // Record trade in database
       await this.db.trades.insert({
         signature,
         timestamp: Date.now(),
         type: 'BUY',
         tokenMint: mint,
-        amountTokens: parsedTx.tokenAmount,
-        amountSol: parsedTx.solAmount || positionSizeSol,
-        pricePerToken: parsedTx.pricePerToken,
+        amountTokens: tokensReceived,
+        amountSol: actualSol,
+        pricePerToken,
         metadata: {
           requestedSol: positionSizeSol,
-          actualSol: parsedTx.solAmount,
-          fee: parsedTx.fee,
-          parseSuccess: parsedTx.success,
+          actualSol,
+          method: useJupiter ? 'Jupiter' : 'PumpPortal',
         },
       });
 
@@ -530,15 +574,15 @@ export class TradingEngine {
         mint,
         signature,
         requestedSol: positionSizeSol,
-        actualSol: parsedTx.solAmount,
-        tokensReceived: parsedTx.tokenAmount,
-        pricePerToken: parsedTx.pricePerToken,
-        fee: parsedTx.fee,
-      }, 'Buy trade executed and parsed successfully');
+        actualSol,
+        tokensReceived,
+        pricePerToken,
+        method: useJupiter ? 'Jupiter' : 'PumpPortal',
+      }, 'Buy trade executed successfully');
 
       return signature;
     } catch (error) {
-      logger.error({ mint, error }, 'Buy trade failed');
+      logger.error({ mint, error, method: useJupiter ? 'Jupiter' : 'PumpPortal' }, 'Buy trade failed');
       return null;
     }
   }
@@ -556,38 +600,78 @@ export class TradingEngine {
       return null;
     }
 
-    // Execute trade via PumpPortal
+    // Check if token has graduated (tradeable on Jupiter/Raydium)
+    let useJupiter = false;
+    if (this.jupiter) {
+      try {
+        useJupiter = await this.jupiter.hasGraduated(mint);
+        if (useJupiter) {
+          logger.info({ mint }, 'Token has graduated - using Jupiter for sell');
+        }
+      } catch (error) {
+        logger.debug({ mint, error }, 'Jupiter graduation check failed - using PumpPortal');
+      }
+    }
+
+    // Execute trade via Jupiter (graduated) or PumpPortal (bonding curve)
     try {
-      const signature = await this.pumpPortal.sell({
-        mint,
-        amount,
-        slippage: this.config.slippageTolerance,
-      });
+      let signature: string;
+      let actualTokens: number;
+      let solReceived: number;
+      let pricePerToken: number;
 
-      // Parse the confirmed transaction to get actual amounts
-      const parsedTx = await this.txParser.waitAndParse(
-        signature,
-        this.walletAddress,
-        mint,
-        'sell',
-        30000 // 30 second timeout
-      );
+      if (useJupiter && this.jupiter) {
+        // Use Jupiter for graduated tokens
+        const result = await this.jupiter.sell(mint, amount, 6, {
+          slippageBps: Math.floor(this.config.slippageTolerance * 10000),
+        });
+        signature = result.signature;
+        actualTokens = result.inputAmount;
+        solReceived = result.outputAmount;
+        pricePerToken = solReceived / actualTokens;
 
-      // Record trade in database with ACTUAL amounts from parsed transaction
+        logger.info({
+          mint,
+          signature,
+          method: 'Jupiter',
+          priceImpact: result.priceImpactPct,
+        }, 'Jupiter sell executed');
+      } else {
+        // Use PumpPortal for bonding curve tokens
+        signature = await this.pumpPortal.sell({
+          mint,
+          amount,
+          slippage: this.config.slippageTolerance,
+        });
+
+        // Parse the confirmed transaction to get actual amounts
+        const parsedTx = await this.txParser.waitAndParse(
+          signature,
+          this.walletAddress,
+          mint,
+          'sell',
+          30000 // 30 second timeout
+        );
+
+        actualTokens = parsedTx.tokenAmount || amount;
+        solReceived = parsedTx.solAmount || 0;
+        pricePerToken = parsedTx.pricePerToken;
+      }
+
+      // Record trade in database
       await this.db.trades.insert({
         signature,
         timestamp: Date.now(),
         type: 'SELL',
         tokenMint: mint,
-        amountTokens: parsedTx.tokenAmount || amount,
-        amountSol: parsedTx.solAmount,
-        pricePerToken: parsedTx.pricePerToken,
+        amountTokens: actualTokens,
+        amountSol: solReceived,
+        pricePerToken,
         metadata: {
           requestedTokens: amount,
-          actualTokens: parsedTx.tokenAmount,
-          solReceived: parsedTx.solAmount,
-          fee: parsedTx.fee,
-          parseSuccess: parsedTx.success,
+          actualTokens,
+          solReceived,
+          method: useJupiter ? 'Jupiter' : 'PumpPortal',
         },
       });
 
@@ -595,15 +679,15 @@ export class TradingEngine {
         mint,
         signature,
         requestedTokens: amount,
-        actualTokens: parsedTx.tokenAmount,
-        solReceived: parsedTx.solAmount,
-        pricePerToken: parsedTx.pricePerToken,
-        fee: parsedTx.fee,
-      }, 'Sell trade executed and parsed successfully');
+        actualTokens,
+        solReceived,
+        pricePerToken,
+        method: useJupiter ? 'Jupiter' : 'PumpPortal',
+      }, 'Sell trade executed successfully');
 
       return signature;
     } catch (error) {
-      logger.error({ mint, error }, 'Sell trade failed');
+      logger.error({ mint, error, method: useJupiter ? 'Jupiter' : 'PumpPortal' }, 'Sell trade failed');
       return null;
     }
   }

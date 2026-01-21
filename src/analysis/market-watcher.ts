@@ -1,3 +1,4 @@
+
 /**
  * Market Watcher - Observes market activity and learns patterns
  *
