@@ -1052,7 +1052,7 @@ export class TradingLoop {
 
           logger.info({ mint, signature }, 'Trade executed successfully');
         } else {
-          logger.warn({ mint }, 'Trade execution failed');
+          logger.info({ mint }, 'Trade execution skipped (Circuit breaker or Engine rejection)');
         }
       } else {
         logger.info({ mint, reasons: decision.reasons }, 'Trade rejected');

@@ -458,7 +458,7 @@ export class TradingEngine {
     }, 'Trade decision');
 
     if (!decision.shouldTrade) {
-      logger.info({ mint, reasons: decision.reasons }, 'Trade rejected');
+      logger.warn({ mint, reasons: decision.reasons }, `⛔ Trade rejected: ${decision.reasons.join(', ')}`);
       return null;
     }
 

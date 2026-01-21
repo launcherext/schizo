@@ -148,11 +148,13 @@ export class CopyTrader {
     );
 
     if (!isLikelySwap) {
-      logger.debug({ signature: logs.signature }, 'Not a swap transaction');
+      logger.info({ signature: logs.signature, logs: logs.logs.slice(0, 3) }, '❌ Transaction rejected: Not a swap');
       return;
     }
 
+    const startParse = Date.now();
     await this.analyzeTransactionBySignature(logs.signature, walletAddress);
+    logger.debug({ signature: logs.signature, ms: Date.now() - startParse }, 'Transaction analysis complete');
   }
 
   /**
@@ -226,7 +228,10 @@ export class CopyTrader {
         commitment: 'confirmed'
       });
 
-      if (!parsed || !parsed.meta) return;
+      if (!parsed || !parsed.meta) {
+          logger.warn({ signature }, '❌ Transaction not found or missing meta');
+          return;
+      }
 
       await this.processTransaction(signature, parsed, walletAddress);
     } catch (error) {
@@ -254,19 +259,23 @@ export class CopyTrader {
     } catch (error) {
       logger.warn({ error, signature: tx.signature }, 'Failed to parse potential copy trade');
     }
-  }
+  } 
 
-  /**
-   * Process a parsed transaction to detect buy signals
-   */
   private async processTransaction(signature: string, parsed: any, walletAddress: string): Promise<void> {
     const preTokenBalances = parsed.meta.preTokenBalances || [];
     const postTokenBalances = parsed.meta.postTokenBalances || [];
     const accountKeys = parsed.transaction.message.accountKeys;
     
-    const walletIndex = accountKeys.findIndex((k: any) => k.pubkey.toBase58() === walletAddress);
+    // Find wallet index (handles both legacy and versioned tx structures where static keys are first)
+    const walletIndex = accountKeys.findIndex((k: any) => {
+        const key = k.pubkey ? k.pubkey.toBase58() : k.toBase58();
+        return key === walletAddress;
+    });
 
-    if (walletIndex === -1) return;
+    if (walletIndex === -1) {
+        logger.warn({ signature, walletAddress }, '❌ Wallet not found in transaction keys');
+        return;
+    }
 
     // Check SOL change
     const preSol = parsed.meta.preBalances[walletIndex];
@@ -297,6 +306,15 @@ export class CopyTrader {
 
     const isBuy = solChange < -0.001 && !!boughtMint;
     
+    // Log the analysis details
+    logger.info({
+        signature,
+        solChange: solChange.toFixed(6),
+        boughtMint,
+        isBuy,
+        mintsInvolved: involvedMints.size
+    }, '🔍 CopyTrade Analysis');
+
     if (isBuy && boughtMint) {
       logger.info({ 
         signature, 

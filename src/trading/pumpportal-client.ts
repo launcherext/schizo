@@ -340,7 +340,7 @@ export class PumpPortalClient {
       mint,
       amount,
       denominatedInSol: 'true',
-      slippage,
+      slippage: slippage * 100, // Convert 0.05 to 5 (percent)
       priorityFee,
       pool: 'pump',
     };
