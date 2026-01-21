@@ -131,7 +131,9 @@ export interface StatsUpdateEvent extends BaseEvent {
   data: {
     todayTrades: number;
     openPositions: number;
-    dailyPnL: number;
+    realizedPnL: number;    // NEW: Profit/loss from closed positions
+    unrealizedPnL: number;  // NEW: Current value change of open positions
+    dailyPnL: number;       // Backwards compat: same as realizedPnL
     winRate: number;
     totalBuybacks: number;
     balance: number;

@@ -124,8 +124,11 @@ export class TradingLoop {
     // NOTE: New token discovery is now handled by SniperPipeline
     // This loop executes trending scans and position management
 
+    // Track last PnL snapshot time
+    let lastSnapshotTime = Date.now();
+
     // Process queue periodically
-    this.intervalId = setInterval(() => {
+    this.intervalId = setInterval(async () => {
       // Also run position checks if trading
       if (this.config.enableTrading && this.tradingEngine) {
         this.checkPositionExits().catch(error => {
@@ -136,6 +139,14 @@ export class TradingLoop {
       // Emit stats and positions
       this.emitStatsUpdate().catch(() => {});
       this.emitPositionsUpdate().catch(() => {});
+
+      // Save PnL snapshot every 5 minutes
+      if (Date.now() - lastSnapshotTime > 5 * 60 * 1000) {
+        await this.savePnLSnapshot().catch(error => {
+          logger.error({ error }, 'Error saving PnL snapshot');
+        });
+        lastSnapshotTime = Date.now();
+      }
     }, this.config.pollIntervalMs);
 
     // Scan trending tokens every 60 seconds (Birdeye rate limit friendly)
@@ -606,7 +617,7 @@ export class TradingLoop {
     try {
       const stats = this.tradingEngine
         ? await this.tradingEngine.getStats()
-        : { todayTrades: 0, openPositions: 0, dailyPnL: 0, consecutiveLosses: 0 };
+        : { todayTrades: 0, openPositions: 0, realizedPnL: 0, unrealizedPnL: 0, dailyPnL: 0, consecutiveLosses: 0 };
 
       // Calculate win rate from completed trades
       const allTrades = this.db.trades.getRecent(100);
@@ -659,6 +670,8 @@ export class TradingLoop {
         data: {
           todayTrades: stats.todayTrades,
           openPositions: stats.openPositions,
+          realizedPnL: stats.realizedPnL,
+          unrealizedPnL: stats.unrealizedPnL,
           dailyPnL: stats.dailyPnL,
           winRate,
           totalBuybacks: buybacks,
@@ -806,6 +819,54 @@ export class TradingLoop {
    */
   getTokenMetadata(mint: string): TokenMetadata | undefined {
     return this.tokenMetadataCache.get(mint);
+  }
+
+  /**
+   * Save PnL snapshot to database
+   * Records current portfolio state for historical tracking
+   */
+  private async savePnLSnapshot(): Promise<void> {
+    if (!this.tradingEngine) return;
+
+    try {
+      const positions = await this.tradingEngine.getOpenPositionsWithPrices();
+      const stats = await this.tradingEngine.getStats();
+
+      // Get wallet balance
+      let balance = 0;
+      if (this.walletPublicKey) {
+        const lamports = await this.connection.getBalance(this.walletPublicKey);
+        balance = lamports / LAMPORTS_PER_SOL;
+      }
+
+      // Calculate total value of holdings
+      let holdingsValue = 0;
+      const tokenHoldings: Record<string, number> = {};
+
+      for (const pos of positions) {
+        tokenHoldings[pos.tokenMint] = pos.entryAmountTokens;
+        if (pos.currentPrice) {
+          holdingsValue += pos.entryAmountTokens * pos.currentPrice;
+        }
+      }
+
+      // Save snapshot
+      this.db.state.savePnLSnapshot({
+        timestamp: Date.now(),
+        totalValueSol: balance + holdingsValue,
+        realizedPnlSol: stats.realizedPnL,
+        unrealizedPnlSol: stats.unrealizedPnL,
+        tokenHoldings,
+      });
+
+      logger.debug({
+        totalValueSol: (balance + holdingsValue).toFixed(4),
+        realizedPnL: stats.realizedPnL.toFixed(4),
+        unrealizedPnL: stats.unrealizedPnL.toFixed(4),
+      }, 'PnL snapshot saved');
+    } catch (error) {
+      logger.error({ error }, 'Failed to save PnL snapshot');
+    }
   }
 
   /**

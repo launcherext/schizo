@@ -80,7 +80,9 @@ export interface TradeDecision {
 export interface TradingStats {
   todayTrades: number;
   openPositions: number;
-  dailyPnL: number;
+  realizedPnL: number;     // Profit/loss from closed positions only
+  unrealizedPnL: number;   // Current value change of open positions
+  dailyPnL: number;        // Backwards compat: same as realizedPnL
   consecutiveLosses: number;
   circuitBreakerActive: boolean;
   circuitBreakerReason: string | null;
@@ -919,9 +921,11 @@ export class TradingEngine {
     const allTrades = this.db.trades.getRecent(1000); // Get recent 1000 trades
     const todayTrades = allTrades.filter((t: { timestamp: number }) => t.timestamp >= todayStart);
 
-    // Calculate daily P&L from actual trades
-    // P&L = SOL received from sells - SOL spent on buys
-    const dailyPnL = this.calculateDailyPnL(todayTrades);
+    // Calculate realized P&L from completed round-trips (buy + sell pairs)
+    const realizedPnL = this.calculateRealizedPnL(todayTrades);
+
+    // Calculate unrealized P&L from open positions
+    const unrealizedPnL = await this.calculateUnrealizedPnL();
 
     // Count open positions by finding tokens with net positive holdings
     const openPositions = this.countOpenPositions(allTrades);
@@ -933,9 +937,9 @@ export class TradingEngine {
     let circuitBreakerActive = false;
     let circuitBreakerReason: string | null = null;
 
-    if (dailyPnL <= this.config.circuitBreakerDailyLoss) {
+    if (realizedPnL <= this.config.circuitBreakerDailyLoss) {
       circuitBreakerActive = true;
-      circuitBreakerReason = `Daily loss limit exceeded (${dailyPnL.toFixed(2)} SOL)`;
+      circuitBreakerReason = `Daily loss limit exceeded (${realizedPnL.toFixed(2)} SOL)`;
     }
 
     if (consecutiveLosses >= this.config.circuitBreakerConsecutiveLosses) {
@@ -946,7 +950,9 @@ export class TradingEngine {
     return {
       todayTrades: todayTrades.length,
       openPositions,
-      dailyPnL,
+      realizedPnL,
+      unrealizedPnL,
+      dailyPnL: realizedPnL, // Backwards compatibility
       consecutiveLosses,
       circuitBreakerActive,
       circuitBreakerReason,
@@ -954,24 +960,33 @@ export class TradingEngine {
   }
 
   /**
-   * Calculate daily P&L from trades
-   * P&L = SOL received from sells - SOL spent on buys (excluding buybacks)
+   * Calculate realized P&L from completed trades (buy + sell pairs)
+   * Only counts profit/loss from closed positions using FIFO matching
    */
-  private calculateDailyPnL(todayTrades: Array<{ type: string; amountSol: number; metadata?: Record<string, unknown> }>): number {
-    let pnl = 0;
+  private calculateRealizedPnL(trades: Array<{ type: string; tokenMint: string; amountSol: number; metadata?: Record<string, unknown> }>): number {
+    // Group by token, match buy/sell pairs (FIFO), sum actual profit/loss
+    const tokenBuyCosts = new Map<string, number[]>();
+    let realizedPnL = 0;
 
-    for (const trade of todayTrades) {
+    for (const trade of trades) {
       // Skip buybacks - they're not trading P&L
       if (trade.metadata?.isBuyback) continue;
 
-      if (trade.type === 'SELL') {
-        pnl += trade.amountSol; // SOL received
-      } else if (trade.type === 'BUY') {
-        pnl -= trade.amountSol; // SOL spent
+      if (trade.type === 'BUY') {
+        const costs = tokenBuyCosts.get(trade.tokenMint) || [];
+        costs.push(trade.amountSol);
+        tokenBuyCosts.set(trade.tokenMint, costs);
+      } else if (trade.type === 'SELL') {
+        const costs = tokenBuyCosts.get(trade.tokenMint) || [];
+        if (costs.length > 0) {
+          const buyCost = costs.shift()!; // FIFO matching
+          realizedPnL += trade.amountSol - buyCost; // Actual profit/loss
+          tokenBuyCosts.set(trade.tokenMint, costs);
+        }
       }
     }
 
-    return pnl;
+    return realizedPnL;
   }
 
   /**
@@ -1180,6 +1195,25 @@ export class TradingEngine {
     }
 
     return positionsWithPrices;
+  }
+
+  /**
+   * Calculate unrealized P&L from open positions
+   * Returns the total unrealized profit/loss across all open positions
+   */
+  async calculateUnrealizedPnL(): Promise<number> {
+    const positions = await this.getOpenPositionsWithPrices();
+    let unrealizedPnL = 0;
+
+    for (const position of positions) {
+      if (position.currentPrice && position.entryPrice) {
+        const currentValue = position.entryAmountTokens * position.currentPrice;
+        const entryCost = position.entryAmountSol;
+        unrealizedPnL += currentValue - entryCost;
+      }
+    }
+
+    return unrealizedPnL;
   }
 
   /**

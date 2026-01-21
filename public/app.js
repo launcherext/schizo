@@ -335,7 +335,24 @@ function processAudioQueue() {
 // Update dashboard stats
 function updateStats(stats) {
   document.getElementById('winRate').textContent = stats.winRate.toFixed(1) + '%';
-  document.getElementById('pnl').textContent = stats.dailyPnL.toFixed(2) + ' SOL';
+  
+  // Calculate PnL breakdown
+  const realizedPnL = stats.realizedPnL ?? 0;
+  const unrealizedPnL = stats.unrealizedPnL ?? 0;
+  const totalPnL = realizedPnL + unrealizedPnL;
+  
+  const pnlElement = document.getElementById('pnl');
+  
+  // Format PnL values with sign
+  const formatPnL = (val) => (val >= 0 ? '+' : '') + val.toFixed(3);
+  
+  // Display breakdown: "R: X | U: Y | T: Z"
+  pnlElement.innerHTML = `
+    <span class="${realizedPnL >= 0 ? 'positive' : 'negative'}">R: ${formatPnL(realizedPnL)}</span> |
+    <span class="${unrealizedPnL >= 0 ? 'positive' : 'negative'}">U: ${formatPnL(unrealizedPnL)}</span> |
+    <span class="${totalPnL >= 0 ? 'positive' : 'negative'}">T: ${formatPnL(totalPnL)} SOL</span>
+  `;
+  
   document.getElementById('buybacks').textContent = stats.totalBuybacks;
   if (stats.balance !== undefined) {
     document.getElementById('balance').textContent = stats.balance.toFixed(4) + ' SOL';
