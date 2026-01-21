@@ -134,6 +134,12 @@ export interface StatsUpdateEvent extends BaseEvent {
     winRate: number;
     totalBuybacks: number;
     balance: number;
+    // Entertainment mode stats
+    mood?: string;              // Current mood (CONFIDENT, PARANOID, etc.)
+    moodIntensity?: number;     // Mood intensity 0-1
+    timeSinceLastTrade?: number; // Seconds since last trade
+    tradesThisHour?: number;    // Number of trades this hour
+    timePressure?: number;      // 0-1 time pressure level
   };
 }
 
