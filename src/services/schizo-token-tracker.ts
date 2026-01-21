@@ -69,6 +69,18 @@ export class SchizoTokenTracker {
       intervalMs: this.config.updateIntervalMs
     }, '$SCHIZO token tracker started');
 
+    // Broadcast CA immediately so frontend can show it even if token isn't live yet
+    this.broadcastUpdate({
+      ca: this.config.tokenMint,
+      price: 0,
+      priceChange24h: 0,
+      priceChange1h: 0,
+      marketCap: 0,
+      volume24h: 0,
+      liquidity: 0,
+      live: false,
+    });
+
     // Fetch immediately
     this.fetchAndBroadcast();
 
