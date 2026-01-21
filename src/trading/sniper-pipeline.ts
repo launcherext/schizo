@@ -319,7 +319,7 @@ export class SniperPipeline {
         mint: token.mint,
         symbol: token.symbol,
         reason: result.reason
-      }, '❌ Token rejected by validator');
+      }, `❌ Token rejected: ${result.reason}`);
     }
   }
 }
