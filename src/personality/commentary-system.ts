@@ -20,13 +20,15 @@ export type NarrativeBeat =
   | 'DECISION'         // Made a trade decision (buy/skip with reason)
   | 'TRADE_RESULT'     // Trade completed (profit/loss)
   | 'PARANOID_MUSING'  // Quiet period conspiracy theory
-  | 'TIME_PRESSURE';   // Restless, needs action
+  | 'TIME_PRESSURE'    // Restless, needs action
+  | 'SHILL_ANALYSIS';  // Viewer shill request being analyzed
 
 /**
  * Priority levels for queue ordering
  */
 const BEAT_PRIORITY: Record<NarrativeBeat, number> = {
   TRADE_RESULT: 100,     // Highest - always report trade outcomes
+  SHILL_ANALYSIS: 90,    // Very high - interrupts for viewer shills
   DECISION: 80,          // High - trade decisions matter
   ANALYSIS: 60,          // Medium - interesting findings
   DISCOVERY: 40,         // Lower - only interesting tokens
@@ -68,6 +70,11 @@ export interface CommentaryContext {
   tradeType?: 'BUY' | 'SELL';
   profitLossSol?: number;
   profitLossPercent?: number;
+
+  // Shill queue context (for SHILL_ANALYSIS)
+  shillSender?: string;
+  shillCA?: string;
+  shillAmount?: number;
 
   // Custom prompt override
   customPrompt?: string;
@@ -292,6 +299,10 @@ export class CommentarySystem {
         // Always interesting - we executed a trade
         return true;
 
+      case 'SHILL_ANALYSIS':
+        // Always interesting - viewer paid to shill
+        return true;
+
       case 'DECISION':
         // Interesting if we're actually trading OR if we found critical risk
         return context.shouldTrade === true ||
@@ -353,6 +364,9 @@ export class CommentarySystem {
 
       case 'TRADE_RESULT':
         return this.generateTradeResultCommentary(item.context, moodStyle);
+
+      case 'SHILL_ANALYSIS':
+        return this.generateShillCommentary(item.context);
 
       case 'PARANOID_MUSING':
         return await this.generateParanoidMusing() || this.getFallbackMusing();
@@ -479,6 +493,17 @@ export class CommentarySystem {
   private generateTimePressureCommentary(moodStyle: string): string {
     const prompts = getTimePressurePrompts();
     return prompts[Math.floor(Math.random() * prompts.length)];
+  }
+
+  /**
+   * Generate shill analysis commentary
+   */
+  private generateShillCommentary(context: CommentaryContext): string {
+    const shortSender = context.shillSender?.slice(0, 6) || 'anon';
+    const shortCA = context.shillCA?.slice(0, 8) || 'unknown';
+    const amount = context.shillAmount?.toFixed(0) || '?';
+
+    return `Incoming shill from ${shortSender}. They burned ${amount} SCHIZO for ${shortCA}. Running my checks.`;
   }
 
   /**

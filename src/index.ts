@@ -411,6 +411,52 @@ async function main(): Promise<void> {
       });
     }
 
+    // Initialize Shill Queue (viewer-submitted token shills via $SCHIZO burns)
+    let shillQueue: any = null;
+    let shillWatcher: any = null;
+    const shillQueueEnabled = process.env.SHILL_QUEUE_ENABLED === 'true';
+    const schizoTokenMint = process.env.SCHIZO_TOKEN_MINT;
+
+    if (shillQueueEnabled && schizoTokenMint) {
+      log.info('Initializing Shill Queue...');
+
+      const { ShillQueue, ShillQueueWatcher, DEFAULT_SHILL_QUEUE_CONFIG, DEFAULT_SHILL_WATCHER_CONFIG } = await import('./shill-queue/index.js');
+
+      shillQueue = new ShillQueue(
+        {
+          ...DEFAULT_SHILL_QUEUE_CONFIG,
+          lottoPositionSol: parseFloat(process.env.SHILL_LOTTO_SIZE || '0.02'),
+        },
+        tradingEngine,
+        tokenSafety,
+        claude,
+        narrator,
+        commentarySystem
+      );
+
+      shillWatcher = new ShillQueueWatcher(
+        {
+          ...DEFAULT_SHILL_WATCHER_CONFIG,
+          burnWalletAddress: process.env.SHILL_BURN_WALLET || 'GvV8bXgQTYSGHnfNF9vgodshgQ4P2fcichGFLqBd73kr',
+          schizoTokenMint,
+          minShillAmountTokens: parseInt(process.env.MIN_SHILL_AMOUNT || '1000'),
+          cooldownPerWalletMs: parseInt(process.env.SHILL_COOLDOWN_MS || '300000'),
+          enabled: true,
+        },
+        connection,
+        shillQueue
+      );
+
+      await shillWatcher.start();
+      log.info({
+        burnWallet: process.env.SHILL_BURN_WALLET || 'GvV8bXgQTYSGHnfNF9vgodshgQ4P2fcichGFLqBd73kr',
+        minAmount: process.env.MIN_SHILL_AMOUNT || '1000',
+        lottoSize: process.env.SHILL_LOTTO_SIZE || '0.02',
+      }, '🎤 Shill Queue active - viewers can burn $SCHIZO to shill tokens');
+    } else if (shillQueueEnabled && !schizoTokenMint) {
+      log.warn('SHILL_QUEUE_ENABLED=true but SCHIZO_TOKEN_MINT not set - shill queue disabled');
+    }
+
     // Start WebSocket server (Railway uses PORT, fallback to WEBSOCKET_PORT or 8080)
     const websocketPort = parseInt(process.env.PORT || process.env.WEBSOCKET_PORT || '8080');
     let wss: any = null;
@@ -452,6 +498,7 @@ async function main(): Promise<void> {
       // Shutdown handlers
       const shutdown = () => {
         log.info('Shutting down...');
+        if (shillWatcher) shillWatcher.stop();
         if (rewardClaimer) rewardClaimer.stop();
         if (commentarySystem) commentarySystem.stop();
         if (marketWatcher) marketWatcher.stop();
@@ -478,6 +525,7 @@ async function main(): Promise<void> {
       log.info(`  ${claude ? '✅' : '⚠️'} Phase 4: AI Personality ${claude ? '(ACTIVE)' : '(DISABLED)'}`);
       log.info(`  ${narrator ? '✅' : '⚠️'} Voice: Deepgram TTS ${narrator ? '(ACTIVE)' : '(DISABLED)'}`);
       log.info(`  ${entertainmentEnabled ? '✅' : '⚠️'} Entertainment Mode ${entertainmentEnabled ? '(ACTIVE - Degen trading)' : '(DISABLED)'}`);
+      log.info(`  ${shillWatcher ? '✅' : '⚠️'} Shill Queue ${shillWatcher ? '(ACTIVE - burn $SCHIZO to shill)' : '(DISABLED)'}`);
       log.info(`  ✅ Market Watcher: Learning from trades`);
       log.info('');
 

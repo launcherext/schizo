@@ -62,7 +62,10 @@ export type AgentEvent =
   | ScanEvent
   | RejectEvent
   | RewardClaimedEvent
-  | RewardFailedEvent;
+  | RewardFailedEvent
+  | ShillReceivedEvent
+  | ShillRoastEvent
+  | ShillBuyEvent;
 
 /**
  * Token scan initiated (even if rejected)
@@ -453,5 +456,43 @@ export interface PositionsUpdateEvent extends BaseEvent {
       currentPrice?: number;
       unrealizedPnLPercent?: number;
     }>;
+  };
+}
+
+/**
+ * Shill received from viewer burning $SCHIZO
+ */
+export interface ShillReceivedEvent extends BaseEvent {
+  type: 'SHILL_RECEIVED';
+  data: RichEventData & {
+    senderWallet: string;
+    contractAddress: string;
+    schizoAmountBurned: number;
+  };
+}
+
+/**
+ * Shill rejected with roast
+ */
+export interface ShillRoastEvent extends BaseEvent {
+  type: 'SHILL_ROAST';
+  data: RichEventData & {
+    senderWallet: string;
+    contractAddress: string;
+    roastMessage: string;
+    risks: string[];
+  };
+}
+
+/**
+ * Shill accepted with lotto buy
+ */
+export interface ShillBuyEvent extends BaseEvent {
+  type: 'SHILL_BUY';
+  data: RichEventData & {
+    senderWallet: string;
+    contractAddress: string;
+    buySignature: string;
+    positionSizeSol: number;
   };
 }

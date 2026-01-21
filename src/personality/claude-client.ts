@@ -569,6 +569,69 @@ RULES:
   }
 
   /**
+   * Generate a roast for a failed shill request
+   * Called when a viewer burns $SCHIZO to shill a token that fails safety checks
+   */
+  async generateShillRoast(context: {
+    senderWallet: string;
+    risks: string[];
+    schizoAmountBurned: number;
+  }): Promise<string> {
+    const shortSender = context.senderWallet.slice(0, 6);
+    const risksStr = context.risks.slice(0, 3).join(', ');
+
+    const prompt = `A viewer just burned ${context.schizoAmountBurned.toFixed(0)} $SCHIZO tokens to shill a token.
+But the token FAILED your safety checks with these risks: ${risksStr}
+
+Generate a SHORT (max 25 words) paranoid roast directed at the viewer (wallet ${shortSender}...).
+- Reference the SPECIFIC risks that made you reject it
+- Be funny but not mean-spirited
+- Stay in your paranoid trader character
+- Thank them sarcastically for wasting their tokens`;
+
+    try {
+      const roast = await this.callAI(SCHIZO_SYSTEM_PROMPT, prompt);
+      return roast || this.generateFallbackShillRoast(shortSender, context.risks);
+    } catch (error) {
+      logger.error({ error }, 'Failed to generate shill roast');
+      return this.generateFallbackShillRoast(shortSender, context.risks);
+    }
+  }
+
+  /**
+   * Fallback shill roasts when Claude is unavailable
+   */
+  private generateFallbackShillRoast(shortSender: string, risks: string[]): string {
+    const riskStr = risks.join(', ').toLowerCase();
+
+    if (riskStr.includes('honeypot') || riskStr.includes('freeze')) {
+      return `Nice try ${shortSender}. This token has honeypot written all over it. Your SCHIZO died for nothing.`;
+    }
+
+    if (riskStr.includes('mint') || riskStr.includes('authority')) {
+      return `${shortSender}, this dev can print tokens whenever they want. That's a hard no from me.`;
+    }
+
+    if (riskStr.includes('concentration') || riskStr.includes('holder')) {
+      return `One wallet owns half the supply. Thanks for the shill ${shortSender}, but I'm not that gullible.`;
+    }
+
+    if (riskStr.includes('liquidity')) {
+      return `${shortSender} just burned tokens to shill something with no liquidity. Bold move.`;
+    }
+
+    // Generic fallback
+    const genericRoasts = [
+      `Sorry ${shortSender}, this one failed my paranoid checks. Better luck next time.`,
+      `${shortSender} really thought this would get past me? My trust issues say no.`,
+      `Thanks for the burn ${shortSender}, but this token screams rug to me.`,
+      `${shortSender}, I appreciate the enthusiasm but my pattern recognition says pass.`,
+    ];
+
+    return genericRoasts[Math.floor(Math.random() * genericRoasts.length)];
+  }
+
+  /**
    * Generate live analysis thought during token evaluation
    * This is what SCHIZO says out loud as he analyzes a token
    */

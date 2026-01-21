@@ -147,6 +147,14 @@ export class TradingLoop {
         });
         lastSnapshotTime = Date.now();
       }
+
+      // Sync wallet positions every 60 seconds (detect manual trades, airdrops, etc)
+      if (this.tradingEngine && Date.now() - (this as any).lastSyncTime > 60 * 1000) {
+        this.tradingEngine.syncPositions().catch(error => {
+          logger.debug({ error }, 'Position sync failed');
+        });
+        (this as any).lastSyncTime = Date.now();
+      }
     }, this.config.pollIntervalMs);
 
     // Scan trending tokens every 60 seconds (Birdeye rate limit friendly)

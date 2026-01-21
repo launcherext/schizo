@@ -236,18 +236,30 @@ export class TradingEngine {
       // Ideally we'd use Helius Enhanced API filter, but our client wrappers might not expose it fully yet.
       // We'll trust the latest large BUY or just default to current price.
       
-      // Attempt to get token info for metadata
+      // Attempt to get token info for metadata - try PumpPortal first, fallback to DexScreener
       let symbol = 'UNKNOWN';
       let name = 'Unknown Token';
       let price = 0;
 
       try {
-          const info = await this.pumpPortal.getTokenInfo(mint);
-          symbol = info.symbol;
-          name = info.name;
-          price = info.price; // SOL price
-      } catch (e) {
-          // Ignore
+        const info = await this.pumpPortal.getTokenInfo(mint);
+        symbol = info.symbol;
+        name = info.name;
+        price = info.price; // SOL price
+      } catch {
+        // PumpPortal failed (token may have graduated) - try DexScreener
+        logger.debug({ mint }, 'PumpPortal failed in restorePosition, trying DexScreener');
+        try {
+          const dexData = await dexscreener.getRawPairs(mint);
+          if (dexData && dexData.length > 0) {
+            symbol = dexData[0].baseToken?.symbol || 'UNKNOWN';
+            name = dexData[0].baseToken?.name || 'Unknown Token';
+            price = parseFloat(dexData[0].priceNative || '0');
+            logger.info({ mint, symbol, price }, 'Got price from DexScreener for sync');
+          }
+        } catch (dexErr) {
+          logger.warn({ mint, error: dexErr }, 'DexScreener also failed');
+        }
       }
 
       // If we can't find a historical buy easily (parsing complicated), we use current price as cost basis

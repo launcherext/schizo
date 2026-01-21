@@ -61,6 +61,11 @@ export interface TokenSafetyResult {
   mint: string;
   isSafe: boolean;
   risks: TokenRisk[];
+  // Optional token info (populated when available)
+  symbol?: string;
+  name?: string;
+  marketCapSol?: number;
+  liquidity?: number;
   authorities: {
     mintAuthority: string | null;
     freezeAuthority: string | null;
