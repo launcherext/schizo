@@ -1409,130 +1409,133 @@ export class TradingEngine {
   }
 
   /**
-   * Get all open positions (tokens with net positive holdings)
-   * Cross-checks against actual wallet balances to filter sold positions
+   * Get all open positions directly from wallet balance (wallet-first approach)
+   * Uses database only for entry price lookup
    */
   async getOpenPositions(): Promise<OpenPosition[]> {
-    // Dust threshold: ignore positions worth less than ~$0.10 (at $200/SOL)
     const DUST_THRESHOLD_SOL = 0.0005; 
     
+    logger.debug('Fetching positions from actual wallet balance...');
+    
+    // Get actual wallet holdings via Helius DAS API
+    let walletTokens: Array<{ mint: string; balance: number }>;
+    try {
+      walletTokens = await this.helius.getAssetsByOwner(this.walletAddress);
+    } catch (error) {
+      logger.warn({ error }, 'Helius DAS failed, using RPC fallback');
+      // Fallback to RPC
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+        new PublicKey(this.walletAddress),
+        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+      );
+      walletTokens = tokenAccounts.value
+        .map(acc => {
+          const info = acc.account.data.parsed.info;
+          return {
+            mint: info.mint,
+            balance: parseFloat(info.tokenAmount.uiAmountString),
+          };
+        })
+        .filter(t => t.balance > 0);
+    }
+
+    if (walletTokens.length === 0) {
+      logger.debug('No tokens in wallet');
+      return [];
+    }
+
+    logger.debug({ tokenCount: walletTokens.length }, 'Found tokens in wallet');
+
+    // Get trade history to look up entry prices
     const allTrades = this.db.trades.getRecent(1000);
-    const positions = new Map<string, {
-      tokenMint: string;
-      tokenSymbol?: string;
-      tokenName?: string;
-      tokenImage?: string;
-      totalSolSpent: number;
-      totalTokensBought: number;
-      totalSolReceived: number;
-      totalTokensSold: number;
-      earliestBuyTimestamp: number;
+    const entryPrices = new Map<string, { 
+      avgPrice: number; 
+      totalSol: number; 
+      totalTokens: number;
+      earliestBuy: number;
+      symbol?: string;
+      name?: string;
+      image?: string;
     }>();
 
-    // Aggregate trades by token
+    // Build entry price map from buy trades
     for (const trade of allTrades) {
-      // Skip buybacks
-      if (trade.metadata?.isBuyback) continue;
-
-      const current = positions.get(trade.tokenMint) || {
-        tokenMint: trade.tokenMint,
-        tokenSymbol: trade.tokenSymbol,
-        tokenName: trade.metadata?.tokenName as string | undefined,
-        tokenImage: trade.metadata?.tokenImage as string | undefined,
-        totalSolSpent: 0,
-        totalTokensBought: 0,
-        totalSolReceived: 0,
-        totalTokensSold: 0,
-        earliestBuyTimestamp: Infinity,
+      if (trade.type !== 'BUY' || trade.metadata?.isBuyback) continue;
+      
+      const current = entryPrices.get(trade.tokenMint) || {
+        avgPrice: 0,
+        totalSol: 0,
+        totalTokens: 0,
+        earliestBuy: Infinity,
+        symbol: trade.tokenSymbol,
+        name: trade.metadata?.tokenName as string | undefined,
+        image: trade.metadata?.tokenImage as string | undefined,
       };
 
-      if (trade.type === 'BUY') {
-        current.totalSolSpent += trade.amountSol;
-        current.totalTokensBought += trade.amountTokens;
-        if (trade.timestamp < current.earliestBuyTimestamp) {
-          current.earliestBuyTimestamp = trade.timestamp;
-        }
-      } else if (trade.type === 'SELL') {
-        current.totalSolReceived += trade.amountSol;
-        current.totalTokensSold += trade.amountTokens;
+      current.totalSol += trade.amountSol;
+      current.totalTokens += trade.amountTokens;
+      current.avgPrice = current.totalSol / current.totalTokens;
+      if (trade.timestamp < current.earliestBuy) {
+        current.earliestBuy = trade.timestamp;
       }
 
-      positions.set(trade.tokenMint, current);
+      entryPrices.set(trade.tokenMint, current);
     }
 
-    // Get actual wallet token balances for cross-check using Helius DAS API
-    let actualBalances: Map<string, number>;
-    try {
-      const tokens = await this.helius.getAssetsByOwner(this.walletAddress);
-      actualBalances = new Map(tokens.map(t => [t.mint, t.balance]));
-      logger.debug({ tokenCount: tokens.length }, 'Fetched wallet balances via Helius DAS');
-    } catch (error) {
-      logger.warn({ error }, 'Failed to fetch wallet token balances via Helius, using RPC fallback');
-      // Fallback to RPC if Helius fails
-      try {
-        const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-          new PublicKey(this.walletAddress),
-          { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-        );
-        actualBalances = new Map(
-          tokenAccounts.value.map(acc => {
-            const info = acc.account.data.parsed.info;
-            return [info.mint, parseFloat(info.tokenAmount.uiAmountString)];
-          })
-        );
-      } catch (rpcError) {
-        logger.error({ error: rpcError }, 'RPC fallback also failed');
-        actualBalances = new Map(); // Continue without cross-check
-      }
-    }
-
-    // Filter to positions with net positive token holdings
+    // Build positions from actual wallet holdings
     const openPositions: OpenPosition[] = [];
 
-    for (const [, pos] of positions) {
-      const netTokens = pos.totalTokensBought - pos.totalTokensSold;
+    for (const walletToken of walletTokens) {
+      const entryData = entryPrices.get(walletToken.mint);
       
-      // Skip if no tokens left according to trades
-      if (netTokens <= 0) continue;
+      // Calculate entry cost for the current balance
+      let entryPrice: number;
+      let entrySol: number;
+      let entryTimestamp: number;
 
-      // Cross-check: If we have actual balance data and it's zero, skip even if trades show balance
-      const actualBalance = actualBalances.get(pos.tokenMint);
-      if (actualBalance !== undefined && actualBalance <= 0) {
-        logger.debug({
-          mint: pos.tokenMint,
-          netTokensFromTrades: netTokens,
-          actualBalance,
-          reason: 'Wallet balance is zero - position already closed'
-        }, 'Filtering out phantom position');
-        continue;
+      if (entryData) {
+        // Use database entry price
+        entryPrice = entryData.avgPrice;
+        entrySol = walletToken.balance * entryPrice;
+        entryTimestamp = entryData.earliestBuy;
+      } else {
+        // No entry data - token may have been received externally
+        // Use current price as entry price (0% P&L)
+        logger.debug({ mint: walletToken.mint }, 'No entry data found - using current price');
+        try {
+          const tokenInfo = await this.pumpPortal.getTokenInfo(walletToken.mint);
+          entryPrice = tokenInfo.price;
+          entrySol = walletToken.balance * entryPrice;
+          entryTimestamp = Date.now();
+        } catch {
+          // Can't get price, skip this token
+          logger.debug({ mint: walletToken.mint }, 'Cannot determine price - skipping');
+          continue;
+        }
       }
 
-      // Calculate average entry price
-      const entryPrice = pos.totalSolSpent / pos.totalTokensBought;
-      const entrySol = (netTokens / pos.totalTokensBought) * pos.totalSolSpent;
-
-      // Skip dust positions (< ~$0.10 worth, likely from rounding/slippage)
+      // Skip dust positions
       if (entrySol < DUST_THRESHOLD_SOL) {
         logger.debug({
-          mint: pos.tokenMint,
+          mint: walletToken.mint,
           entrySol,
-          reason: 'Dust position filtered out'
-        }, 'Ignoring dust position');
+        }, 'Skipping dust position');
         continue;
       }
 
       openPositions.push({
-        tokenMint: pos.tokenMint,
-        tokenSymbol: pos.tokenSymbol,
-        tokenName: pos.tokenName,
-        tokenImage: pos.tokenImage,
+        tokenMint: walletToken.mint,
+        tokenSymbol: entryData?.symbol,
+        tokenName: entryData?.name,
+        tokenImage: entryData?.image,
         entryAmountSol: entrySol,
-        entryAmountTokens: netTokens,
+        entryAmountTokens: walletToken.balance,
         entryPrice,
-        entryTimestamp: pos.earliestBuyTimestamp,
+        entryTimestamp,
       });
     }
 
+    logger.info({ positionCount: openPositions.length }, 'Open positions loaded from wallet');
     return openPositions;
   }
 
