@@ -342,7 +342,11 @@ export class PositionManager extends EventEmitter {
     const sellAmount = position.amount * sellPercent;
 
     // Execute partial sell with proper slippage for volatile tokens
-    const result = await txManager.executeSell(position.mint, sellAmount, 9, { slippageBps: config.defaultSlippageBps });
+    // skipBalanceCheck: trust our tracked position amount (RPC can be unreliable)
+    const result = await txManager.executeSell(position.mint, sellAmount, 9, {
+      slippageBps: config.defaultSlippageBps,
+      skipBalanceCheck: true,
+    });
 
     if (result.success) {
       position.amount -= sellAmount;
@@ -382,7 +386,11 @@ export class PositionManager extends EventEmitter {
     const actualSellAmount = Math.min(sellAmount, position.amount * 0.99);
 
     // Execute partial sell with proper slippage for volatile tokens
-    const result = await txManager.executeSell(position.mint, actualSellAmount, 9, { slippageBps: config.defaultSlippageBps });
+    // skipBalanceCheck: trust our tracked position amount (RPC can be unreliable)
+    const result = await txManager.executeSell(position.mint, actualSellAmount, 9, {
+      slippageBps: config.defaultSlippageBps,
+      skipBalanceCheck: true,
+    });
 
     if (result.success) {
       const previousAmount = position.amount;
@@ -474,7 +482,11 @@ export class PositionManager extends EventEmitter {
     position.status = 'closing';
 
     // Execute full sell with proper slippage for volatile tokens
-    const result = await txManager.executeSell(position.mint, position.amount, 9, { slippageBps: config.defaultSlippageBps });
+    // skipBalanceCheck: trust our tracked position amount (RPC can be unreliable)
+    const result = await txManager.executeSell(position.mint, position.amount, 9, {
+      slippageBps: config.defaultSlippageBps,
+      skipBalanceCheck: true,
+    });
 
     if (result.success) {
       position.status = 'closed';
@@ -520,16 +532,21 @@ export class PositionManager extends EventEmitter {
       }, 'Position closed');
     } else {
       // Check if actual balance is 0 - if so, close as total loss (ghost position)
-      if (result.actualBalance === 0) {
+      // BUT: Add grace period - don't close as ghost if position is < 60 seconds old
+      // This prevents false positives due to RPC indexing delays
+      const positionAgeMs = Date.now() - position.entryTime.getTime();
+      const GHOST_GRACE_PERIOD_MS = 60000; // 60 seconds
+
+      if (result.actualBalance === 0 && positionAgeMs > GHOST_GRACE_PERIOD_MS) {
         logger.warn({
           positionId,
           reason,
           error: result.error,
+          positionAgeMs,
         }, 'Ghost position detected - no tokens on chain. Closing as total loss.');
 
         position.status = 'closed';
         position.amount = 0;
-
         // Total loss = entire investment
         const totalPnlSol = -position.amountSol;
         const pnlPercent = -100;
@@ -555,6 +572,17 @@ export class PositionManager extends EventEmitter {
           totalPnlSol: totalPnlSol.toFixed(6),
           pnlPercent: pnlPercent.toFixed(2),
         }, 'Ghost position closed as total loss');
+        return;
+      } else if (result.actualBalance === 0) {
+        // Position is young, RPC might just be slow - retry later
+        logger.warn({
+          positionId,
+          reason,
+          error: result.error,
+          positionAgeMs,
+          graceRemaining: GHOST_GRACE_PERIOD_MS - positionAgeMs,
+        }, 'Sell failed but position is young - will retry (RPC may be slow)');
+        position.status = 'open';
         return;
       }
 

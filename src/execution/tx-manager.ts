@@ -165,37 +165,56 @@ export class TransactionManager extends EventEmitter {
       slippageBps?: number;
       useJito?: boolean;
       maxRetries?: number;
+      skipBalanceCheck?: boolean;  // Trust position amount when RPC is unreliable
     } = {}
   ): Promise<SwapResult> {
     const {
       slippageBps = config.defaultSlippageBps,  // Use config default (15%) for volatile tokens
       useJito = config.enableJito,
       maxRetries = 3,
+      skipBalanceCheck = false,
     } = options;
 
-    // Verify actual token balance before selling
-    const actualBalance = await this.getTokenBalance(mint);
+    // Verify actual token balance before selling (with retry)
+    let actualBalance = 0;
+    let balanceCheckFailed = false;
 
-    if (actualBalance < amountTokens * 0.99) {  // 1% tolerance
+    if (!skipBalanceCheck) {
+      // Try balance check with retries
+      for (let i = 0; i < 3; i++) {
+        actualBalance = await this.getTokenBalance(mint);
+        if (actualBalance > 0) break;
+
+        // Wait and retry - RPC might be slow
+        if (i < 2) {
+          logger.debug({ mint, attempt: i + 1 }, 'Balance check returned 0, retrying...');
+          await this.sleep(1000 * (i + 1));
+        }
+      }
+
+      if (actualBalance === 0) {
+        balanceCheckFailed = true;
+        logger.warn({ mint, requestedAmount: amountTokens },
+          'Balance check returned 0 after retries - proceeding with tracked amount');
+      }
+    }
+
+    if (!skipBalanceCheck && !balanceCheckFailed && actualBalance < amountTokens * 0.99) {  // 1% tolerance
       logger.warn({ mint, requested: amountTokens, actual: actualBalance },
         'Insufficient token balance - adjusting sell amount');
 
       if (actualBalance > 0) {
         // Sell what we actually have
         amountTokens = actualBalance;
-      } else {
-        logger.error({ mint }, 'No tokens to sell');
-        return {
-          success: false,
-          inputAmount: amountTokens,
-          outputAmount: 0,
-          priceImpact: 0,
-          fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
-          error: 'No tokens to sell - zero balance',
-          timestamp: new Date(),
-          actualBalance: 0,  // Tell position-manager the real balance
-        };
       }
+      // If actualBalance is 0 but balanceCheckFailed is true, we proceed with tracked amount
+    }
+
+    // If balance check completely failed, proceed anyway with tracked amount
+    // The swap API will fail if we truly have no tokens, but at least we try
+    if (balanceCheckFailed || skipBalanceCheck) {
+      logger.info({ mint, amountTokens, balanceCheckFailed, skipBalanceCheck },
+        'Proceeding with sell using tracked position amount');
     }
 
     const txId = `sell_${mint}_${Date.now()}`;
