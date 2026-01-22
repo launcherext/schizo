@@ -975,12 +975,15 @@ function updateTrenchRadioFromPositions(positions) {
         if (pos.unrealizedPnLPercent !== undefined) {
             const weight = pos.entryAmountSol || 1;
             // Convert percentage to decimal (30% -> 0.30) and multiply by position size
-            totalPnL += (pos.unrealizedPnLPercent / 100) * weight;
+            const positionPnL = (pos.unrealizedPnLPercent / 100) * weight;
+            console.log(`💰 Position ${pos.tokenSymbol}: ${pos.unrealizedPnLPercent}% * ${weight} SOL = ${positionPnL} SOL`);
+            totalPnL += positionPnL;
             totalWeight += weight;
         }
     });
 
     const avgPnL = totalWeight > 0 ? (totalPnL / totalWeight) * 100 : 0; // Convert back to percentage
+    console.log(`📊 Total P&L: ${totalPnL} SOL across ${totalWeight} SOL (${avgPnL.toFixed(2)}% avg)`);
 
     // Link trench radio state to audio
     if (window.trenchRadio) {

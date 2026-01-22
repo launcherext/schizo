@@ -138,6 +138,7 @@ export class TradingEngine {
   private jupiter?: JupiterClient; // Optional Jupiter client for graduated tokens
   private learningEngine?: LearningEngine; // Learning from trade outcomes
   private entryFeatures: Map<string, { features: TradeFeatures; confidence: number; entryPrice: number }> = new Map();
+  private priceCache: Map<string, { price: number; timestamp: number }> = new Map(); // Cache prices for 10s
 
   constructor(
     config: TradingConfig,
@@ -1499,26 +1500,39 @@ export class TradingEngine {
   /**
    * Get open positions with current prices and PnL
    * Fetches live prices from PumpPortal for each position
+   * Uses 10s price cache to avoid rate limits
    */
   async getOpenPositionsWithPrices(): Promise<OpenPosition[]> {
     const positions = await this.getOpenPositions();
     const positionsWithPrices: OpenPosition[] = [];
+    const now = Date.now();
+    const PRICE_CACHE_TTL = 10000; // 10 second cache
 
     for (const position of positions) {
       try {
-        // Get current price - try PumpPortal first, fallback to DexScreener for graduated tokens
+        // Check cache first
+        const cached = this.priceCache.get(position.tokenMint);
         let currentPrice: number;
-        try {
-          const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
-          currentPrice = tokenInfo.price;
-        } catch {
-          // Token may have graduated - try DexScreener
-          const dexData = await dexscreener.getRawPairs(position.tokenMint);
-          if (dexData && dexData.length > 0) {
-            currentPrice = parseFloat(dexData[0].priceNative || '0');
-          } else {
-            throw new Error('No price data available');
+
+        if (cached && now - cached.timestamp < PRICE_CACHE_TTL) {
+          currentPrice = cached.price;
+        } else {
+          // Get current price - try PumpPortal first, fallback to DexScreener for graduated tokens
+          try {
+            const tokenInfo = await this.pumpPortal.getTokenInfo(position.tokenMint);
+            currentPrice = tokenInfo.price;
+          } catch {
+            // Token may have graduated - try DexScreener
+            const dexData = await dexscreener.getRawPairs(position.tokenMint);
+            if (dexData && dexData.length > 0) {
+              currentPrice = parseFloat(dexData[0].priceNative || '0');
+            } else {
+              throw new Error('No price data available');
+            }
           }
+
+          // Cache the price
+          this.priceCache.set(position.tokenMint, { price: currentPrice, timestamp: now });
         }
 
         // Calculate P&L percentage
