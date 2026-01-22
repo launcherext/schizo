@@ -627,8 +627,15 @@ class TradingBot {
       return;
     }
 
+    // Extract buy pressure from entry evaluation for AI confidence calculation
+    // Use velocity metrics if available, otherwise fall back to pump metrics
+    let entryBuyPressure = pumpMetrics.buyPressure;
+    if (entryResult.metrics && 'buyPressure' in entryResult.metrics) {
+      entryBuyPressure = entryResult.metrics.buyPressure;
+    }
+
     // AI Decision
-    const decision = this.makeDecision(features, rugScore, pumpMetrics, mint);
+    const decision = this.makeDecision(features, rugScore, pumpMetrics, mint, entryBuyPressure);
     
     // Broadcast AI decision
     apiServer.getIO().emit('ai:decision', {
@@ -695,7 +702,8 @@ class TradingBot {
     features: StateVector,
     rugScore: RugScore,
     pumpMetrics: PumpMetrics,
-    mint?: string  // NEW: Pass mint for dynamic threshold lookup
+    mint?: string,  // NEW: Pass mint for dynamic threshold lookup
+    entryBuyPressure?: number  // NEW: Buy pressure from entry evaluation
   ): AIDecision {
     const stateArray = featureExtractor.toArray(features);
     const { action, qValues } = ddqnAgent.selectAction(stateArray);
@@ -703,10 +711,27 @@ class TradingBot {
     const regime = regimeDetector.getCurrentRegime().regime;
     const availableCapital = capitalAllocator.getAvailableCapital('active');
 
+    // Check if DDQN is in exploration mode (qValues all zeros)
+    const isExplorationMode = qValues.every(q => q === 0);
+
     // Adjust confidence based on signals
-    let confidence = Math.max(...qValues) - Math.min(...qValues);
-    confidence *= rugScore.total / 100;
-    confidence *= pumpMetrics.confidence;
+    let confidence: number;
+    if (isExplorationMode && entryBuyPressure !== undefined) {
+      // In exploration mode, use entry evaluation's buy pressure as confidence
+      // This allows trading based on real market signals while model learns
+      confidence = entryBuyPressure * (rugScore.total / 100);
+      logger.info({
+        mint: mint?.substring(0, 15),
+        entryBuyPressure: entryBuyPressure.toFixed(2),
+        rugScore: rugScore.total,
+        confidence: confidence.toFixed(2),
+      }, 'Using entry buy pressure as confidence (exploration mode)');
+    } else {
+      // Normal mode: use qValues spread as confidence
+      confidence = Math.max(...qValues) - Math.min(...qValues);
+      confidence *= rugScore.total / 100;
+      confidence *= pumpMetrics.confidence;
+    }
 
     // NEW: Get dynamic confidence threshold and momentum override
     let requiredConfidence = config.watchlist?.minConfidence || 0.55;
