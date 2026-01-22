@@ -45,11 +45,11 @@ export const TradeList: React.FC<TradeListProps> = ({ trades }) => {
                 </div>
                 <div className="trade-pnl">
                   <div className={`trade-pnl-value ${isProfit ? 'positive' : 'negative'}`}>
-                    {isProfit ? '+' : ''}{pnl.toFixed(3)} SOL
+                    {isProfit ? '+' : ''}{pnl.toFixed(4)} SOL
                   </div>
-                  {isProfit && (
-                    <div className="trade-pnl-percent">+{pnlPercent.toFixed(0)}%</div>
-                  )}
+                  <div className={`trade-pnl-percent ${isProfit ? 'positive' : 'negative'}`}>
+                    {isProfit ? '+' : ''}{pnlPercent.toFixed(1)}%
+                  </div>
                 </div>
               </div>
             );
