@@ -15,15 +15,27 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
   useEffect(() => {
     if (!decision) return;
 
-    // Map action to text
-    const actions = ['HOLD', 'BUY', 'SELL'];
-    const actionText = actions[decision.action];
-    
     // Map regime to text
-    const regimes = ['BULL MARKET', 'VOLATILE', 'CRASH DETECTED'];
+    const regimes = ['BULL', 'VOLATILE', 'CRASH'];
     const regimeText = regimes[decision.regime];
 
-    setStatusText(`${regimeText}: Considering ${actionText}`);
+    // Clearer action text - these are decisions about NEW tokens, not existing positions
+    let actionText: string;
+    switch (decision.action) {
+      case 0: // HOLD
+        actionText = `Watching`;
+        break;
+      case 1: // BUY
+        actionText = `Buying`;
+        break;
+      case 2: // SELL (means "pass on this token")
+        actionText = `Passing on`;
+        break;
+      default:
+        actionText = `Evaluating`;
+    }
+
+    setStatusText(`${regimeText}: ${actionText}`);
   }, [decision]);
 
   // Fallback animation if no decision yet
@@ -82,7 +94,7 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
 
         {/* Q-Value Visualization */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', height: '60px', alignItems: 'flex-end' }}>
-          {['HOLD', 'BUY', 'SELL'].map((label, i) => {
+          {['WATCH', 'BUY', 'PASS'].map((label, i) => {
             const val = qValues[i] || 0;
             const height = Math.abs(val) / maxQ * 100;
             const color = val > 0 ? 'var(--success)' : 'var(--error)';
