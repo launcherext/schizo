@@ -45,7 +45,22 @@ export const config = {
     highRisk: 0.20,   // 20% meme plays
   },
 
-  stopLossPercent: 0.12,      // -12% stop loss (was 50%)
+  stopLossPercent: 0.12,      // -12% stop loss for established tokens
+
+  // Age-based stop loss for new tokens (wider stop during initial volatility)
+  ageBasedStopLoss: {
+    enabled: true,
+    // For tokens < 60 seconds old: use wider stop
+    newTokenThresholdSeconds: 60,
+    newTokenStopLossPercent: 0.25,  // -25% for brand new tokens
+    // For tokens 60-180 seconds: gradual tightening
+    youngTokenThresholdSeconds: 180,
+    youngTokenStopLossPercent: 0.18, // -18% for young tokens
+    // After 180 seconds: use standard stop loss (0.12)
+  },
+
+  // Grace period: don't trigger stop loss for first X seconds
+  stopLossGracePeriodSeconds: 15,  // 15 second grace period
 
   // NEW Take Profit Strategy: recover initial at +50%, then scale out
   takeProfitStrategy: {

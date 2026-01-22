@@ -254,18 +254,40 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 1. STOP LOSS CHECK (-12%)
-    if (profitPercent <= -config.stopLossPercent) {
-      logger.warn({
-        positionId: position.id,
-        currentPrice,
-        entryPrice: position.entryPrice,
-        profitPercent: (profitPercent * 100).toFixed(2),
-        stopLossPercent: (config.stopLossPercent * 100).toFixed(0),
-      }, 'Stop loss triggered at -12%');
+    // 1. STOP LOSS CHECK (age-based for new tokens)
+    const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
 
-      await this.closePosition(position.id, 'stop_loss');
-      return;
+    // Grace period: don't trigger stop loss for first X seconds
+    if (positionAgeSeconds < config.stopLossGracePeriodSeconds) {
+      // Skip stop loss check during grace period
+    } else {
+      // Calculate age-based stop loss
+      let effectiveStopLoss = config.stopLossPercent; // Default 12%
+
+      if (config.ageBasedStopLoss.enabled) {
+        if (positionAgeSeconds < config.ageBasedStopLoss.newTokenThresholdSeconds) {
+          // Brand new token (<60s): use wide stop
+          effectiveStopLoss = config.ageBasedStopLoss.newTokenStopLossPercent;
+        } else if (positionAgeSeconds < config.ageBasedStopLoss.youngTokenThresholdSeconds) {
+          // Young token (60-180s): use medium stop
+          effectiveStopLoss = config.ageBasedStopLoss.youngTokenStopLossPercent;
+        }
+        // After 180s: use standard stop loss
+      }
+
+      if (profitPercent <= -effectiveStopLoss) {
+        logger.warn({
+          positionId: position.id,
+          currentPrice,
+          entryPrice: position.entryPrice,
+          profitPercent: (profitPercent * 100).toFixed(2),
+          stopLossPercent: (effectiveStopLoss * 100).toFixed(0),
+          positionAgeSeconds: positionAgeSeconds.toFixed(0),
+        }, `Stop loss triggered at -${(effectiveStopLoss * 100).toFixed(0)}%`);
+
+        await this.closePosition(position.id, 'stop_loss');
+        return;
+      }
     }
 
     // 2. TRAILING STOP CHECK (after any TP)
