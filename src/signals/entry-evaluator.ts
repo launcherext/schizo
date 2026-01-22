@@ -53,27 +53,6 @@ export class EntryEvaluator {
     }
 
     // Path 2: New token without price history → check velocity
-    // CRITICAL: First check token age - don't buy brand new tokens
-    const watchedToken = tokenWatchlist.getToken(mint);
-    const minAgeSeconds = config.watchlist?.minAgeSeconds || 180;
-
-    if (watchedToken) {
-      const ageSeconds = (Date.now() - watchedToken.firstSeen) / 1000;
-      if (ageSeconds < minAgeSeconds) {
-        logger.info({
-          mint: mint.substring(0, 12),
-          ageSeconds: ageSeconds.toFixed(0),
-          minAgeSeconds,
-        }, 'Token too young for velocity entry');
-
-        return {
-          canEnter: false,
-          source: 'none',
-          reason: `Token only ${ageSeconds.toFixed(0)}s old, need ${minAgeSeconds}s`,
-        };
-      }
-    }
-
     const velocityResult = velocityTracker.hasGoodVelocity(mint, marketCapSol);
 
     logger.info({
