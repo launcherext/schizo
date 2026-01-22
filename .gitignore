@@ -2,7 +2,7 @@ node_modules/
 dist/
 .env
 *.log
-data/
+/data/
 models/*.json
 !models/.gitkeep
 .DS_Store

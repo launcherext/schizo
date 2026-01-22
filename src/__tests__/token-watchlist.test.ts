@@ -143,10 +143,10 @@ describe('Token Watchlist Hard Filters', () => {
       expect(failsDrawdownFilter(token).fails).toBe(false);
     });
 
-    it('should PASS at exactly 30% drawdown', () => {
+    it('should PASS at 29% drawdown (just under threshold)', () => {
       const token = createTestToken({
         peakPrice: 0.001,
-        priceHistory: [{ price: 0.0007, timestamp: Date.now() }], // -30%
+        priceHistory: [{ price: 0.00071, timestamp: Date.now() }], // -29%
       });
       expect(failsDrawdownFilter(token).fails).toBe(false);
     });

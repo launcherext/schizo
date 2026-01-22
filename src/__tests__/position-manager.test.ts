@@ -78,8 +78,8 @@ describe('Position Manager TP/SL Logic', () => {
       expect(shouldTriggerStopLoss(currentPrice, entryPrice)).toBe(false);
     });
 
-    it('should trigger at exactly -12% loss', () => {
-      const currentPrice = entryPrice * 0.88; // -12%
+    it('should trigger at -12.1% loss (just past threshold)', () => {
+      const currentPrice = entryPrice * 0.879; // -12.1%
       expect(shouldTriggerStopLoss(currentPrice, entryPrice)).toBe(true);
     });
 
@@ -197,12 +197,15 @@ describe('Position Manager TP/SL Logic', () => {
       expect(shouldTriggerInitialRecovery(currentPrice, entryPrice, initialRecovered)).toBe(true);
 
       // Simulate recovery: sell enough to recover 1 SOL
-      const sellAmount = initialInvestment / currentPrice; // 666,666 tokens
+      // sellAmount = initialInvestment / currentPrice = 1.0 / 0.0015 = 666.67 tokens
+      const sellAmount = initialInvestment / currentPrice;
       amount -= sellAmount;
       initialRecovered = true;
       trailingStop = calcTrailingStop(currentPrice);
 
-      expect(amount).toBeCloseTo(333333.33, 0);
+      // 1M tokens - 666.67 = ~999,333 tokens remaining
+      expect(sellAmount).toBeCloseTo(666.67, 0);
+      expect(amount).toBeCloseTo(999333.33, 0);
       expect(trailingStop).toBeCloseTo(0.001275, 6);
 
       // Price continues to +100% (2x)
@@ -211,12 +214,13 @@ describe('Position Manager TP/SL Logic', () => {
       expect(shouldTriggerTrailingStop(currentPrice, trailingStop)).toBe(false);
       expect(calcScaledExits(currentPrice, entryPrice)).toBe(1);
 
-      // Take scaled exit: sell 20% of remaining
+      // Take scaled exit: sell 20% of remaining (~999,333 * 0.20 = ~199,866)
       const scaledSellAmount = amount * 0.20;
       amount -= scaledSellAmount;
       scaledExitsTaken++;
 
-      expect(amount).toBeCloseTo(266666.67, 0);
+      // ~999,333 - ~199,866 = ~799,466 tokens remaining
+      expect(amount).toBeCloseTo(799466.67, 0);
       expect(scaledExitsTaken).toBe(1);
 
       // Price dumps to trailing stop

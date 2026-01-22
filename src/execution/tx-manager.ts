@@ -193,6 +193,7 @@ export class TransactionManager extends EventEmitter {
           fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
           error: 'No tokens to sell - zero balance',
           timestamp: new Date(),
+          actualBalance: 0,  // Tell position-manager the real balance
         };
       }
     }

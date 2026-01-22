@@ -221,6 +221,34 @@ export class PositionManager extends EventEmitter {
     const currentPrice = position.currentPrice;
     const profitPercent = (currentPrice - position.entryPrice) / position.entryPrice;
 
+    // GUARD: Skip if profit percent is invalid (entry price = 0, or other corruption)
+    if (!isFinite(profitPercent) || isNaN(profitPercent)) {
+      logger.error({
+        positionId: position.id,
+        entryPrice: position.entryPrice,
+        currentPrice,
+        profitPercent,
+      }, 'Invalid profit percent (possible corrupted position) - closing position');
+
+      // Close the corrupted position
+      await this.closePosition(position.id, 'manual');
+      return;
+    }
+
+    // GUARD: Skip if position has no tokens left
+    if (position.amount <= 0) {
+      logger.warn({
+        positionId: position.id,
+        amount: position.amount,
+      }, 'Position has no tokens - closing');
+
+      // Mark as closed without trying to sell
+      position.status = 'closed';
+      await this.persistPosition(position);
+      this.positions.delete(position.id);
+      return;
+    }
+
     // 1. STOP LOSS CHECK (-12%)
     if (profitPercent <= -config.stopLossPercent) {
       logger.warn({
@@ -263,11 +291,14 @@ export class PositionManager extends EventEmitter {
         currentValue,
       }, 'Initial recovery: selling to recover initial investment at +50%');
 
-      await this.partialCloseNewStrategy(position, sellAmount, 'initial_recovery');
-      position.initialRecovered = true;
-      position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+      const success = await this.partialCloseNewStrategy(position, sellAmount, 'initial_recovery');
 
-      await this.persistPosition(position);
+      // ONLY mark as recovered and set trailing stop on successful sell
+      if (success) {
+        position.initialRecovered = true;
+        position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+        await this.persistPosition(position);
+      }
       return;
     }
 
@@ -287,11 +318,14 @@ export class PositionManager extends EventEmitter {
           sellAmount,
         }, 'Scaled exit: selling 20% of remaining at +50% interval');
 
-        await this.partialCloseNewStrategy(position, sellAmount, 'scaled_exit');
-        position.scaledExitsTaken++;
-        position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+        const success = await this.partialCloseNewStrategy(position, sellAmount, 'scaled_exit');
 
-        await this.persistPosition(position);
+        // ONLY increment counter and update trailing stop on successful sell
+        if (success) {
+          position.scaledExitsTaken++;
+          position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+          await this.persistPosition(position);
+        }
       }
     }
 
@@ -328,11 +362,22 @@ export class PositionManager extends EventEmitter {
   }
 
   // NEW: Partial close for new TP strategy (absolute amount instead of percent)
+  // Returns true on success, false on failure
   private async partialCloseNewStrategy(
     position: Position,
     sellAmount: number,
     reason: 'initial_recovery' | 'scaled_exit'
-  ): Promise<void> {
+  ): Promise<boolean> {
+    // Guard: Don't try to sell if amount is too small
+    if (position.amount <= 0 || sellAmount <= 0) {
+      logger.warn({
+        positionId: position.id,
+        amount: position.amount,
+        sellAmount,
+      }, 'Cannot sell - position amount is zero or negative');
+      return false;
+    }
+
     // Ensure we don't sell more than we have
     const actualSellAmount = Math.min(sellAmount, position.amount * 0.99);
 
@@ -378,12 +423,35 @@ export class PositionManager extends EventEmitter {
         pnlSol: pnlSol.toFixed(6),
         totalRealizedPnl: position.realizedPnl.toFixed(6),
       }, 'Partial close executed (new strategy)');
+      return true;
     } else {
       logger.error({
         positionId: position.id,
         reason,
         error: result.error,
       }, 'Partial close failed (new strategy)');
+
+      // SYNC: If tx-manager reports actual balance, update our position
+      if (result.actualBalance !== undefined && result.actualBalance !== position.amount) {
+        logger.warn({
+          positionId: position.id,
+          previousAmount: position.amount,
+          actualBalance: result.actualBalance,
+        }, 'Syncing position amount with actual on-chain balance (manual sell detected?)');
+
+        position.amount = result.actualBalance;
+        await this.persistPosition(position);
+
+        // If balance is now 0, close the position
+        if (position.amount <= 0) {
+          logger.info({ positionId: position.id }, 'Position has no tokens after sync - marking as closed');
+          position.status = 'closed';
+          await this.persistPosition(position);
+          this.positions.delete(position.id);
+        }
+      }
+
+      return false;
     }
   }
 

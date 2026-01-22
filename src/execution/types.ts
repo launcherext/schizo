@@ -36,6 +36,7 @@ export interface SwapResult {
   fees: SwapFees;
   error?: string;
   timestamp: Date;
+  actualBalance?: number;  // Actual on-chain balance (for detecting manual sells)
 }
 
 export interface JitoBundleResult {
