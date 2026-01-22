@@ -18,7 +18,7 @@ export const config = {
   initialCapitalSol: parseFloat(process.env.INITIAL_CAPITAL_SOL || '1.0'),
   maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.10'),  // 10% of capital max (allows small balances to trade)
   dailyLossLimit: parseFloat(process.env.DAILY_LOSS_LIMIT || '0.15'),
-  maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '5'),
+  maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '3'),  // Default to 3
 
   // Jito MEV Protection
   jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL || 'https://mainnet.block-engine.jito.wtf',

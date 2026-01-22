@@ -85,6 +85,10 @@ export class CapitalAllocator {
     // Check position count limit
     const currentPositions = positionManager.getPositionCount();
     if (currentPositions >= this.limits.maxConcurrentPositions) {
+      logger.info({
+        currentPositions,
+        maxPositions: this.limits.maxConcurrentPositions,
+      }, 'BLOCKED: Max concurrent positions reached');
       return {
         approved: false,
         reason: `Max positions (${this.limits.maxConcurrentPositions}) reached`,
