@@ -112,7 +112,7 @@ export const config = {
     enabled: false,          // DISABLED: AI decides entry, not velocity
     minTxCount: 5,           // Lowered from 10 - tokens evaluated quickly after creation
     minUniqueBuyers: 3,      // Lowered from 5 - need at least 3 different wallets
-    minBuyPressure: 0.70,    // 70% buys - slightly more permissive
+    minBuyPressure: 0.50,    // 50% buys - lowered for testing
     maxMarketCapSol: 60,     // Increased - tokens with traction often hit 40-50 SOL quickly
   },
 

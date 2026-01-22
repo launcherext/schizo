@@ -6,6 +6,7 @@ import { tokenWatchlist, pumpDetector } from '../signals';
 import { ddqnAgent, regimeDetector, positionSizer } from '../ai';
 import { config } from '../config/settings';
 import { walletSync, equityTracker, positionReconciler } from '../services';
+import { txManager } from '../execution/tx-manager';
 
 const logger = createChildLogger('api-routes');
 
@@ -543,6 +544,85 @@ export function setupRoutes(app: Express): void {
     } catch (error) {
       logger.error({ error }, 'Failed to get realtime positions');
       res.status(500).json({ error: 'Failed to get realtime positions' });
+    }
+  });
+
+  // Manual test buy endpoint
+  app.post('/api/test/buy', async (req: Request, res: Response) => {
+    try {
+      const { mint, amountSol = 0.01 } = req.body;
+
+      if (!mint) {
+        return res.status(400).json({ error: 'mint is required' });
+      }
+
+      logger.info({ mint, amountSol }, 'Manual test buy requested');
+
+      // Execute the buy
+      const result = await txManager.executeBuy(mint, amountSol, {
+        slippageBps: config.defaultSlippageBps,
+        maxRetries: 3,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          error: result.error,
+          mint,
+          amountSol,
+        });
+      }
+
+      // Wait for tx to settle and check balance
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const actualBalance = await txManager.getTokenBalance(mint);
+
+      // Create position if we got tokens
+      if (actualBalance > 0) {
+        const entryPrice = amountSol / actualBalance;
+        const position = await positionManager.openPosition({
+          mint,
+          symbol: mint.slice(0, 8),
+          entryPrice,
+          amount: actualBalance,
+          amountSol,
+          poolType: 'active',
+        });
+
+        await tradeLogger.logEntry({
+          positionId: position.id,
+          mint,
+          symbol: mint.slice(0, 8),
+          entryPrice,
+          amount: actualBalance,
+          amountSol,
+          features: {} as any,
+          regime: 0,
+          pumpPhase: 'cold',
+        });
+
+        return res.json({
+          success: true,
+          positionId: position.id,
+          mint,
+          amountSol,
+          tokensReceived: actualBalance,
+          entryPrice,
+          signature: result.signature,
+        });
+      } else {
+        return res.json({
+          success: false,
+          error: 'Buy tx succeeded but no tokens received',
+          mint,
+          amountSol,
+          signature: result.signature,
+          actualBalance,
+        });
+      }
+    } catch (error: any) {
+      logger.error({ error }, 'Manual test buy failed');
+      res.status(500).json({ error: error.message });
     }
   });
 

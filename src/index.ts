@@ -780,18 +780,31 @@ class TradingBot {
       return;
     }
 
-    // Calculate actual price and amount from swap result
-    // PumpPortal doesn't return outputAmount, so estimate from price
-    let amountTokens = result.outputAmount;
-    let actualPrice = currentPrice;
+    // CRITICAL: Verify actual token balance before creating position
+    // This prevents phantom positions when buy tx fails silently
+    await this.sleep(2000); // Wait for tx to settle
+    const actualBalance = await txManager.getTokenBalance(mint);
 
-    if (amountTokens === 0 && currentPrice > 0) {
-      // Estimate tokens received based on input and price
-      amountTokens = sizeSol / currentPrice;
-      logger.debug({ sizeSol, currentPrice, estimatedTokens: amountTokens }, 'Estimated tokens from price');
-    } else if (amountTokens > 0) {
-      actualPrice = sizeSol / amountTokens;
+    if (actualBalance <= 0) {
+      logger.error({
+        mint,
+        signature: result.signature,
+        expectedTokens: result.outputAmount || 'unknown',
+        actualBalance
+      }, 'Buy tx succeeded but no tokens received - NOT creating position');
+      priceFeed.removeFromWatchList(mint);
+      return;
     }
+
+    // Use actual balance instead of estimate
+    let amountTokens = actualBalance;
+    let actualPrice = sizeSol / amountTokens;
+
+    logger.info({
+      mint,
+      actualBalance,
+      calculatedPrice: actualPrice
+    }, 'Verified token balance after buy');
 
     // Open position
     const position = await positionManager.openPosition({
@@ -922,6 +935,10 @@ class TradingBot {
       training: modelTrainer.getTrainingStatus(),
       performance: performanceAnalytics.formatMetrics(metrics),
     };
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
