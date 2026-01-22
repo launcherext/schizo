@@ -1742,8 +1742,28 @@ export class TradingEngine {
       if (position.currentPrice && position.entryPrice) {
         const currentValue = position.entryAmountTokens * position.currentPrice;
         const entryCost = position.entryAmountSol;
-        unrealizedPnL += currentValue - entryCost;
+        const positionPnL = currentValue - entryCost;
+
+        // Log individual position P&L for debugging large values
+        if (Math.abs(positionPnL) > 1) {
+          logger.info({
+            symbol: position.tokenSymbol,
+            mint: position.tokenMint,
+            tokens: position.entryAmountTokens,
+            entryPrice: position.entryPrice,
+            currentPrice: position.currentPrice,
+            entryCost,
+            currentValue,
+            positionPnL,
+          }, 'Large position P&L detected');
+        }
+
+        unrealizedPnL += positionPnL;
       }
+    }
+
+    if (Math.abs(unrealizedPnL) > 10) {
+      logger.warn({ unrealizedPnL, positionCount: positions.length }, 'Unusually large unrealized P&L');
     }
 
     return unrealizedPnL;

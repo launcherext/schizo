@@ -99,8 +99,9 @@ async function main(): Promise<void> {
     }
     const helius = new HeliusClient({ apiKey: heliusApiKey } as any);
 
-    // Initialize Solana connection
-    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    // Use Helius RPC for reliable connection (public RPC has heavy rate limits)
+    const connection = helius.getConnection();
+    log.info('Using Helius RPC for Solana connection');
 
     // Load Risk Profile early for safety analyzer configuration
     const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;

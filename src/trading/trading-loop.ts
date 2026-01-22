@@ -780,17 +780,26 @@ export class TradingLoop {
         type: 'POSITIONS_UPDATE',
         timestamp: Date.now(),
         data: {
-          positions: positions.map(p => ({
-            tokenMint: p.tokenMint,
-            tokenSymbol: p.tokenSymbol,
-            tokenName: p.tokenName,
-            entryAmountSol: p.entryAmountSol,
-            entryAmountTokens: p.entryAmountTokens,
-            entryPrice: p.entryPrice,
-            entryTimestamp: p.entryTimestamp,
-            currentPrice: p.currentPrice,
-            unrealizedPnLPercent: p.unrealizedPnLPercent,
-          })),
+          positions: positions.map(p => {
+            // Calculate unrealized P&L in SOL for this position
+            let unrealizedPnLSol = 0;
+            if (p.currentPrice && p.entryPrice) {
+              const currentValue = p.entryAmountTokens * p.currentPrice;
+              unrealizedPnLSol = currentValue - p.entryAmountSol;
+            }
+            return {
+              tokenMint: p.tokenMint,
+              tokenSymbol: p.tokenSymbol,
+              tokenName: p.tokenName,
+              entryAmountSol: p.entryAmountSol,
+              entryAmountTokens: p.entryAmountTokens,
+              entryPrice: p.entryPrice,
+              entryTimestamp: p.entryTimestamp,
+              currentPrice: p.currentPrice,
+              unrealizedPnLPercent: p.unrealizedPnLPercent,
+              unrealizedPnLSol, // NEW: actual SOL P&L for debugging
+            };
+          }),
         },
       });
     } catch (error) {

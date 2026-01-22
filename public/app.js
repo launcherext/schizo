@@ -897,8 +897,10 @@ function updateHoldings(positions) {
         // Use name if available, otherwise show CA
         const name = pos.tokenName || formatMint(pos.tokenMint);
         const pnlPercent = pos.unrealizedPnLPercent || 0;
+        const pnlSol = pos.unrealizedPnLSol || 0; // NEW: P&L in SOL
         const pnlClass = pnlPercent >= 0 ? 'profit' : 'loss';
         const pnlSign = pnlPercent >= 0 ? '+' : '';
+        const solSign = pnlSol >= 0 ? '+' : '';
         const entryAge = getTimeAgo(pos.entryTimestamp);
 
         // Show actual token image if available, otherwise fallback to $ icon
@@ -918,7 +920,7 @@ function updateHoldings(positions) {
             </div>
             <div class="holding-right">
                 <span class="holding-value">${pos.entryAmountSol.toFixed(3)} SOL</span>
-                <span class="holding-pnl ${pnlClass}">${pnlSign}${pnlPercent.toFixed(1)}%</span>
+                <span class="holding-pnl ${pnlClass}">${pnlSign}${pnlPercent.toFixed(1)}% (${solSign}${pnlSol.toFixed(3)})</span>
                 <span class="holding-entry">Entry: ${entryAge}</span>
             </div>
         `;
