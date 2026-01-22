@@ -134,22 +134,25 @@ export const config = {
     maxMarketCapSol: 100,    // Allow slightly larger caps for tokens with real traction
   },
 
-  // Token Watchlist - AI-driven entry (NEW)
+  // Token Watchlist - AI-driven entry (TIGHTENED to reduce losses)
   watchlist: {
-    minDataPoints: 10,       // Need 10+ price updates before AI can analyze
-    minAgeSeconds: 180,      // 3 MINUTES: token must survive initial dump period
-    minConfidence: 0.55,     // LOWERED: Base confidence (dynamic scaling adds more)
-    maxConfidence: 0.70,     // NEW: Max confidence threshold for older tokens
-    maxDrawdown: 0.30,       // Hard reject if crashed >30% from peak
+    minDataPoints: 15,       // Need 15+ price updates before AI can analyze
+    minAgeSeconds: 300,      // 5 MINUTES: token must survive initial pump/dump cycle
+    minConfidence: 0.65,     // RAISED: Require stronger AI confidence
+    maxConfidence: 0.80,     // RAISED: Higher bar for older tokens
+    maxDrawdown: 0.15,       // TIGHTENED: Hard reject if crashed >15% from peak (avoid dead tokens)
+    minMarketCapSol: 50,     // NEW: Minimum 50 SOL market cap (skip ultra micro tokens)
+    minUniqueTraders: 10,    // NEW: Minimum 10 unique traders (real activity filter)
+    requireUptrend: true,    // NEW: Price must be above entry compared to 1 minute ago
   },
 
-  // Momentum Override - bypass lower confidence if signals are strong
+  // Momentum Override - bypass lower confidence if signals are VERY strong
   momentumOverride: {
     enabled: true,
-    minBuyPressure: 0.75,           // 75%+ buys
-    minVolumeAcceleration: 1.2,     // Volume 20%+ higher than previous window
-    minUniqueTraderGrowth: 3,       // At least 3 new unique traders
-    confidenceFloor: 0.45,          // Allow entries at 45% confidence if momentum strong
+    minBuyPressure: 0.80,           // RAISED: 80%+ buys required
+    minVolumeAcceleration: 1.5,     // RAISED: Volume 50%+ higher than previous window
+    minUniqueTraderGrowth: 5,       // RAISED: At least 5 new unique traders
+    confidenceFloor: 0.55,          // RAISED: Even with momentum, need 55% confidence
   },
 
   // Dev Sold Tracking - percentage-based instead of binary

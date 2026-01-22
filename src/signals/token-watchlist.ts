@@ -233,8 +233,8 @@ export class TokenWatchlist extends EventEmitter {
       };
     }
 
-    // NEW: INSTANT REJECT: Token too young (need time-based validity)
-    const minAgeSeconds = config.watchlist?.minAgeSeconds || 60;
+    // INSTANT REJECT: Token too young (need time-based validity)
+    const minAgeSeconds = config.watchlist?.minAgeSeconds || 300;
     const ageSeconds = (Date.now() - token.firstSeen) / 1000;
     if (ageSeconds < minAgeSeconds) {
       return {
@@ -244,7 +244,7 @@ export class TokenWatchlist extends EventEmitter {
     }
 
     // INSTANT REJECT: Crashed more than maxDrawdown from peak
-    const maxDrawdown = config.watchlist?.maxDrawdown || 0.30;
+    const maxDrawdown = config.watchlist?.maxDrawdown || 0.15;
     if (token.peakPrice > 0) {
       const currentPrice = token.priceHistory[token.priceHistory.length - 1]?.price || 0;
       const drawdown = (token.peakPrice - currentPrice) / token.peakPrice;
@@ -252,6 +252,41 @@ export class TokenWatchlist extends EventEmitter {
         return {
           passes: false,
           reason: `Crashed ${(drawdown * 100).toFixed(0)}% from peak (max ${(maxDrawdown * 100).toFixed(0)}%)`
+        };
+      }
+    }
+
+    // NEW: INSTANT REJECT: Market cap too low
+    const minMarketCapSol = (config.watchlist as any)?.minMarketCapSol || 50;
+    const latestPrice = token.priceHistory[token.priceHistory.length - 1];
+    if (latestPrice && latestPrice.marketCap < minMarketCapSol) {
+      return {
+        passes: false,
+        reason: `Market cap ${latestPrice.marketCap.toFixed(1)} SOL (min ${minMarketCapSol} SOL)`
+      };
+    }
+
+    // NEW: INSTANT REJECT: Not enough unique traders (filter wash trading)
+    const minUniqueTraders = (config.watchlist as any)?.minUniqueTraders || 10;
+    const uniqueTraders = new Set(token.trades.map(t => t.traderPublicKey)).size;
+    if (uniqueTraders < minUniqueTraders) {
+      return {
+        passes: false,
+        reason: `Only ${uniqueTraders} unique traders (min ${minUniqueTraders})`
+      };
+    }
+
+    // NEW: INSTANT REJECT: Price not in uptrend (comparing to 1 minute ago)
+    const requireUptrend = (config.watchlist as any)?.requireUptrend !== false;
+    if (requireUptrend && token.priceHistory.length >= 60) {
+      const currentPrice = token.priceHistory[token.priceHistory.length - 1]?.price || 0;
+      const priceOneMinAgo = token.priceHistory[token.priceHistory.length - 60]?.price || currentPrice;
+      // Require at least flat or positive (allow -2% tolerance)
+      if (priceOneMinAgo > 0 && currentPrice < priceOneMinAgo * 0.98) {
+        const trend = ((currentPrice - priceOneMinAgo) / priceOneMinAgo * 100).toFixed(1);
+        return {
+          passes: false,
+          reason: `Price in downtrend (${trend}% in last 60s)`
         };
       }
     }
