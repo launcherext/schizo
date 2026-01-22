@@ -89,6 +89,10 @@ function handleEvent(event) {
       const emoji = stageEmojis[event.data.stage] || '🤔';
       const label = stageLabels[event.data.stage] || 'ANALYSIS';
       addToFeed(`${emoji} [${label}] ${event.data.symbol}: "${event.data.thought}"`, `analysis-${event.data.stage}`, event.data.mint);
+      // Also add to analysis stream for scanning stage
+      if (event.data.stage === 'scanning') {
+        addToAnalysisStream(event.data);
+      }
       break;
     case 'SAFETY_CHECK':
       // Silent - ANALYSIS_THOUGHT handles the voiced commentary
@@ -182,12 +186,6 @@ function handleEvent(event) {
     case 'VOICE_AUDIO':
       playVoiceAudio(event.data);
       break;
-    case 'ANALYSIS_THOUGHT':
-      // Only show tokens entering analysis (scanning stage)
-      if (event.data.stage === 'scanning') {
-        addToAnalysisStream(event.data);
-      }
-      break;
     case 'TOKEN_COMMENTARY':
       // Claude's random commentary on tokens (voice only, but show in stream)
       highlightTokenCommentary(event.data.mint, event.data.commentary);
@@ -262,6 +260,12 @@ function addToAnalysisStream(token) {
   // Limit to 15 items (fewer since they have more content)
   while (container.children.length > 15) {
     container.removeChild(container.lastChild);
+  }
+
+  // Update analyzing count
+  const countEl = document.getElementById('analyzing-count');
+  if (countEl) {
+    countEl.textContent = `(${container.children.length})`;
   }
 
   // Flash effect for new token

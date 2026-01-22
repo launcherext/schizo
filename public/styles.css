@@ -858,12 +858,16 @@ button:active {
 
 /* Token Stream Content Area */
 #token-stream {
+    display: none;
     flex: 1;
     overflow-y: auto;
     padding: 15px;
-    display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+#token-stream.active {
+    display: flex;
 }
 
 .event {

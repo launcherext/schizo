@@ -1460,13 +1460,13 @@ export class TradingEngine {
           logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'RPC fallback returned tokens');
         } catch (rpcError) {
           logger.error({ error: rpcError }, 'RPC fallback also failed');
-          // Use stale cache if available
-          if (this.walletCache) {
-            logger.warn({ age: now - this.walletCache.timestamp }, 'Using stale wallet cache');
+          // Use stale cache if available (up to 5 minutes old during rate limits)
+          if (this.walletCache && now - this.walletCache.timestamp < 300000) {
+            logger.warn({ age: Math.floor((now - this.walletCache.timestamp) / 1000) + 's' }, 'Using stale wallet cache due to API failures');
             walletTokens = this.walletCache.tokens;
           } else {
             // Final fallback: Use database to reconstruct positions
-            logger.warn('No wallet data available - using database fallback');
+            logger.warn('No wallet data available and cache too old - using database fallback');
             return this.getPositionsFromDatabase();
           }
         }
@@ -1578,77 +1578,99 @@ export class TradingEngine {
 
   /**
    * Fallback: Get positions from database when wallet APIs are down
-   * Reconstructs positions from trade history (buys - sells)
+   * Reconstructs positions from trade history using Weighted Average Cost Basis
    */
   private getPositionsFromDatabase(): OpenPosition[] {
     const DUST_THRESHOLD_SOL = 0.0005;
     const allTrades = this.db.trades.getRecent(1000);
-    const positions = new Map<string, {
-      tokenMint: string;
-      tokenSymbol?: string;
-      tokenName?: string;
-      tokenImage?: string;
-      totalSolSpent: number;
-      totalTokensBought: number;
-      totalSolReceived: number;
-      totalTokensSold: number;
-      earliestBuyTimestamp: number;
-    }>();
-
-    // Aggregate trades by token
+    
+    // 1. Group trades by token
+    const tradesByToken = new Map<string, typeof allTrades>();
+    const tokenMetadata = new Map<string, { symbol?: string; name?: string; image?: string }>();
+    
     for (const trade of allTrades) {
       if (trade.metadata?.isBuyback) continue;
+      
+      const list = tradesByToken.get(trade.tokenMint) || [];
+      list.push(trade);
+      tradesByToken.set(trade.tokenMint, list);
+      
+      // Capture metadata if missing
+      if (!tokenMetadata.has(trade.tokenMint) && (trade.tokenSymbol || trade.metadata?.tokenName)) {
+        tokenMetadata.set(trade.tokenMint, {
+          symbol: trade.tokenSymbol,
+          name: trade.metadata?.tokenName as string | undefined,
+          image: trade.metadata?.tokenImage as string | undefined,
+        });
+      }
+    }
 
-      const current = positions.get(trade.tokenMint) || {
-        tokenMint: trade.tokenMint,
-        tokenSymbol: trade.tokenSymbol,
-        tokenName: trade.metadata?.tokenName as string | undefined,
-        tokenImage: trade.metadata?.tokenImage as string | undefined,
-        totalSolSpent: 0,
-        totalTokensBought: 0,
-        totalSolReceived: 0,
-        totalTokensSold: 0,
-        earliestBuyTimestamp: Infinity,
-      };
+    const openPositions: OpenPosition[] = [];
 
-      if (trade.type === 'BUY') {
-        current.totalSolSpent += trade.amountSol;
-        current.totalTokensBought += trade.amountTokens;
-        if (trade.timestamp < current.earliestBuyTimestamp) {
-          current.earliestBuyTimestamp = trade.timestamp;
+    // 2. Process each token chronologically
+    for (const [mint, trades] of tradesByToken) {
+      // Sort oldest first
+      trades.sort((a: any, b: any) => a.timestamp - b.timestamp);
+      
+      let currentTokens = 0;
+      let currentCostBasis = 0; // Total SOL spent on *current* holdings
+      let earliestBuyTimestamp = Infinity;
+
+      for (const trade of trades) {
+        if (trade.type === 'BUY') {
+          // If starting a new position (from zero/dust), reset timestamp
+          if (currentTokens <= 0.000001) {
+            earliestBuyTimestamp = trade.timestamp;
+          }
+          currentTokens += trade.amountTokens;
+          currentCostBasis += trade.amountSol;
+        } else if (trade.type === 'SELL') {
+           if (currentTokens > 0) {
+             // WACB: Reduce cost basis proportionally to preserve average entry price
+             // CostRemoved = (AmountSold / CurrentTokens) * CurrentCostBasis
+             const costRemoved = (trade.amountTokens / currentTokens) * currentCostBasis;
+             currentCostBasis -= costRemoved;
+             currentTokens -= trade.amountTokens;
+           }
         }
-      } else if (trade.type === 'SELL') {
-        current.totalSolReceived += trade.amountSol;
-        current.totalTokensSold += trade.amountTokens;
+        
+        // Safety reset for dust/negatives
+        if (currentTokens <= 0.000001) {
+          currentTokens = 0;
+          currentCostBasis = 0;
+          earliestBuyTimestamp = Infinity;
+        }
       }
 
-      positions.set(trade.tokenMint, current);
+      // Check if we have an open position
+      if (currentTokens > 0) {
+         // Calculate entry price from remaining cost basis
+         const entryPrice = currentCostBasis / currentTokens;
+         
+         if (currentCostBasis >= DUST_THRESHOLD_SOL) {
+             const meta = tokenMetadata.get(mint);
+             openPositions.push({
+               tokenMint: mint,
+               tokenSymbol: meta?.symbol,
+               tokenName: meta?.name,
+               tokenImage: meta?.image,
+               entryAmountSol: currentCostBasis,
+               entryAmountTokens: currentTokens,
+               entryPrice: entryPrice,
+               entryTimestamp: earliestBuyTimestamp,
+             });
+             logger.debug({
+               mint,
+               symbol: meta?.symbol,
+               currentTokens,
+               currentCostBasis,
+               entryPrice,
+             }, 'DB position reconstructed');
+         }
+      }
     }
 
-    // Filter to positions with net positive token holdings
-    const openPositions: OpenPosition[] = [];
-    for (const [, pos] of positions) {
-      const netTokens = pos.totalTokensBought - pos.totalTokensSold;
-      if (netTokens <= 0) continue;
-
-      const entryPrice = pos.totalSolSpent / pos.totalTokensBought;
-      const entrySol = (netTokens / pos.totalTokensBought) * pos.totalSolSpent;
-
-      if (entrySol < DUST_THRESHOLD_SOL) continue;
-
-      openPositions.push({
-        tokenMint: pos.tokenMint,
-        tokenSymbol: pos.tokenSymbol,
-        tokenName: pos.tokenName,
-        tokenImage: pos.tokenImage,
-        entryAmountSol: entrySol,
-        entryAmountTokens: netTokens,
-        entryPrice,
-        entryTimestamp: pos.earliestBuyTimestamp,
-      });
-    }
-
-    logger.info({ positionCount: openPositions.length }, 'Open positions loaded from database (API fallback)');
+    logger.info({ positionCount: openPositions.length }, 'Open positions reconstructed from database (WACB)');
     return openPositions;
   }
 
