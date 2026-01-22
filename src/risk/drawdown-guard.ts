@@ -220,7 +220,8 @@ export class DrawdownGuard extends EventEmitter {
   }
 
   canTrade(): boolean {
-    return !this.state.isPaused;
+    // Drawdown guard disabled - always allow trading
+    return true;
   }
 
   getState(): DrawdownState {
