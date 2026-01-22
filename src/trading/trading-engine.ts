@@ -614,18 +614,23 @@ export class TradingEngine {
       marketCapSol: tokenMetadata?.marketCapSol 
     }, '🎯 TRADE ATTEMPT STARTED');
 
-    // CRITICAL: Prevent duplicate buys - check if we already hold this token
-    const openPositions = await this.getOpenPositions();
-    const existingPosition = openPositions.find(p => p.tokenMint === mint);
-    if (existingPosition) {
+    // CRITICAL: Prevent duplicate buys - check database for recent BUY without matching SELL
+    const recentTrades = this.db.trades.getRecent(100);
+    const tokenTrades = recentTrades.filter(t => t.tokenMint === mint && !t.metadata?.isBuyback);
+    const totalBought = tokenTrades.filter(t => t.type === 'BUY').reduce((sum, t) => sum + t.amountTokens, 0);
+    const totalSold = tokenTrades.filter(t => t.type === 'SELL').reduce((sum, t) => sum + t.amountTokens, 0);
+    const netHolding = totalBought - totalSold;
+    
+    if (netHolding > 0) {
       logger.error({
         mint,
-        symbol: existingPosition.tokenSymbol,
-        existingAmountSol: existingPosition.entryAmountSol,
-      }, '🚫 TRADE BLOCKED: Already holding this token - duplicate buy prevented');
+        netHolding,
+        totalBought,
+        totalSold,
+      }, '🚫 TRADE BLOCKED: Already holding this token (from DB) - duplicate buy prevented');
       return null;
     } else {
-      logger.info({ mint, openPositionsCount: openPositions.length }, '✅ No existing position - proceeding');
+      logger.info({ mint, netHolding }, '✅ No existing position (from DB) - proceeding');
     }
 
     // HARD BLOCK: Pump.fun Mayhem Mode tokens (2 billion supply)
