@@ -63,20 +63,13 @@ async function main(): Promise<void> {
     // These positions show in DB but wallet has 0 tokens - causing incorrect P&L
     const phantomMints = [
       'G9tnG6Z4KDrNepi2fYQUZYEhuBtfwg6TwbzekxWMpump', // doge
-      'C4br6g4C', // HonorPump (partial mint)
-      'DPypP1iY', // FaPEPE
-      '9R4zqfea', // RyanAir
-      'VTCQxY6b', // CITY
-      'DRtvTCzf', // ChiefPussy
-      '96zMCM9n', // HUGGI
-      'HKWqwDuU', // XEPE
-      'X8vikGpF', // LAUDE
+      'C4br6g4CBAP2grzc2sUrU9wUN7eJGZZpePCN1yjapump', // HonorPump (full mint from logs)
     ];
     let totalPhantomDeleted = 0;
     for (const mint of phantomMints) {
-      // Use LIKE for partial mints
+      // Use LIKE for partial mints (dbWithRepos extends Database.Database)
       const deleted = mint.length < 20
-        ? dbWithRepos.db.prepare("DELETE FROM trades WHERE token_mint LIKE ?").run(`${mint}%`).changes
+        ? dbWithRepos.prepare("DELETE FROM trades WHERE token_mint LIKE ?").run(`${mint}%`).changes
         : dbWithRepos.trades.deleteByTokenMint(mint);
       if (deleted > 0) {
         log.info({ mint, deleted }, 'Cleaned up phantom position');
@@ -238,20 +231,23 @@ async function main(): Promise<void> {
     // Initialize PumpPortal client (requires wallet)
     let pumpPortal: PumpPortalClient | undefined;
     const pumpPortalApiKey = process.env.PUMPPORTAL_API_KEY; // Optional for local trading
-    
+
     if (wallet) {
       pumpPortal = new PumpPortalClient({
         apiKey: pumpPortalApiKey, // Can be undefined
         baseUrl: process.env.PUMPPORTAL_BASE_URL || 'https://pumpportal.fun/api',
-        rpcUrl: 'https://api.mainnet-beta.solana.com', // Add default RPC
+        rpcUrl: connection.rpcEndpoint, // Use Helius RPC for reliability
         maxRetries: 5,
         retryDelayMs: 2000,
-      } as any, wallet!); // Cast to any to bypass strict config check if types outdated
-      
-      log.info({ 
-        hasApiKey: !!pumpPortalApiKey, 
-        wallet: wallet.publicKey.toBase58() 
-      }, 'PumpPortal client initialized (Local Trading)');
+        heliusApiKey: heliusApiKey, // Enable smart transactions with Jito tips
+        enableSmartTx: true,
+      }, wallet);
+
+      log.info({
+        hasApiKey: !!pumpPortalApiKey,
+        wallet: wallet.publicKey.toBase58(),
+        smartTxEnabled: true,
+      }, 'PumpPortal client initialized with Helius smart transactions');
     } else {
       log.warn('Wallet not configured - Trading Engine disabled');
     }
@@ -263,8 +259,10 @@ async function main(): Promise<void> {
         jupiter = new JupiterClient({
           connection,
           wallet,
+          heliusApiKey: heliusApiKey, // Enable smart transactions
+          enableSmartTx: true,
         });
-        log.info('Jupiter client initialized (for graduated tokens)');
+        log.info('Jupiter client initialized with smart transactions');
       } catch (error) {
         log.warn({ error }, 'Failed to initialize Jupiter client');
       }

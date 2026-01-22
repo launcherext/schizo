@@ -8,11 +8,55 @@ This document contains comprehensive API documentation for all services used in 
 
 | Service | SDK | Status | Use Case |
 |---------|-----|--------|----------|
-| Helius | `helius-sdk` | Active | RPC, DAS API, transactions |
+| Helius | `helius-sdk` + Smart TX | Active | RPC, DAS API, smart transactions |
 | Jupiter | `@jup-ag/api` | Active | Token swaps for graduated tokens |
 | Birdeye | Raw HTTP | No SDK | Trending tokens, security |
 | DexScreener | Raw HTTP | No SDK | DEX pair data |
 | PumpPortal | WebSocket + REST | No SDK | Pump.fun trades |
+
+---
+
+## Transaction Optimizations (Jan 2026)
+
+All trading clients now use **Helius Smart Transactions** with:
+
+### Features Enabled
+- **Jito Tips** - MEV protection (min 0.0002 SOL, dynamic from Jito API)
+- **Dynamic Priority Fees** - From Helius `getPriorityFeeEstimate` API
+- **Smart Retry** - Polling-based confirmation with automatic rebroadcast
+- **Compute Unit Optimization** - Auto-calculated via simulation
+
+### Developer Tier Rate Limits
+| Endpoint | Limit |
+|----------|-------|
+| RPC requests | 50/sec |
+| `sendTransaction` | 5/sec |
+| `Sender` endpoint | 15/sec |
+| Enhanced WebSockets | Not available (Business+ only) |
+
+### How It Works
+```typescript
+// All clients auto-initialized with smart transactions in src/index.ts
+
+// PumpPortal - uses SmartTransactionSender for all trades
+pumpPortal = new PumpPortalClient({
+  heliusApiKey: process.env.HELIUS_API_KEY,
+  enableSmartTx: true,  // Auto-enabled
+}, wallet);
+
+// Jupiter - uses SmartTransactionSender for swap confirmation
+jupiter = new JupiterClient({
+  heliusApiKey: process.env.HELIUS_API_KEY,
+  enableSmartTx: true,
+});
+```
+
+### Smart Transaction Flow
+1. Build transaction with compute budget instructions
+2. Add Jito tip (dynamic from API, 75th percentile)
+3. Set priority fee (from Helius, level: medium/high based on urgency)
+4. Send with polling-based confirmation (2s intervals, 60s timeout)
+5. Auto-rebroadcast on timeout
 
 ---
 
@@ -87,19 +131,32 @@ const fees = await helius.rpc.getPriorityFeeEstimate({
 });
 ```
 
-#### Smart Transactions
+#### Smart Transactions (Custom Implementation)
 ```typescript
-// Create optimized transaction with compute budget
-const smartTx = await helius.createSmartTransaction({
-  instructions: [...],
-  signers: [keypair],
-  feePayer: keypair
+// Our custom SmartTransactionSender (src/api/smart-transaction.ts)
+import { createSmartTransactionSender } from './api/smart-transaction.js';
+
+const smartTx = createSmartTransactionSender(apiKey, wallet, {
+  enableJitoTips: true,
+  minJitoTipSol: 0.0002,
+  maxJitoTipSol: 0.002,
 });
 
-// Send with automatic retry and confirmation
-const sig = await helius.sendSmartTransaction(smartTx, {
-  skipPreflight: false
+// Build and send with all optimizations
+const sig = await smartTx.buildAndSendSmartTransaction(instructions, {
+  urgent: false,  // true for sells (higher priority)
+  priorityLevel: 'high',  // 'low' | 'medium' | 'high' | 'veryHigh'
 });
+
+// Or send external transaction (from PumpPortal/Jupiter)
+const sig = await smartTx.sendExternalTransaction(transaction, {
+  urgent: true,
+  skipPreflight: false,
+});
+
+// Get priority fee levels
+const fees = await smartTx.getPriorityFeeEstimate();
+// { min, low, medium, high, veryHigh, unsafeMax }
 ```
 
 #### Webhooks

@@ -6,14 +6,22 @@
  * - TTL-based response caching
  * - Circuit breaker for cascading failure protection
  * - @solana/web3.js Connection integration
+ * - Smart transaction support with Jito tips
+ * - Optimized priority fee estimation
+ *
+ * Optimized for Developer tier (Jan 2026):
+ * - RPC: 50/sec
+ * - sendTransaction: 5/sec
+ * - Sender: 15/sec
  */
 
 import { createHelius, type HeliusClient as SdkHeliusClient } from 'helius-sdk';
 import CircuitBreaker from 'opossum';
-import { Connection, PublicKey, type ConfirmedSignatureInfo } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, VersionedTransaction, TransactionInstruction, type ConfirmedSignatureInfo } from '@solana/web3.js';
 import { TTLCache } from './cache.js';
 import { createLogger } from '../lib/logger.js';
 import { GetAssetResponse } from '../analysis/types.js';
+import { SmartTransactionSender, PriorityFeeLevels, createSmartTransactionSender } from './smart-transaction.js';
 
 const logger = createLogger('helius');
 
@@ -32,6 +40,10 @@ interface HeliusClientConfig {
   tier?: HeliusTier;
   /** Cache TTL in milliseconds (default: 30000 = 30 seconds) */
   cacheTTL?: number;
+  /** Wallet keypair for smart transactions (optional) */
+  wallet?: Keypair;
+  /** Enable Jito tips for transactions (default: true) */
+  enableJitoTips?: boolean;
 }
 
 /**
@@ -118,18 +130,31 @@ class HeliusClient {
   private cacheHits = 0;
   private cacheMisses = 0;
   private _connection: Connection;
+  private smartTxSender: SmartTransactionSender | null = null;
+  private rpcUrl: string;
 
   constructor(config: HeliusClientConfig) {
     this.apiKey = config.apiKey;
+    this.rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${config.apiKey}`;
 
     // Initialize official Helius SDK
     this.sdk = createHelius({ apiKey: config.apiKey });
 
-    // Create connection with Helius RPC
-    this._connection = new Connection(
-      `https://mainnet.helius-rpc.com/?api-key=${config.apiKey}`,
-      'confirmed'
-    );
+    // Create optimized connection with Helius RPC
+    // Optimized config based on Helius best practices (Jan 2026)
+    this._connection = new Connection(this.rpcUrl, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 60000, // 60s for slow txs
+      disableRetryOnRateLimit: false, // Let Connection handle rate limits
+    });
+
+    // Initialize smart transaction sender if wallet provided
+    if (config.wallet) {
+      this.smartTxSender = createSmartTransactionSender(config.apiKey, config.wallet, {
+        enableJitoTips: config.enableJitoTips ?? true,
+      });
+      logger.info('Smart transaction sender initialized with Jito tips');
+    }
 
     // Initialize cache
     this.cache = new TTLCache<unknown>(config.cacheTTL ?? 30000);
@@ -162,8 +187,10 @@ class HeliusClient {
       {
         tier: config.tier ?? 'developer',
         cacheTTL: config.cacheTTL ?? 30000,
+        hasSmartTx: !!config.wallet,
+        jitoTipsEnabled: config.enableJitoTips ?? true,
       },
-      'HeliusClient initialized with official SDK'
+      'HeliusClient initialized with official SDK (optimized for Jan 2026)'
     );
   }
 
@@ -389,32 +416,128 @@ class HeliusClient {
   }
 
   /**
-   * Get priority fee estimate using SDK.
+   * Get priority fee estimate using Helius API.
+   *
+   * Optimized for Jan 2026: Uses serialized transaction when available
+   * for more accurate fee estimation.
+   *
+   * @param serializedTx - Base64 serialized transaction (most accurate)
+   * @param accountKeys - Fallback to account keys if no transaction
    */
-  async getPriorityFeeEstimate(accountKeys?: string[]): Promise<{
-    min: number;
-    low: number;
-    medium: number;
-    high: number;
-    veryHigh: number;
-  }> {
-    const result = await this.circuitBreaker.fire(async () => {
-      const estimate = await this.sdk.getPriorityFeeEstimate({
-        accountKeys: accountKeys || [],
-        options: { recommended: true },
-      });
-      return estimate;
-    }) as { priorityFeeEstimate?: number; priorityFeeLevels?: Record<string, number> };
+  async getPriorityFeeEstimate(
+    serializedTx?: string,
+    accountKeys?: string[]
+  ): Promise<PriorityFeeLevels> {
+    // Use smart tx sender if available (has caching)
+    if (this.smartTxSender) {
+      return this.smartTxSender.getPriorityFeeEstimate(serializedTx, accountKeys);
+    }
 
-    // Map SDK response to our format
-    const base = result.priorityFeeEstimate || 1000;
+    // Fallback to direct API call
+    const result = await this.circuitBreaker.fire(async () => {
+      const params: any = {
+        options: { includeAllPriorityFeeLevels: true },
+      };
+
+      if (serializedTx) {
+        params.transaction = serializedTx;
+      } else if (accountKeys && accountKeys.length > 0) {
+        params.accountKeys = accountKeys;
+      }
+
+      const response = await fetch(this.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'priority-fee',
+          method: 'getPriorityFeeEstimate',
+          params: [params],
+        }),
+      });
+
+      return response.json();
+    }) as { result?: { priorityFeeLevels?: Record<string, number>; priorityFeeEstimate?: number } };
+
+    // Map response to our format
+    if (result.result?.priorityFeeLevels) {
+      const levels = result.result.priorityFeeLevels;
+      return {
+        min: levels.min || 0,
+        low: levels.low || 1000,
+        medium: levels.medium || 10000,
+        high: levels.high || 100000,
+        veryHigh: levels.veryHigh || 500000,
+        unsafeMax: levels.unsafeMax || 1000000,
+      };
+    }
+
+    // Fallback single value
+    const base = result.result?.priorityFeeEstimate || 10000;
     return {
       min: Math.floor(base * 0.5),
       low: Math.floor(base * 0.75),
       medium: base,
       high: Math.floor(base * 1.5),
       veryHigh: Math.floor(base * 2),
+      unsafeMax: Math.floor(base * 3),
     };
+  }
+
+  /**
+   * Get the smart transaction sender for optimized transaction sending.
+   * Returns null if no wallet was provided in config.
+   */
+  getSmartTxSender(): SmartTransactionSender | null {
+    return this.smartTxSender;
+  }
+
+  /**
+   * Send a transaction using smart transaction pattern with Jito tips.
+   * Includes automatic retry, polling, and rebroadcast.
+   *
+   * @param transaction - Signed VersionedTransaction
+   * @param options - Send options
+   */
+  async sendSmartTransaction(
+    transaction: VersionedTransaction,
+    options?: {
+      urgent?: boolean;
+      skipPreflight?: boolean;
+    }
+  ): Promise<string> {
+    if (!this.smartTxSender) {
+      // Fallback to regular send if no smart tx sender
+      logger.warn('No smart tx sender - using basic sendTransaction');
+      const signature = await this._connection.sendTransaction(transaction, {
+        skipPreflight: options?.skipPreflight ?? false,
+      });
+      return signature;
+    }
+
+    return this.smartTxSender.sendExternalTransaction(transaction, options);
+  }
+
+  /**
+   * Build and send a smart transaction from instructions.
+   * Automatically adds Jito tips and optimal priority fees.
+   *
+   * @param instructions - Transaction instructions
+   * @param options - Build and send options
+   */
+  async buildAndSendSmartTransaction(
+    instructions: TransactionInstruction[],
+    options?: {
+      urgent?: boolean;
+      priorityLevel?: 'low' | 'medium' | 'high' | 'veryHigh';
+      skipJitoTip?: boolean;
+    }
+  ): Promise<string> {
+    if (!this.smartTxSender) {
+      throw new Error('Smart transaction sender not initialized - provide wallet in config');
+    }
+
+    return this.smartTxSender.buildAndSendSmartTransaction(instructions, options);
   }
 
   /**
@@ -490,4 +613,8 @@ export {
   GetTransactionsOptions,
   TokenHolder,
   TokenHoldersResponse,
+  PriorityFeeLevels,
 };
+
+// Re-export smart transaction utilities
+export { SmartTransactionSender, createSmartTransactionSender } from './smart-transaction.js';

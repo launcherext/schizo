@@ -6940,148 +6940,363 @@ export class JupiterClient {
 export { SOL_MINT };
 </file>
 
-<file path="src/db/repositories/trades.ts">
-import Database from 'better-sqlite3';
+<file path="src/personality/deepgram-tts.ts">
+/**
+ * Deepgram Text-to-Speech client for $SCHIZO voice output
+ */
+
+import { createLogger } from '../lib/logger.js';
+import { agentEvents } from '../events/emitter.js';
+
+const logger = createLogger('deepgram-tts');
 
 /**
- * Trade record representing a completed trade.
+ * Deepgram TTS configuration
  */
-interface Trade {
-  signature: string;
-  timestamp: number;
-  type: 'BUY' | 'SELL';
-  tokenMint: string;
-  tokenSymbol?: string;
-  amountTokens: number;
-  amountSol: number;
-  pricePerToken: number;
-  feeSol?: number;
-  status?: string;
-  metadata?: Record<string, unknown>;
+export interface DeepgramTTSConfig {
+  apiKey: string;
+  model?: string;
+  voice?: string;
 }
 
 /**
- * Repository for trade CRUD operations.
- * Uses prepared statements for optimal performance.
- *
- * @example
- * const repo = new TradeRepository(db);
- * repo.insert({ signature: 'abc', ... });
- * const trade = repo.getBySignature('abc');
+ * Default TTS configuration
  */
-class TradeRepository {
-  private insertStmt: Database.Statement;
-  private getBySignatureStmt: Database.Statement;
-  private getRecentStmt: Database.Statement;
-  private getByTokenStmt: Database.Statement;
+export const DEFAULT_TTS_CONFIG: Omit<DeepgramTTSConfig, 'apiKey'> = {
+  model: 'aura-2-aries-en', // Natural sounding voice
+  voice: 'asteria', // Can be: asteria, luna, stella, athena, hera, orion, arcas, perseus, angus, orpheus
+};
 
-  constructor(private db: Database.Database) {
-    this.insertStmt = db.prepare(`
-      INSERT INTO trades
-        (signature, timestamp, type, token_mint, token_symbol,
-         amount_tokens, amount_sol, price_per_token, fee_sol, status, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+/**
+ * Deepgram TTS client for generating speech from text
+ */
+export class DeepgramTTS {
+  private config: DeepgramTTSConfig;
+  private baseUrl = 'https://api.deepgram.com/v1/speak';
 
-    this.getBySignatureStmt = db.prepare(
-      'SELECT * FROM trades WHERE signature = ?'
-    );
-
-    this.getRecentStmt = db.prepare(
-      'SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?'
-    );
-
-    this.getByTokenStmt = db.prepare(
-      'SELECT * FROM trades WHERE token_mint = ? ORDER BY timestamp DESC'
-    );
-  }
-
-  /**
-   * Insert a new trade record.
-   *
-   * @param trade - The trade to insert
-   * @throws If a trade with the same signature already exists
-   */
-  insert(trade: Trade): void {
-    this.insertStmt.run(
-      trade.signature,
-      trade.timestamp,
-      trade.type,
-      trade.tokenMint,
-      trade.tokenSymbol ?? null,
-      trade.amountTokens,
-      trade.amountSol,
-      trade.pricePerToken,
-      trade.feeSol ?? 0,
-      trade.status ?? 'CONFIRMED',
-      trade.metadata ? JSON.stringify(trade.metadata) : null
-    );
-  }
-
-  /**
-   * Get a trade by its transaction signature.
-   *
-   * @param signature - The Solana transaction signature
-   * @returns The trade if found, undefined otherwise
-   */
-  getBySignature(signature: string): Trade | undefined {
-    const row = this.getBySignatureStmt.get(signature) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(row) : undefined;
-  }
-
-  /**
-   * Get recent trades ordered by timestamp (newest first).
-   *
-   * @param limit - Maximum number of trades to return (default 100)
-   * @returns Array of trades
-   */
-  getRecent(limit: number = 100): Trade[] {
-    const rows = this.getRecentStmt.all(limit) as Record<string, unknown>[];
-    return rows.map(row => this.mapRow(row));
-  }
-
-  /**
-   * Get all trades for a specific token.
-   *
-   * @param tokenMint - The token mint address
-   * @returns Array of trades for that token
-   */
-  getByToken(tokenMint: string): Trade[] {
-    const rows = this.getByTokenStmt.all(tokenMint) as Record<string, unknown>[];
-    return rows.map(row => this.mapRow(row));
-  }
-
-  /**
-   * Clear all sync trades (auto-generated position recovery records).
-   * Call this on startup to clear stale position data.
-   * @returns Number of trades deleted
-   */
-  clearSyncTrades(): number {
-    const result = this.db.prepare("DELETE FROM trades WHERE signature LIKE 'sync-%'").run();
-    return result.changes;
-  }
-
-  /**
-   * Map a database row to a Trade object.
-   */
-  private mapRow(row: Record<string, unknown>): Trade {
-    return {
-      signature: row.signature as string,
-      timestamp: row.timestamp as number,
-      type: row.type as 'BUY' | 'SELL',
-      tokenMint: row.token_mint as string,
-      tokenSymbol: row.token_symbol as string | undefined,
-      amountTokens: row.amount_tokens as number,
-      amountSol: row.amount_sol as number,
-      pricePerToken: row.price_per_token as number,
-      feeSol: row.fee_sol as number | undefined,
-      status: row.status as string | undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined
+  constructor(config: DeepgramTTSConfig) {
+    this.config = {
+      ...DEFAULT_TTS_CONFIG,
+      ...config,
     };
+
+    logger.info({ model: this.config.model, voice: this.config.voice }, 'Deepgram TTS initialized');
+  }
+
+  /**
+   * Convert text to speech and return audio buffer
+   */
+  async speak(text: string): Promise<Buffer> {
+    logger.debug({ text: text.slice(0, 50) }, 'Generating speech');
+
+    try {
+      const url = `${this.baseUrl}?model=${this.config.model}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${this.config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Deepgram API error: ${response.status} ${errorText}`);
+      }
+
+      const audioBuffer = Buffer.from(await response.arrayBuffer());
+
+      logger.info({ textLength: text.length, audioSize: audioBuffer.length }, 'Speech generated');
+
+      return audioBuffer;
+    } catch (error) {
+      logger.error({ error, text: text.slice(0, 50) }, 'Failed to generate speech');
+      throw error;
+    }
+  }
+
+  /**
+   * Speak text and broadcast audio via WebSocket
+   */
+  async speakAndBroadcast(text: string, wss?: any): Promise<void> {
+    try {
+      const audioBuffer = await this.speak(text);
+
+      if (wss && wss.clients) {
+        // Broadcast audio to all connected clients
+        const audioBase64 = audioBuffer.toString('base64');
+
+        const message = JSON.stringify({
+          type: 'VOICE_AUDIO',
+          timestamp: Date.now(),
+          data: {
+            text,
+            audio: audioBase64,
+            format: 'mp3',
+          },
+        });
+
+        wss.clients.forEach((client: any) => {
+          if (client.readyState === 1) { // WebSocket.OPEN
+            client.send(message);
+          }
+        });
+
+        logger.info({ clientCount: wss.clients.size }, 'Voice broadcast sent');
+      }
+
+      // Also emit event for the feed
+      agentEvents.emit({
+        type: 'SCHIZO_SPEAKS',
+        timestamp: Date.now(),
+        data: { text },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to speak and broadcast');
+    }
+  }
+
+  /**
+   * Get available voices
+   */
+  getAvailableVoices(): string[] {
+    return [
+      'asteria',  // Default, warm female
+      'luna',     // Soft female
+      'stella',   // Professional female
+      'athena',   // Confident female
+      'hera',     // Mature female
+      'orion',    // Deep male
+      'arcas',    // Friendly male
+      'perseus',  // Strong male
+      'angus',    // Scottish accent
+      'orpheus',  // Dramatic male
+    ];
+  }
+
+  /**
+   * Update voice
+   */
+  setVoice(voice: string): void {
+    this.config.voice = voice;
+    this.config.model = `aura-${voice}-en`;
+    logger.info({ voice }, 'Voice updated');
   }
 }
 
-export { TradeRepository, Trade };
+/**
+ * Create a voice narrator that speaks the agent's thoughts
+ */
+export class VoiceNarrator {
+  private tts: DeepgramTTS;
+  private wss?: any;
+  private speakQueue: string[] = [];
+  private enabled = true;
+  private processingPromise: Promise<void> | null = null;
+  private recentSpoken: Map<string, number> = new Map(); // text hash -> timestamp
+  private readonly DEDUPE_WINDOW_MS = 30000; // 30 seconds deduplication window
+
+  constructor(tts: DeepgramTTS, wss?: any) {
+    this.tts = tts;
+    this.wss = wss;
+
+    // Cleanup old entries periodically
+    setInterval(() => this.cleanupRecentSpoken(), 60000);
+
+    logger.info('Voice narrator initialized with deduplication');
+  }
+
+  /**
+   * Simple hash for deduplication
+   */
+  private hashText(text: string): string {
+    // Use first 50 chars + length as a simple hash
+    return `${text.slice(0, 50).toLowerCase()}_${text.length}`;
+  }
+
+  /**
+   * Cleanup old entries from deduplication map
+   */
+  private cleanupRecentSpoken(): void {
+    const now = Date.now();
+    for (const [hash, timestamp] of this.recentSpoken) {
+      if (now - timestamp > this.DEDUPE_WINDOW_MS * 2) {
+        this.recentSpoken.delete(hash);
+      }
+    }
+  }
+
+  /**
+   * Enable/disable voice
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    logger.info({ enabled }, 'Voice narrator enabled state changed');
+  }
+
+  /**
+   * Set WebSocket server for broadcasting
+   */
+  setWebSocket(wss: any): void {
+    this.wss = wss;
+  }
+
+  /**
+   * Replace acronyms with pronounceable versions for TTS
+   */
+  private replaceAcronyms(text: string): string {
+    const acronymMap: Record<string, string> = {
+      // Crypto currencies - use phonetic spellings
+      ' SOL': ' soul',        // Solana
+      'SOL ': 'soul ',
+      'SOL.': 'soul.',
+      'SOL,': 'soul,',
+      'SOL?': 'soul?',
+      'SOL!': 'soul!',
+      
+      ' USDC': ' U-S-D-C',    // USD Coin
+      'USDC ': 'U-S-D-C ',
+      
+      ' BTC': ' bitcoin',     // Bitcoin
+      'BTC ': 'bitcoin ',
+      
+      ' ETH': ' ethereum',    // Ethereum
+      'ETH ': 'ethereum ',
+      
+      ' USDT': ' tether',     // Tether
+      'USDT ': 'tether ',
+      
+      // Common trading terms
+      ' mcap': ' market cap',
+      'mcap ': 'market cap ',
+      
+      ' P&L': ' profit and loss',
+      'P&L ': 'profit and loss ',
+      
+      ' NFT': ' N-F-T',
+      'NFT ': 'N-F-T ',
+      
+      ' DeFi': ' dee-fi',
+      'DeFi ': 'dee-fi ',
+      
+      ' APY': ' A-P-Y',
+      'APY ': 'A-P-Y ',
+      
+      ' TVL': ' T-V-L',
+      'TVL ': 'T-V-L ',
+    };
+
+    let result = text;
+    for (const [acronym, replacement] of Object.entries(acronymMap)) {
+      result = result.replace(new RegExp(acronym, 'g'), replacement);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Clean text for speech - remove asterisk actions and other non-speech content
+   */
+  private cleanTextForSpeech(text: string): string {
+    // Remove asterisk actions like *neural networks flickering*
+    let cleaned = text.replace(/\*[^*]+\*/g, '');
+    
+    // Remove emojis and graphic symbols
+    cleaned = cleaned.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
+    
+    // Replace acronyms with pronounceable versions
+    cleaned = this.replaceAcronyms(cleaned);
+    
+    // Remove multiple spaces
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    return cleaned;
+  }
+
+  /**
+   * Queue text to be spoken
+   */
+  async say(text: string): Promise<void> {
+    if (!this.enabled) {
+      logger.debug('Voice disabled, skipping');
+      return;
+    }
+
+    // Clean the text before queuing
+    const cleanedText = this.cleanTextForSpeech(text);
+    if (!cleanedText) {
+      logger.debug('Text empty after cleaning, skipping');
+      return;
+    }
+
+    // Check for duplicate/similar text recently spoken
+    const hash = this.hashText(cleanedText);
+    const lastSpoken = this.recentSpoken.get(hash);
+    if (lastSpoken && Date.now() - lastSpoken < this.DEDUPE_WINDOW_MS) {
+      logger.debug({ text: cleanedText.slice(0, 30) }, 'Skipping duplicate speech');
+      return;
+    }
+
+    // Mark as spoken (even before actual speech to prevent queue duplicates)
+    this.recentSpoken.set(hash, Date.now());
+
+    // Limit queue size to prevent buildup
+    if (this.speakQueue.length >= 3) {
+      logger.warn({ queueLength: this.speakQueue.length }, 'Speech queue full, dropping oldest');
+      this.speakQueue.shift();
+    }
+
+    this.speakQueue.push(cleanedText);
+    // Don't await - let queue process in background
+    this.processQueue();
+  }
+
+  /**
+   * Process the speak queue - ensures only one speech at a time
+   */
+  private processQueue(): void {
+    // If already processing, the loop will pick up new items
+    if (this.processingPromise) {
+      return;
+    }
+
+    this.processingPromise = this.doProcessQueue().finally(() => {
+      this.processingPromise = null;
+    });
+  }
+
+  private async doProcessQueue(): Promise<void> {
+    while (this.speakQueue.length > 0) {
+      const text = this.speakQueue.shift()!;
+
+      try {
+        logger.info({ queueLength: this.speakQueue.length }, 'Speaking next in queue');
+        await this.tts.speakAndBroadcast(text, this.wss);
+
+        // Add delay between speeches to prevent overlap
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        logger.error({ error }, 'Error speaking text');
+      }
+    }
+  }
+
+  /**
+   * Clear the speak queue
+   */
+  clearQueue(): void {
+    this.speakQueue = [];
+    logger.info('Speak queue cleared');
+  }
+
+  /**
+   * Get queue length
+   */
+  getQueueLength(): number {
+    return this.speakQueue.length;
+  }
+}
 </file>
 
 <file path="src/personality/mood-system.ts">
@@ -9027,6 +9242,347 @@ export {
 main().catch(console.error);
 </file>
 
+<file path="src/trading/copy-trader.ts">
+import { HeliusClient, TransactionResult } from '../api/helius.js';
+import { Connection, PublicKey, Logs } from '@solana/web3.js';
+import { createLogger } from '../lib/logger.js';
+import { agentEvents } from '../events/emitter.js';
+
+const logger = createLogger('copy-trader');
+
+export interface CopyTraderConfig {
+  walletAddresses: string[];  // Changed to array for multiple wallets
+  pollIntervalMs: number;
+  enabled: boolean;
+}
+
+/**
+ * CopyTrader - Watches multiple wallets and copies their trades
+ * Uses WebSocket subscription for real-time detection
+ * "Schizo copy trades" - blindly follows trusted wallets with high confidence
+ */
+export class CopyTrader {
+  private config: CopyTraderConfig;
+  private helius: HeliusClient;
+  private connection: Connection;
+  private isRunning: boolean = false;
+  private subscriptionIds: Map<string, number> = new Map(); // wallet -> subscriptionId
+  private fallbackIntervalId?: NodeJS.Timeout;
+  private lastSignatures: Map<string, string | null> = new Map(); // wallet -> lastSignature
+  private isProcessing = false;
+  private processedSignatures = new Set<string>();
+
+  constructor(
+    config: CopyTraderConfig,
+    helius: HeliusClient,
+    connection: Connection
+  ) {
+    this.config = config;
+    this.helius = helius;
+    this.connection = connection;
+
+    logger.info({ 
+      wallets: this.config.walletAddresses.length,
+      enabled: this.config.enabled 
+    }, `CopyTrader initialized with ${this.config.walletAddresses.length} wallets (WebSocket mode)`);
+  }
+
+  /**
+   * Start watching all target wallets via WebSocket
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('CopyTrader already running');
+      return;
+    }
+
+    if (!this.config.enabled || this.config.walletAddresses.length === 0) {
+      logger.info('CopyTrader disabled or no wallets configured');
+      return;
+    }
+
+    this.isRunning = true;
+
+    // Subscribe to each wallet
+    for (const walletAddress of this.config.walletAddresses) {
+      try {
+        const walletPubkey = new PublicKey(walletAddress);
+        
+        const subscriptionId = this.connection.onLogs(
+          walletPubkey,
+          (logs: Logs) => this.handleLogNotification(logs, walletAddress),
+          'confirmed'
+        );
+
+        this.subscriptionIds.set(walletAddress, subscriptionId);
+        this.lastSignatures.set(walletAddress, null);
+
+        logger.info({ 
+          wallet: walletAddress.slice(0, 8) + '...', 
+          subscriptionId 
+        }, '✅ WebSocket subscription active');
+
+      } catch (error) {
+        logger.error({ wallet: walletAddress, error }, 'Failed to subscribe to wallet');
+      }
+    }
+
+    logger.info(`🎯 CopyTrader watching ${this.subscriptionIds.size} wallets`);
+
+    // Start fallback polling
+    this.startFallbackPolling();
+  }
+
+  /**
+   * Start fallback polling for all wallets
+   */
+  private startFallbackPolling(): void {
+    if (this.fallbackIntervalId) return;
+
+    const fallbackInterval = Math.max(this.config.pollIntervalMs * 6, 30000);
+    
+    this.fallbackIntervalId = setInterval(() => {
+      this.pollAllWallets().catch(err => {
+        logger.error({ error: err }, 'Error in CopyTrader fallback poll');
+      });
+    }, fallbackInterval);
+
+    logger.debug({ intervalMs: fallbackInterval }, 'Fallback polling started');
+  }
+
+  /**
+   * Poll all wallets for new transactions
+   */
+  private async pollAllWallets(): Promise<void> {
+    for (const walletAddress of this.config.walletAddresses) {
+      await this.pollWallet(walletAddress);
+    }
+  }
+
+  /**
+   * Handle real-time log notification from WebSocket
+   */
+  private async handleLogNotification(logs: Logs, walletAddress: string): Promise<void> {
+    if (logs.err) {
+      logger.debug({ signature: logs.signature }, 'Ignoring failed transaction');
+      return;
+    }
+
+    if (this.processedSignatures.has(logs.signature)) {
+      return;
+    }
+    this.processedSignatures.add(logs.signature);
+
+    // Limit cache size
+    if (this.processedSignatures.size > 2000) {
+      const entries = Array.from(this.processedSignatures);
+      this.processedSignatures = new Set(entries.slice(-1000));
+    }
+
+    logger.info({ 
+      signature: logs.signature, 
+      wallet: walletAddress.slice(0, 8) + '...' 
+    }, '⚡ Real-time transaction detected!');
+
+    // Check if it looks like a swap
+    const isLikelySwap = logs.logs.some(log => 
+      log.includes('Instruction: Swap') || 
+      log.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') ||
+      log.includes('Program JUP') ||
+      log.includes('pump')
+    );
+
+    if (!isLikelySwap) {
+      logger.info({ signature: logs.signature, logs: logs.logs.slice(0, 3) }, '❌ Transaction rejected: Not a swap');
+      return;
+    }
+
+    const startParse = Date.now();
+    await this.analyzeTransactionBySignature(logs.signature, walletAddress);
+    logger.debug({ signature: logs.signature, ms: Date.now() - startParse }, 'Transaction analysis complete');
+  }
+
+  /**
+   * Stop watching all wallets
+   */
+  stop(): void {
+    if (!this.isRunning) return;
+    
+    this.isRunning = false;
+
+    // Unsubscribe from all WebSocket subscriptions
+    for (const [wallet, subscriptionId] of this.subscriptionIds) {
+      this.connection.removeOnLogsListener(subscriptionId).catch(err => {
+        logger.warn({ error: err, wallet }, 'Failed to remove logs listener');
+      });
+    }
+    this.subscriptionIds.clear();
+
+    if (this.fallbackIntervalId) {
+      clearInterval(this.fallbackIntervalId);
+      this.fallbackIntervalId = undefined;
+    }
+
+    logger.info('CopyTrader stopped');
+  }
+
+  /**
+   * Fallback poll for a single wallet
+   */
+  private async pollWallet(walletAddress: string): Promise<void> {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    try {
+      const response = await this.helius.getTransactionsForAddress(walletAddress, {
+        limit: 5
+      });
+
+      if (!response.data || response.data.length === 0) {
+        return;
+      }
+
+      const lastSig = this.lastSignatures.get(walletAddress);
+
+      for (const tx of response.data) {
+        if (this.processedSignatures.has(tx.signature)) continue;
+        if (tx.signature === lastSig) break;
+
+        this.processedSignatures.add(tx.signature);
+        await this.analyzeTransaction(tx, walletAddress);
+      }
+
+      if (response.data.length > 0) {
+        this.lastSignatures.set(walletAddress, response.data[0].signature);
+      }
+
+    } catch (error) {
+      logger.error({ error, wallet: walletAddress }, 'Failed to poll wallet');
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Analyze transaction by signature (WebSocket path)
+   */
+  private async analyzeTransactionBySignature(signature: string, walletAddress: string): Promise<void> {
+    try {
+      const parsed = await this.connection.getParsedTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed'
+      });
+
+      if (!parsed || !parsed.meta) {
+          logger.warn({ signature }, '❌ Transaction not found or missing meta');
+          return;
+      }
+
+      await this.processTransaction(signature, parsed, walletAddress);
+    } catch (error) {
+      logger.warn({ error, signature }, 'Failed to parse transaction from WebSocket');
+    }
+  }
+
+  /**
+   * Analyze a transaction from Helius response (polling path)
+   */
+  private async analyzeTransaction(tx: TransactionResult, walletAddress: string): Promise<void> {
+    if (!tx.success || tx.type !== 'SWAP') {
+      return;
+    }
+
+    try {
+      const parsed = await this.connection.getParsedTransaction(tx.signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed'
+      });
+
+      if (!parsed || !parsed.meta) return;
+
+      await this.processTransaction(tx.signature, parsed, walletAddress);
+    } catch (error) {
+      logger.warn({ error, signature: tx.signature }, 'Failed to parse potential copy trade');
+    }
+  } 
+
+  private async processTransaction(signature: string, parsed: any, walletAddress: string): Promise<void> {
+    const preTokenBalances = parsed.meta.preTokenBalances || [];
+    const postTokenBalances = parsed.meta.postTokenBalances || [];
+    const accountKeys = parsed.transaction.message.accountKeys;
+    
+    // Find wallet index (handles both legacy and versioned tx structures where static keys are first)
+    const walletIndex = accountKeys.findIndex((k: any) => {
+        const key = k.pubkey ? k.pubkey.toBase58() : k.toBase58();
+        return key === walletAddress;
+    });
+
+    if (walletIndex === -1) {
+        logger.warn({ signature, walletAddress }, '❌ Wallet not found in transaction keys');
+        return;
+    }
+
+    // Check SOL change
+    const preSol = parsed.meta.preBalances[walletIndex];
+    const postSol = parsed.meta.postBalances[walletIndex];
+    const solChange = (postSol - preSol) / 1e9;
+
+    // Check Token changes
+    let boughtMint: string | undefined;
+
+    const getBalance = (balances: any[], mint: string, owner: string) => {
+      const b = balances.find(x => x.mint === mint && x.owner === owner);
+      return b ? parseFloat(b.uiTokenAmount.uiAmountString || '0') : 0;
+    };
+
+    const involvedMints = new Set<string>();
+    [...preTokenBalances, ...postTokenBalances].forEach(b => {
+      if (b.owner === walletAddress) involvedMints.add(b.mint);
+    });
+
+    for (const mint of involvedMints) {
+      const pre = getBalance(preTokenBalances, mint, walletAddress);
+      const post = getBalance(postTokenBalances, mint, walletAddress);
+      if (post > pre) {
+        boughtMint = mint;
+        break;
+      }
+    }
+
+    const isBuy = solChange < -0.001 && !!boughtMint;
+    
+    // Log the analysis details
+    logger.info({
+        signature,
+        solChange: solChange.toFixed(6),
+        boughtMint,
+        isBuy,
+        mintsInvolved: involvedMints.size
+    }, '🔍 CopyTrade Analysis');
+
+    if (isBuy && boughtMint) {
+      logger.info({ 
+        signature, 
+        mint: boughtMint, 
+        solSpent: Math.abs(solChange).toFixed(4),
+        sourceWallet: walletAddress.slice(0, 8) + '...'
+      }, '🎯 COPY TRADE BUY SIGNAL (Real-time)');
+
+      agentEvents.emit({
+        type: 'COPY_TRADE_SIGNAL',
+        timestamp: Date.now(),
+        data: {
+           mint: boughtMint,
+           sourceWallet: walletAddress,
+           signature,
+           solSpent: Math.abs(solChange)
+        }
+      });
+    }
+  }
+}
+</file>
+
 <file path="src/trading/index.ts">
 export { PumpPortalClient } from './pumpportal-client.js';
 export { TradingEngine } from './trading-engine.js';
@@ -9467,6 +10023,54 @@ export class SmartMoneyCopier {
     };
   }
 }
+</file>
+
+<file path="src/trading/types.ts">
+/**
+ * Trading-related type definitions
+ */
+
+/**
+ * Token information from PumpPortal
+ */
+export interface TokenInfo {
+  mint: string;
+  name: string;
+  symbol: string;
+  price: number; // in SOL
+  liquidity: number; // in SOL
+  holderCount: number;
+}
+
+/**
+ * Parameters for executing a trade
+ */
+export interface TradeParams {
+  mint: string;
+  amount: number;
+  slippage: number; // 0-1, e.g., 0.05 for 5%
+}
+
+/**
+ * Result of a trade execution
+ */
+export interface TradeResult {
+  signature: string;
+  timestamp: number;
+  mint: string;
+  amount: number;
+  price: number;
+}
+
+/**
+ * Trade action type
+ */
+export type TradeAction = 'buy' | 'sell';
+
+/**
+ * Risk Profile definition
+ */
+export type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE' | 'ENTERTAINMENT';
 </file>
 
 <file path=".gitignore">
@@ -11362,6 +11966,160 @@ export function initMoralisClient(apiKey: string): MoralisClient {
 }
 </file>
 
+<file path="src/db/repositories/trades.ts">
+import Database from 'better-sqlite3';
+
+/**
+ * Trade record representing a completed trade.
+ */
+interface Trade {
+  signature: string;
+  timestamp: number;
+  type: 'BUY' | 'SELL';
+  tokenMint: string;
+  tokenSymbol?: string;
+  amountTokens: number;
+  amountSol: number;
+  pricePerToken: number;
+  feeSol?: number;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Repository for trade CRUD operations.
+ * Uses prepared statements for optimal performance.
+ *
+ * @example
+ * const repo = new TradeRepository(db);
+ * repo.insert({ signature: 'abc', ... });
+ * const trade = repo.getBySignature('abc');
+ */
+class TradeRepository {
+  private insertStmt: Database.Statement;
+  private getBySignatureStmt: Database.Statement;
+  private getRecentStmt: Database.Statement;
+  private getByTokenStmt: Database.Statement;
+
+  constructor(private db: Database.Database) {
+    this.insertStmt = db.prepare(`
+      INSERT INTO trades
+        (signature, timestamp, type, token_mint, token_symbol,
+         amount_tokens, amount_sol, price_per_token, fee_sol, status, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.getBySignatureStmt = db.prepare(
+      'SELECT * FROM trades WHERE signature = ?'
+    );
+
+    this.getRecentStmt = db.prepare(
+      'SELECT * FROM trades ORDER BY timestamp DESC LIMIT ?'
+    );
+
+    this.getByTokenStmt = db.prepare(
+      'SELECT * FROM trades WHERE token_mint = ? ORDER BY timestamp DESC'
+    );
+  }
+
+  /**
+   * Insert a new trade record.
+   *
+   * @param trade - The trade to insert
+   * @throws If a trade with the same signature already exists
+   */
+  insert(trade: Trade): void {
+    this.insertStmt.run(
+      trade.signature,
+      trade.timestamp,
+      trade.type,
+      trade.tokenMint,
+      trade.tokenSymbol ?? null,
+      trade.amountTokens,
+      trade.amountSol,
+      trade.pricePerToken,
+      trade.feeSol ?? 0,
+      trade.status ?? 'CONFIRMED',
+      trade.metadata ? JSON.stringify(trade.metadata) : null
+    );
+  }
+
+  /**
+   * Get a trade by its transaction signature.
+   *
+   * @param signature - The Solana transaction signature
+   * @returns The trade if found, undefined otherwise
+   */
+  getBySignature(signature: string): Trade | undefined {
+    const row = this.getBySignatureStmt.get(signature) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : undefined;
+  }
+
+  /**
+   * Get recent trades ordered by timestamp (newest first).
+   *
+   * @param limit - Maximum number of trades to return (default 100)
+   * @returns Array of trades
+   */
+  getRecent(limit: number = 100): Trade[] {
+    const rows = this.getRecentStmt.all(limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
+  }
+
+  /**
+   * Get all trades for a specific token.
+   *
+   * @param tokenMint - The token mint address
+   * @returns Array of trades for that token
+   */
+  getByToken(tokenMint: string): Trade[] {
+    const rows = this.getByTokenStmt.all(tokenMint) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
+  }
+
+  /**
+   * Clear all sync trades (auto-generated position recovery records).
+   * Call this on startup to clear stale position data.
+   * @returns Number of trades deleted
+   */
+  clearSyncTrades(): number {
+    const result = this.db.prepare("DELETE FROM trades WHERE signature LIKE 'sync-%'").run();
+    return result.changes;
+  }
+
+  /**
+   * Delete all trades for a specific token mint.
+   * Use this to clean up phantom positions that no longer exist in the wallet.
+   * @returns Number of trades deleted
+   */
+  deleteByTokenMint(tokenMint: string): number {
+    const result = this.db.prepare("DELETE FROM trades WHERE token_mint = ?").run(tokenMint);
+    return result.changes;
+  }
+
+  /**
+   * Map a database row to a Trade object.
+   */
+  private mapRow(row: Record<string, unknown>): Trade {
+    return {
+      signature: row.signature as string,
+      timestamp: row.timestamp as number,
+      type: row.type as 'BUY' | 'SELL',
+      tokenMint: row.token_mint as string,
+      tokenSymbol: row.token_symbol as string | undefined,
+      amountTokens: row.amount_tokens as number,
+      amountSol: row.amount_sol as number,
+      pricePerToken: row.price_per_token as number,
+      feeSol: row.fee_sol as number | undefined,
+      status: row.status as string | undefined,
+      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined
+    };
+  }
+}
+
+export { TradeRepository, Trade };
+</file>
+
 <file path="src/personality/ai-provider.ts">
 /**
  * Multi-provider AI Client - Supports Claude, Groq (free), and Gemini (free)
@@ -11685,365 +12443,6 @@ export function createAIProvider(): AIProviderClient | null {
     model,
     maxTokens: 200,
   });
-}
-</file>
-
-<file path="src/personality/deepgram-tts.ts">
-/**
- * Deepgram Text-to-Speech client for $SCHIZO voice output
- */
-
-import { createLogger } from '../lib/logger.js';
-import { agentEvents } from '../events/emitter.js';
-
-const logger = createLogger('deepgram-tts');
-
-/**
- * Deepgram TTS configuration
- */
-export interface DeepgramTTSConfig {
-  apiKey: string;
-  model?: string;
-  voice?: string;
-}
-
-/**
- * Default TTS configuration
- */
-export const DEFAULT_TTS_CONFIG: Omit<DeepgramTTSConfig, 'apiKey'> = {
-  model: 'aura-2-aries-en', // Natural sounding voice
-  voice: 'asteria', // Can be: asteria, luna, stella, athena, hera, orion, arcas, perseus, angus, orpheus
-};
-
-/**
- * Deepgram TTS client for generating speech from text
- */
-export class DeepgramTTS {
-  private config: DeepgramTTSConfig;
-  private baseUrl = 'https://api.deepgram.com/v1/speak';
-
-  constructor(config: DeepgramTTSConfig) {
-    this.config = {
-      ...DEFAULT_TTS_CONFIG,
-      ...config,
-    };
-
-    logger.info({ model: this.config.model, voice: this.config.voice }, 'Deepgram TTS initialized');
-  }
-
-  /**
-   * Convert text to speech and return audio buffer
-   */
-  async speak(text: string): Promise<Buffer> {
-    logger.debug({ text: text.slice(0, 50) }, 'Generating speech');
-
-    try {
-      const url = `${this.baseUrl}?model=${this.config.model}`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Token ${this.config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Deepgram API error: ${response.status} ${errorText}`);
-      }
-
-      const audioBuffer = Buffer.from(await response.arrayBuffer());
-
-      logger.info({ textLength: text.length, audioSize: audioBuffer.length }, 'Speech generated');
-
-      return audioBuffer;
-    } catch (error) {
-      logger.error({ error, text: text.slice(0, 50) }, 'Failed to generate speech');
-      throw error;
-    }
-  }
-
-  /**
-   * Speak text and broadcast audio via WebSocket
-   */
-  async speakAndBroadcast(text: string, wss?: any): Promise<void> {
-    try {
-      const audioBuffer = await this.speak(text);
-
-      if (wss && wss.clients) {
-        // Broadcast audio to all connected clients
-        const audioBase64 = audioBuffer.toString('base64');
-
-        const message = JSON.stringify({
-          type: 'VOICE_AUDIO',
-          timestamp: Date.now(),
-          data: {
-            text,
-            audio: audioBase64,
-            format: 'mp3',
-          },
-        });
-
-        wss.clients.forEach((client: any) => {
-          if (client.readyState === 1) { // WebSocket.OPEN
-            client.send(message);
-          }
-        });
-
-        logger.info({ clientCount: wss.clients.size }, 'Voice broadcast sent');
-      }
-
-      // Also emit event for the feed
-      agentEvents.emit({
-        type: 'SCHIZO_SPEAKS',
-        timestamp: Date.now(),
-        data: { text },
-      });
-    } catch (error) {
-      logger.error({ error }, 'Failed to speak and broadcast');
-    }
-  }
-
-  /**
-   * Get available voices
-   */
-  getAvailableVoices(): string[] {
-    return [
-      'asteria',  // Default, warm female
-      'luna',     // Soft female
-      'stella',   // Professional female
-      'athena',   // Confident female
-      'hera',     // Mature female
-      'orion',    // Deep male
-      'arcas',    // Friendly male
-      'perseus',  // Strong male
-      'angus',    // Scottish accent
-      'orpheus',  // Dramatic male
-    ];
-  }
-
-  /**
-   * Update voice
-   */
-  setVoice(voice: string): void {
-    this.config.voice = voice;
-    this.config.model = `aura-${voice}-en`;
-    logger.info({ voice }, 'Voice updated');
-  }
-}
-
-/**
- * Create a voice narrator that speaks the agent's thoughts
- */
-export class VoiceNarrator {
-  private tts: DeepgramTTS;
-  private wss?: any;
-  private speakQueue: string[] = [];
-  private enabled = true;
-  private processingPromise: Promise<void> | null = null;
-  private recentSpoken: Map<string, number> = new Map(); // text hash -> timestamp
-  private readonly DEDUPE_WINDOW_MS = 30000; // 30 seconds deduplication window
-
-  constructor(tts: DeepgramTTS, wss?: any) {
-    this.tts = tts;
-    this.wss = wss;
-
-    // Cleanup old entries periodically
-    setInterval(() => this.cleanupRecentSpoken(), 60000);
-
-    logger.info('Voice narrator initialized with deduplication');
-  }
-
-  /**
-   * Simple hash for deduplication
-   */
-  private hashText(text: string): string {
-    // Use first 50 chars + length as a simple hash
-    return `${text.slice(0, 50).toLowerCase()}_${text.length}`;
-  }
-
-  /**
-   * Cleanup old entries from deduplication map
-   */
-  private cleanupRecentSpoken(): void {
-    const now = Date.now();
-    for (const [hash, timestamp] of this.recentSpoken) {
-      if (now - timestamp > this.DEDUPE_WINDOW_MS * 2) {
-        this.recentSpoken.delete(hash);
-      }
-    }
-  }
-
-  /**
-   * Enable/disable voice
-   */
-  setEnabled(enabled: boolean): void {
-    this.enabled = enabled;
-    logger.info({ enabled }, 'Voice narrator enabled state changed');
-  }
-
-  /**
-   * Set WebSocket server for broadcasting
-   */
-  setWebSocket(wss: any): void {
-    this.wss = wss;
-  }
-
-  /**
-   * Replace acronyms with pronounceable versions for TTS
-   */
-  private replaceAcronyms(text: string): string {
-    const acronymMap: Record<string, string> = {
-      // Crypto currencies - use phonetic spellings
-      ' SOL': ' soul',        // Solana
-      'SOL ': 'soul ',
-      'SOL.': 'soul.',
-      'SOL,': 'soul,',
-      'SOL?': 'soul?',
-      'SOL!': 'soul!',
-      
-      ' USDC': ' U-S-D-C',    // USD Coin
-      'USDC ': 'U-S-D-C ',
-      
-      ' BTC': ' bitcoin',     // Bitcoin
-      'BTC ': 'bitcoin ',
-      
-      ' ETH': ' ethereum',    // Ethereum
-      'ETH ': 'ethereum ',
-      
-      ' USDT': ' tether',     // Tether
-      'USDT ': 'tether ',
-      
-      // Common trading terms
-      ' mcap': ' market cap',
-      'mcap ': 'market cap ',
-      
-      ' P&L': ' profit and loss',
-      'P&L ': 'profit and loss ',
-      
-      ' NFT': ' N-F-T',
-      'NFT ': 'N-F-T ',
-      
-      ' DeFi': ' dee-fi',
-      'DeFi ': 'dee-fi ',
-      
-      ' APY': ' A-P-Y',
-      'APY ': 'A-P-Y ',
-      
-      ' TVL': ' T-V-L',
-      'TVL ': 'T-V-L ',
-    };
-
-    let result = text;
-    for (const [acronym, replacement] of Object.entries(acronymMap)) {
-      result = result.replace(new RegExp(acronym, 'g'), replacement);
-    }
-    
-    return result;
-  }
-
-  /**
-   * Clean text for speech - remove asterisk actions and other non-speech content
-   */
-  private cleanTextForSpeech(text: string): string {
-    // Remove asterisk actions like *neural networks flickering*
-    let cleaned = text.replace(/\*[^*]+\*/g, '');
-    
-    // Remove emojis and graphic symbols
-    cleaned = cleaned.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/g, '');
-    
-    // Replace acronyms with pronounceable versions
-    cleaned = this.replaceAcronyms(cleaned);
-    
-    // Remove multiple spaces
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    return cleaned;
-  }
-
-  /**
-   * Queue text to be spoken
-   */
-  async say(text: string): Promise<void> {
-    if (!this.enabled) {
-      logger.debug('Voice disabled, skipping');
-      return;
-    }
-
-    // Clean the text before queuing
-    const cleanedText = this.cleanTextForSpeech(text);
-    if (!cleanedText) {
-      logger.debug('Text empty after cleaning, skipping');
-      return;
-    }
-
-    // Check for duplicate/similar text recently spoken
-    const hash = this.hashText(cleanedText);
-    const lastSpoken = this.recentSpoken.get(hash);
-    if (lastSpoken && Date.now() - lastSpoken < this.DEDUPE_WINDOW_MS) {
-      logger.debug({ text: cleanedText.slice(0, 30) }, 'Skipping duplicate speech');
-      return;
-    }
-
-    // Mark as spoken (even before actual speech to prevent queue duplicates)
-    this.recentSpoken.set(hash, Date.now());
-
-    // Limit queue size to prevent buildup
-    if (this.speakQueue.length >= 3) {
-      logger.warn({ queueLength: this.speakQueue.length }, 'Speech queue full, dropping oldest');
-      this.speakQueue.shift();
-    }
-
-    this.speakQueue.push(cleanedText);
-    // Don't await - let queue process in background
-    this.processQueue();
-  }
-
-  /**
-   * Process the speak queue - ensures only one speech at a time
-   */
-  private processQueue(): void {
-    // If already processing, the loop will pick up new items
-    if (this.processingPromise) {
-      return;
-    }
-
-    this.processingPromise = this.doProcessQueue().finally(() => {
-      this.processingPromise = null;
-    });
-  }
-
-  private async doProcessQueue(): Promise<void> {
-    while (this.speakQueue.length > 0) {
-      const text = this.speakQueue.shift()!;
-
-      try {
-        logger.info({ queueLength: this.speakQueue.length }, 'Speaking next in queue');
-        await this.tts.speakAndBroadcast(text, this.wss);
-
-        // Add delay between speeches to prevent overlap
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        logger.error({ error }, 'Error speaking text');
-      }
-    }
-  }
-
-  /**
-   * Clear the speak queue
-   */
-  clearQueue(): void {
-    this.speakQueue = [];
-    logger.info('Speak queue cleared');
-  }
-
-  /**
-   * Get queue length
-   */
-  getQueueLength(): number {
-    return this.speakQueue.length;
-  }
 }
 </file>
 
@@ -12717,395 +13116,6 @@ export class ShillQueue {
     };
   }
 }
-</file>
-
-<file path="src/trading/copy-trader.ts">
-import { HeliusClient, TransactionResult } from '../api/helius.js';
-import { Connection, PublicKey, Logs } from '@solana/web3.js';
-import { createLogger } from '../lib/logger.js';
-import { agentEvents } from '../events/emitter.js';
-
-const logger = createLogger('copy-trader');
-
-export interface CopyTraderConfig {
-  walletAddresses: string[];  // Changed to array for multiple wallets
-  pollIntervalMs: number;
-  enabled: boolean;
-}
-
-/**
- * CopyTrader - Watches multiple wallets and copies their trades
- * Uses WebSocket subscription for real-time detection
- * "Schizo copy trades" - blindly follows trusted wallets with high confidence
- */
-export class CopyTrader {
-  private config: CopyTraderConfig;
-  private helius: HeliusClient;
-  private connection: Connection;
-  private isRunning: boolean = false;
-  private subscriptionIds: Map<string, number> = new Map(); // wallet -> subscriptionId
-  private fallbackIntervalId?: NodeJS.Timeout;
-  private lastSignatures: Map<string, string | null> = new Map(); // wallet -> lastSignature
-  private isProcessing = false;
-  private processedSignatures = new Set<string>();
-
-  constructor(
-    config: CopyTraderConfig,
-    helius: HeliusClient,
-    connection: Connection
-  ) {
-    this.config = config;
-    this.helius = helius;
-    this.connection = connection;
-
-    logger.info({ 
-      wallets: this.config.walletAddresses.length,
-      enabled: this.config.enabled 
-    }, `CopyTrader initialized with ${this.config.walletAddresses.length} wallets (WebSocket mode)`);
-  }
-
-  /**
-   * Start watching all target wallets via WebSocket
-   */
-  async start(): Promise<void> {
-    if (this.isRunning) {
-      logger.warn('CopyTrader already running');
-      return;
-    }
-
-    if (!this.config.enabled || this.config.walletAddresses.length === 0) {
-      logger.info('CopyTrader disabled or no wallets configured');
-      return;
-    }
-
-    this.isRunning = true;
-
-    // Subscribe to each wallet
-    for (const walletAddress of this.config.walletAddresses) {
-      try {
-        const walletPubkey = new PublicKey(walletAddress);
-        
-        const subscriptionId = this.connection.onLogs(
-          walletPubkey,
-          (logs: Logs) => this.handleLogNotification(logs, walletAddress),
-          'confirmed'
-        );
-
-        this.subscriptionIds.set(walletAddress, subscriptionId);
-        this.lastSignatures.set(walletAddress, null);
-
-        logger.info({ 
-          wallet: walletAddress.slice(0, 8) + '...', 
-          subscriptionId 
-        }, '✅ WebSocket subscription active');
-
-      } catch (error) {
-        logger.error({ wallet: walletAddress, error }, 'Failed to subscribe to wallet');
-      }
-    }
-
-    logger.info(`🎯 CopyTrader watching ${this.subscriptionIds.size} wallets`);
-
-    // Start fallback polling
-    this.startFallbackPolling();
-  }
-
-  /**
-   * Start fallback polling for all wallets
-   */
-  private startFallbackPolling(): void {
-    if (this.fallbackIntervalId) return;
-
-    const fallbackInterval = Math.max(this.config.pollIntervalMs * 6, 30000);
-    
-    this.fallbackIntervalId = setInterval(() => {
-      this.pollAllWallets().catch(err => {
-        logger.error({ error: err }, 'Error in CopyTrader fallback poll');
-      });
-    }, fallbackInterval);
-
-    logger.debug({ intervalMs: fallbackInterval }, 'Fallback polling started');
-  }
-
-  /**
-   * Poll all wallets for new transactions
-   */
-  private async pollAllWallets(): Promise<void> {
-    for (const walletAddress of this.config.walletAddresses) {
-      await this.pollWallet(walletAddress);
-    }
-  }
-
-  /**
-   * Handle real-time log notification from WebSocket
-   */
-  private async handleLogNotification(logs: Logs, walletAddress: string): Promise<void> {
-    if (logs.err) {
-      logger.debug({ signature: logs.signature }, 'Ignoring failed transaction');
-      return;
-    }
-
-    if (this.processedSignatures.has(logs.signature)) {
-      return;
-    }
-    this.processedSignatures.add(logs.signature);
-
-    // Limit cache size
-    if (this.processedSignatures.size > 2000) {
-      const entries = Array.from(this.processedSignatures);
-      this.processedSignatures = new Set(entries.slice(-1000));
-    }
-
-    logger.info({ 
-      signature: logs.signature, 
-      wallet: walletAddress.slice(0, 8) + '...' 
-    }, '⚡ Real-time transaction detected!');
-
-    // Check if it looks like a swap
-    const isLikelySwap = logs.logs.some(log => 
-      log.includes('Instruction: Swap') || 
-      log.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') ||
-      log.includes('Program JUP') ||
-      log.includes('pump')
-    );
-
-    if (!isLikelySwap) {
-      logger.info({ signature: logs.signature, logs: logs.logs.slice(0, 3) }, '❌ Transaction rejected: Not a swap');
-      return;
-    }
-
-    const startParse = Date.now();
-    await this.analyzeTransactionBySignature(logs.signature, walletAddress);
-    logger.debug({ signature: logs.signature, ms: Date.now() - startParse }, 'Transaction analysis complete');
-  }
-
-  /**
-   * Stop watching all wallets
-   */
-  stop(): void {
-    if (!this.isRunning) return;
-    
-    this.isRunning = false;
-
-    // Unsubscribe from all WebSocket subscriptions
-    for (const [wallet, subscriptionId] of this.subscriptionIds) {
-      this.connection.removeOnLogsListener(subscriptionId).catch(err => {
-        logger.warn({ error: err, wallet }, 'Failed to remove logs listener');
-      });
-    }
-    this.subscriptionIds.clear();
-
-    if (this.fallbackIntervalId) {
-      clearInterval(this.fallbackIntervalId);
-      this.fallbackIntervalId = undefined;
-    }
-
-    logger.info('CopyTrader stopped');
-  }
-
-  /**
-   * Fallback poll for a single wallet
-   */
-  private async pollWallet(walletAddress: string): Promise<void> {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-
-    try {
-      const response = await this.helius.getTransactionsForAddress(walletAddress, {
-        limit: 5
-      });
-
-      if (!response.data || response.data.length === 0) {
-        return;
-      }
-
-      const lastSig = this.lastSignatures.get(walletAddress);
-
-      for (const tx of response.data) {
-        if (this.processedSignatures.has(tx.signature)) continue;
-        if (tx.signature === lastSig) break;
-
-        this.processedSignatures.add(tx.signature);
-        await this.analyzeTransaction(tx, walletAddress);
-      }
-
-      if (response.data.length > 0) {
-        this.lastSignatures.set(walletAddress, response.data[0].signature);
-      }
-
-    } catch (error) {
-      logger.error({ error, wallet: walletAddress }, 'Failed to poll wallet');
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
-  /**
-   * Analyze transaction by signature (WebSocket path)
-   */
-  private async analyzeTransactionBySignature(signature: string, walletAddress: string): Promise<void> {
-    try {
-      const parsed = await this.connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 0,
-        commitment: 'confirmed'
-      });
-
-      if (!parsed || !parsed.meta) {
-          logger.warn({ signature }, '❌ Transaction not found or missing meta');
-          return;
-      }
-
-      await this.processTransaction(signature, parsed, walletAddress);
-    } catch (error) {
-      logger.warn({ error, signature }, 'Failed to parse transaction from WebSocket');
-    }
-  }
-
-  /**
-   * Analyze a transaction from Helius response (polling path)
-   */
-  private async analyzeTransaction(tx: TransactionResult, walletAddress: string): Promise<void> {
-    if (!tx.success || tx.type !== 'SWAP') {
-      return;
-    }
-
-    try {
-      const parsed = await this.connection.getParsedTransaction(tx.signature, {
-        maxSupportedTransactionVersion: 0,
-        commitment: 'confirmed'
-      });
-
-      if (!parsed || !parsed.meta) return;
-
-      await this.processTransaction(tx.signature, parsed, walletAddress);
-    } catch (error) {
-      logger.warn({ error, signature: tx.signature }, 'Failed to parse potential copy trade');
-    }
-  } 
-
-  private async processTransaction(signature: string, parsed: any, walletAddress: string): Promise<void> {
-    const preTokenBalances = parsed.meta.preTokenBalances || [];
-    const postTokenBalances = parsed.meta.postTokenBalances || [];
-    const accountKeys = parsed.transaction.message.accountKeys;
-    
-    // Find wallet index (handles both legacy and versioned tx structures where static keys are first)
-    const walletIndex = accountKeys.findIndex((k: any) => {
-        const key = k.pubkey ? k.pubkey.toBase58() : k.toBase58();
-        return key === walletAddress;
-    });
-
-    if (walletIndex === -1) {
-        logger.warn({ signature, walletAddress }, '❌ Wallet not found in transaction keys');
-        return;
-    }
-
-    // Check SOL change
-    const preSol = parsed.meta.preBalances[walletIndex];
-    const postSol = parsed.meta.postBalances[walletIndex];
-    const solChange = (postSol - preSol) / 1e9;
-
-    // Check Token changes
-    let boughtMint: string | undefined;
-
-    const getBalance = (balances: any[], mint: string, owner: string) => {
-      const b = balances.find(x => x.mint === mint && x.owner === owner);
-      return b ? parseFloat(b.uiTokenAmount.uiAmountString || '0') : 0;
-    };
-
-    const involvedMints = new Set<string>();
-    [...preTokenBalances, ...postTokenBalances].forEach(b => {
-      if (b.owner === walletAddress) involvedMints.add(b.mint);
-    });
-
-    for (const mint of involvedMints) {
-      const pre = getBalance(preTokenBalances, mint, walletAddress);
-      const post = getBalance(postTokenBalances, mint, walletAddress);
-      if (post > pre) {
-        boughtMint = mint;
-        break;
-      }
-    }
-
-    const isBuy = solChange < -0.001 && !!boughtMint;
-    
-    // Log the analysis details
-    logger.info({
-        signature,
-        solChange: solChange.toFixed(6),
-        boughtMint,
-        isBuy,
-        mintsInvolved: involvedMints.size
-    }, '🔍 CopyTrade Analysis');
-
-    if (isBuy && boughtMint) {
-      logger.info({ 
-        signature, 
-        mint: boughtMint, 
-        solSpent: Math.abs(solChange).toFixed(4),
-        sourceWallet: walletAddress.slice(0, 8) + '...'
-      }, '🎯 COPY TRADE BUY SIGNAL (Real-time)');
-
-      agentEvents.emit({
-        type: 'COPY_TRADE_SIGNAL',
-        timestamp: Date.now(),
-        data: {
-           mint: boughtMint,
-           sourceWallet: walletAddress,
-           signature,
-           solSpent: Math.abs(solChange)
-        }
-      });
-    }
-  }
-}
-</file>
-
-<file path="src/trading/types.ts">
-/**
- * Trading-related type definitions
- */
-
-/**
- * Token information from PumpPortal
- */
-export interface TokenInfo {
-  mint: string;
-  name: string;
-  symbol: string;
-  price: number; // in SOL
-  liquidity: number; // in SOL
-  holderCount: number;
-}
-
-/**
- * Parameters for executing a trade
- */
-export interface TradeParams {
-  mint: string;
-  amount: number;
-  slippage: number; // 0-1, e.g., 0.05 for 5%
-}
-
-/**
- * Result of a trade execution
- */
-export interface TradeResult {
-  signature: string;
-  timestamp: number;
-  mint: string;
-  amount: number;
-  price: number;
-}
-
-/**
- * Trade action type
- */
-export type TradeAction = 'buy' | 'sell';
-
-/**
- * Risk Profile definition
- */
-export type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE' | 'ENTERTAINMENT';
 </file>
 
 <file path=".env.example">
@@ -16983,219 +16993,6 @@ export {
 };
 </file>
 
-<file path="public/index.html">
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$SCHIZO - Paranoid AI Trader</title>
-    <link rel="icon" type="image/png" href="schizo-favicon.png">
-    <link rel="stylesheet" href="styles.css">
-</head>
-
-<body>
-    <header>
-        <div class="scanlines"></div>
-        <div class="header-grid">
-            <!-- Left: 3D Character -->
-            <div class="header-left">
-                <div id="schizo-3d-container">
-                    <div id="schizo-3d-canvas"></div>
-                </div>
-            </div>
-
-            <!-- Center: Logo & Title -->
-            <div class="header-center">
-                <div class="logo-container">
-                    <img src="schizo-logo.png" alt="$SCHIZO Logo" class="header-logo" id="hero-logo">
-                </div>
-                <h1 class="glitch" data-text="$SCHIZO">$SCHIZO</h1>
-                <p class="tagline">Paranoid AI Trading Agent</p>
-            </div>
-
-            <!-- Right: Token Card -->
-            <div class="header-right">
-                <div id="schizo-token-card">
-                    <div class="token-card-header">
-                        <img src="schizo-logo.png" alt="$SCHIZO" class="token-card-img">
-                        <div class="token-card-title">
-                            <span class="token-card-name">$SCHIZO</span>
-                            <span class="token-card-status">Coming Soon</span>
-                        </div>
-                    </div>
-                    <div class="token-card-stats">
-                        <div class="token-card-stat">
-                            <span class="stat-label">Price</span>
-                            <span class="stat-value" id="schizo-price">--</span>
-                        </div>
-                        <div class="token-card-stat">
-                            <span class="stat-label">M.Cap</span>
-                            <span class="stat-value" id="schizo-mcap">--</span>
-                        </div>
-                    </div>
-                    <div class="token-card-actions">
-                        <a href="#" class="btn-primary" title="Buy on PUMP/DEX">BUY $SCHIZO</a>
-                        <div class="secondary-actions">
-                            <a href="#" class="btn-icon" title="Twitter"><svg width="18" height="18" viewBox="0 0 24 24"
-                                    fill="currentColor">
-                                    <path
-                                        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                                </svg></a>
-                        </div>
-                    </div>
-                    <div class="token-card-footer">
-                        <div class="ca-input-container">
-                            <input type="text" id="schizo-ca-input" value="CA: TBA" readonly>
-                            <span class="copy-hint">CLICK TO COPY</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </header>
-
-    <main>
-        <section id="stats">
-            <div class="stat">
-                <label>Status</label>
-                <span id="status" class="status-disconnected">Disconnected</span>
-            </div>
-            <div class="stat">
-                <label>Balance</label>
-                <span id="balance">-- SOL</span>
-            </div>
-            <div class="stat">
-                <label>Win Rate</label>
-                <span id="winRate">0%</span>
-            </div>
-            <div class="stat">
-                <label>Total P&L</label>
-                <span id="pnl">0 SOL</span>
-            </div>
-            <div class="stat">
-                <label>Buybacks</label>
-                <span id="buybacks">0</span>
-            </div>
-        </section>
-
-        <div id="main-panels">
-            <section id="token-stream-section">
-                <div id="token-stream-box">
-                    <div class="panel-header">
-                        <div class="panel-tabs">
-                            <button class="panel-tab active" data-tab="holdings">Holdings <span
-                                    id="holdings-count">(0)</span></button>
-                        </div>
-                        <button id="pauseTokensBtn">Pause</button>
-                    </div>
-                    <div id="holdings-stream" class="tab-content active"></div>
-                </div>
-            </section>
-
-            <section id="feed-container">
-                <div id="feed-box">
-                    <div class="panel-header">
-                        <span>Live Feed</span>
-                        <button id="pauseBtn">Pause</button>
-                    </div>
-                    <div id="feed"></div>
-                </div>
-            </section>
-
-            <section id="chat-container">
-                <div id="chat-box">
-                    <div id="chat-header">Chat with $SCHIZO</div>
-                    <div id="chat-messages"></div>
-                    <div id="chat-input-area">
-                        <div class="chat-input-row">
-                            <input type="text" id="usernameInput" placeholder="Name" maxlength="15" value="anon"
-                                title="Your username">
-                        </div>
-                        <input type="text" id="chatInput" placeholder="Ask $SCHIZO anything..." maxlength="500">
-                        <button id="sendBtn">Send</button>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <section id="trades-container">
-            <h2>Recent Trades</h2>
-            <table id="trades">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Type</th>
-                        <th>Token</th>
-                        <th>Amount</th>
-                        <th>Signature</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </section>
-    </main>
-
-    <!-- Chart Popup -->
-    <div id="chart-popup" class="popup-overlay" onclick="closeChart()">
-        <div class="popup-content" onclick="event.stopPropagation()">
-            <button class="popup-close" onclick="closeChart()">✕</button>
-            <iframe id="chart-iframe" src="" frameborder="0"></iframe>
-        </div>
-    </div>
-
-    <!-- Three.js Import Map -->
-    <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-    }
-    </script>
-    <script src="trench-radio.js"></script>
-    <script src="app.js"></script>
-    <script type="module" src="schizo-3d.js"></script>
-
-    <!-- Fixed About Button - Bottom Right -->
-    <a href="/about.html" class="about-btn-fixed" title="How It Works">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 16v-4M12 8h.01" />
-        </svg>
-        <span>About</span>
-    </a>
-
-    <!-- Trench Radio Controls - Bottom Left -->
-    <div id="trench-radio-controls" class="trench-radio-panel">
-        <div class="trench-radio-header">
-            <span class="trench-radio-title">TRENCH RADIO</span>
-            <span id="trench-radio-state" class="trench-radio-state">OFF</span>
-        </div>
-        <div class="trench-radio-body">
-            <button id="trench-radio-toggle" class="trench-radio-btn">
-                <svg id="radio-icon-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    stroke-width="2">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                    <line x1="23" y1="9" x2="17" y2="15"></line>
-                    <line x1="17" y1="9" x2="23" y2="15"></line>
-                </svg>
-                <svg id="radio-icon-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    stroke-width="2" style="display:none;">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                </svg>
-            </button>
-            <input type="range" id="trench-radio-volume" min="0" max="100" value="50" class="trench-radio-slider">
-        </div>
-    </div>
-
-</body>
-
-</html>
-</file>
-
 <file path="public/trench-radio.js">
 /**
  * Trench Radio - Dynamic Audio Environment
@@ -17653,6 +17450,504 @@ document.addEventListener('DOMContentLoaded', () => {
     window.trenchRadio = new TrenchRadio();
     window.trenchRadio.initTrenchRadio();
 });
+</file>
+
+<file path="src/trading/token-validator.ts">
+import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
+import { createLogger } from '../lib/logger.js';
+import type { RiskProfile } from './types.js';
+import type { PumpNewTokenEvent } from '../api/pumpportal-data.js';
+
+const logger = createLogger('token-validator');
+
+export interface ValidationResult {
+  mint: string;
+  passes: boolean;
+  reason?: string;
+  metadata?: TokenMetadata;
+  isBondingCurve?: boolean; // True if validated via bonding curve data
+}
+
+export interface BondingCurveValidationResult {
+  mint: string;
+  passes: boolean;
+  reason?: string;
+  marketCapSol: number;
+  bondingProgress: number; // 0-100% progress toward graduation
+}
+
+export interface ValidatorConfig {
+  riskProfile: RiskProfile;
+  minLiquidityUsd?: number; // Overrides risk profile if set
+  minVolume1hUsd?: number;  // Overrides risk profile if set
+  requireSocials: boolean;
+}
+
+const DEFAULT_CONFIG: ValidatorConfig = {
+  riskProfile: 'BALANCED',
+  requireSocials: false,
+};
+
+// Graduation threshold: ~400 SOL in bonding curve = ~$69k market cap
+const GRADUATION_THRESHOLD_SOL = 400;
+
+/**
+ * TokenValidator
+ * Validates tokens using DexScreener data to ensure quality before trading
+ */
+export class TokenValidator {
+  private config: ValidatorConfig;
+
+  constructor(config: Partial<ValidatorConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    logger.info({ config: this.config }, 'TokenValidator initialized');
+  }
+
+  /**
+   * Validate a token
+   */
+  async validate(mint: string): Promise<ValidationResult> {
+    try {
+      // Fetch metadata from DexScreener
+      const metadata = await dexscreener.getTokenMetadata(mint);
+
+      if (!metadata) {
+        return {
+          mint,
+          passes: false,
+          reason: 'No DexScreener data found (too new or dead)',
+        };
+      }
+
+      // 1. RISK DIAL SETTINGS
+      const profile = this.config.riskProfile;
+      
+      const liquidityThresholds = {
+        CONSERVATIVE: 15000,
+        BALANCED: 5000,
+        AGGRESSIVE: 1500,
+        ENTERTAINMENT: 500, // Very low threshold for micro bets
+      };
+
+      const maxAgeMinutes = {
+        CONSERVATIVE: 15,
+        BALANCED: 8,
+        AGGRESSIVE: 3,
+        ENTERTAINMENT: 60, // Allow older tokens for entertainment
+      };
+
+      const minBuyPressure = {
+        CONSERVATIVE: 1.8,
+        BALANCED: 1.0,
+        AGGRESSIVE: 1.05,
+        ENTERTAINMENT: 0.8, // Lower threshold - just needs some activity
+      };
+
+      // Determine active thresholds
+      const minLiquidity = this.config.minLiquidityUsd || liquidityThresholds[profile];
+      const maxAge = maxAgeMinutes[profile];
+      const pressureThreshold = minBuyPressure[profile];
+      const minVolume = this.config.minVolume1hUsd || minLiquidity; // Volume should match liquidity roughly
+
+      // Check 1: Liquidity
+      if (metadata.liquidity < minLiquidity) {
+        return {
+          mint,
+          passes: false,
+          reason: `Low liquidity: $${metadata.liquidity.toFixed(0)} < $${minLiquidity} (${profile})`,
+          metadata,
+        };
+      }
+
+      // Check 2: Age (Sniping Window)
+      // IF we are AGGRESSIVE, we want FRESH tokens (age < maxAge). 
+      // Existing logic (minAge) was to avoid scams. New logic (maxAge) is to catch pumps.
+      // BUT, we should probably support both flows.
+      // For this specific 'Sniper' flow, passing a token means it is READY to buy.
+      
+      // If we are 'sniping', we want tokens that are YOUNG enough to be early, 
+      // but OLD enough to have some data. 
+      // Actually, the new prompt says: "If ageMinutes <= maxAgeMinutes -> allow".
+      // This implies we ONLY want young tokens for this strategy.
+      if (metadata.ageMinutes && metadata.ageMinutes > maxAge) {
+         // Optionally, we could allow older tokens if they have massive volume?
+         // For now, stick to the prompt: strict age window for 'Sniping'
+         // result: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
+         // BUT user requested to remove age filter entirely, so we log but DO NOT REJECT
+         if (metadata.ageMinutes > maxAge) {
+             logger.debug({ mint, age: metadata.ageMinutes, maxAge }, 'Token older than maxAge - proceeding anyway due to relaxed filter');
+         }
+         /*
+         return {
+            mint,
+            passes: false,
+            reason: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
+            metadata
+         };
+         */
+      }
+
+      // Check 3: Buy Pressure (New)
+      // buyPressure = buys5m / Math.max(1, sells5m)
+      const buys = metadata.buys5m || 0;
+      const sells = metadata.sells5m || 0;
+      const buyPressure = buys / Math.max(1, sells);
+      
+      if (buyPressure < pressureThreshold) {
+          return {
+              mint,
+              passes: false,
+              reason: `Weak buy pressure: ${buyPressure.toFixed(2)} < ${pressureThreshold} (${profile})`,
+              metadata
+          }
+      }
+
+      // Check 4: Volume
+      const volumeScore = metadata.volume1h > 0 
+        ? metadata.volume1h 
+        : (metadata.volume24h > 0 ? metadata.volume24h : metadata.buys5m * 100); 
+
+      if (volumeScore < minVolume) {
+        return {
+          mint,
+          passes: false,
+          reason: `Low volume: $${volumeScore.toFixed(0)} < $${minVolume}`,
+          metadata,
+        };
+      }
+
+      // Check 5: Suspicious Patterns (Rug Check)
+      if (metadata.priceChange1h < -90) {
+        return {
+          mint,
+          passes: false,
+          reason: `Rug detected: Price down ${metadata.priceChange1h.toFixed(1)}% in 1h`,
+          metadata,
+        };
+      }
+
+      return {
+        mint,
+        passes: true,
+        metadata,
+      };
+
+    } catch (error) {
+      logger.error({ mint, error }, 'Error validating token');
+      return {
+        mint,
+        passes: false,
+        reason: 'Validation error',
+      };
+    }
+  }
+
+  /**
+   * Validate a bonding curve token using PumpPortal data
+   * This is for tokens still on the pump.fun bonding curve (not yet graduated)
+   */
+  validateBondingCurve(token: PumpNewTokenEvent): BondingCurveValidationResult {
+    const profile = this.config.riskProfile;
+
+    // Calculate bonding progress (0-100%)
+    // Tokens graduate at ~400 SOL in bonding curve
+    const bondingProgress = Math.min(100, (token.vSolInBondingCurve / GRADUATION_THRESHOLD_SOL) * 100);
+
+    // Market cap thresholds in SOL (since bonding curve tokens are priced in SOL)
+    // Most tokens start at ~28 SOL mcap - thresholds set to catch early momentum
+    const minMarketCapSol = {
+      CONSERVATIVE: 50,    // ~$8.5k at $170/SOL
+      BALANCED: 28,        // ~$4.8k - catch early momentum (lowered from 30 to match reality)
+      AGGRESSIVE: 28,      // ~$4.8k - very early entry
+      ENTERTAINMENT: 0,    // No minimum - catch everything
+    };
+
+    // Minimum bonding progress (% toward graduation)
+    // Lower thresholds - we want to catch tokens with some momentum
+    const minBondingProgress = {
+      CONSERVATIVE: 15,    // 15% = ~60 SOL in curve
+      BALANCED: 5,         // 5% = ~20 SOL in curve
+      AGGRESSIVE: 2,       // 2% = ~8 SOL in curve
+      ENTERTAINMENT: 1,    // 1% = ~4 SOL in curve - almost any activity
+    };
+
+    const minMcap = minMarketCapSol[profile];
+    const minProgress = minBondingProgress[profile];
+
+    // Check 1: Minimum market cap
+    if (token.marketCapSol < minMcap) {
+      return {
+        mint: token.mint,
+        passes: false,
+        reason: `Low market cap: ${token.marketCapSol.toFixed(1)} SOL < ${minMcap} SOL (${profile})`,
+        marketCapSol: token.marketCapSol,
+        bondingProgress,
+      };
+    }
+
+    // Check 2: Minimum bonding progress (shows there's buying activity)
+    if (bondingProgress < minProgress) {
+      return {
+        mint: token.mint,
+        passes: false,
+        reason: `Low bonding progress: ${bondingProgress.toFixed(1)}% < ${minProgress}% (${profile})`,
+        marketCapSol: token.marketCapSol,
+        bondingProgress,
+      };
+    }
+
+    // Check 3: Creator didn't dump immediately (initialBuy > 0 means dev bought)
+    // If dev didn't buy at all, slightly suspicious but not a deal breaker
+    if (token.initialBuy === 0) {
+      logger.debug({ mint: token.mint }, 'Dev did not buy - proceeding with caution');
+    }
+
+    // Check 4: Suspicious name patterns
+    const suspiciousPatterns = [/rug/i, /scam/i, /honeypot/i, /fake/i, /exit/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        return {
+          mint: token.mint,
+          passes: false,
+          reason: `Suspicious token name: ${token.name}`,
+          marketCapSol: token.marketCapSol,
+          bondingProgress,
+        };
+      }
+    }
+
+    logger.info({
+      mint: token.mint,
+      symbol: token.symbol,
+      marketCapSol: token.marketCapSol.toFixed(2),
+      bondingProgress: bondingProgress.toFixed(1),
+      profile,
+    }, '✅ Bonding curve token validated');
+
+    return {
+      mint: token.mint,
+      passes: true,
+      marketCapSol: token.marketCapSol,
+      bondingProgress,
+    };
+  }
+}
+</file>
+
+<file path="public/index.html">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$SCHIZO - Paranoid AI Trader</title>
+    <link rel="icon" type="image/png" href="schizo-favicon.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <header>
+        <div class="scanlines"></div>
+        <div class="header-grid">
+            <!-- Left: 3D Character -->
+            <div class="header-left">
+                <div id="schizo-3d-container">
+                    <div id="schizo-3d-canvas"></div>
+                </div>
+            </div>
+
+            <!-- Center: Logo & Title -->
+            <div class="header-center">
+                <div class="logo-container">
+                    <img src="schizo-logo.png" alt="$SCHIZO Logo" class="header-logo" id="hero-logo">
+                </div>
+                <h1 class="glitch" data-text="$SCHIZO">$SCHIZO</h1>
+                <p class="tagline">Paranoid AI Trading Agent</p>
+            </div>
+
+            <!-- Right: Token Card -->
+            <div class="header-right">
+                <div id="schizo-token-card">
+                    <div class="token-card-header">
+                        <img src="schizo-logo.png" alt="$SCHIZO" class="token-card-img">
+                        <div class="token-card-title">
+                            <span class="token-card-name">$SCHIZO</span>
+                            <span class="token-card-status">Coming Soon</span>
+                        </div>
+                    </div>
+                    <div class="token-card-stats">
+                        <div class="token-card-stat">
+                            <span class="stat-label">Price</span>
+                            <span class="stat-value" id="schizo-price">--</span>
+                        </div>
+                        <div class="token-card-stat">
+                            <span class="stat-label">M.Cap</span>
+                            <span class="stat-value" id="schizo-mcap">--</span>
+                        </div>
+                    </div>
+                    <div class="token-card-actions">
+                        <a href="#" class="btn-primary" title="Buy on PUMP/DEX">BUY $SCHIZO</a>
+                        <div class="secondary-actions">
+                            <a href="#" class="btn-icon" title="Twitter"><svg width="18" height="18" viewBox="0 0 24 24"
+                                    fill="currentColor">
+                                    <path
+                                        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                                </svg></a>
+                        </div>
+                    </div>
+                    <div class="token-card-footer">
+                        <div class="ca-input-container">
+                            <input type="text" id="schizo-ca-input" value="CA: TBA" readonly>
+                            <span class="copy-hint">CLICK TO COPY</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section id="stats">
+            <div class="stat">
+                <label>Status</label>
+                <span id="status" class="status-disconnected">Disconnected</span>
+            </div>
+            <div class="stat">
+                <label>Balance</label>
+                <span id="balance">-- SOL</span>
+            </div>
+            <div class="stat">
+                <label>Win Rate</label>
+                <span id="winRate">0%</span>
+            </div>
+            <div class="stat">
+                <label>Total P&L</label>
+                <span id="pnl">0 SOL</span>
+            </div>
+            <div class="stat">
+                <label>Buybacks</label>
+                <span id="buybacks">0</span>
+            </div>
+        </section>
+
+        <div id="main-panels">
+            <section id="token-stream-section">
+                <div id="token-stream-box">
+                    <div class="panel-header">
+                        <div class="panel-tabs">
+                            <button class="panel-tab" data-tab="analyzing">Analyzing <span
+                                    id="analyzing-count">(0)</span></button>
+                            <button class="panel-tab active" data-tab="holdings">Holdings <span
+                                    id="holdings-count">(0)</span></button>
+                        </div>
+                        <button id="pauseTokensBtn">Pause</button>
+                    </div>
+                    <div id="token-stream" class="tab-content"></div>
+                    <div id="holdings-stream" class="tab-content active"></div>
+                </div>
+            </section>
+
+            <section id="feed-container">
+                <div id="feed-box">
+                    <div class="panel-header">
+                        <span>Live Feed</span>
+                        <button id="pauseBtn">Pause</button>
+                    </div>
+                    <div id="feed"></div>
+                </div>
+            </section>
+
+            <section id="chat-container">
+                <div id="chat-box">
+                    <div id="chat-header">Chat with $SCHIZO</div>
+                    <div id="chat-messages"></div>
+                    <div id="chat-input-area">
+                        <div class="chat-input-row">
+                            <input type="text" id="usernameInput" placeholder="Name" maxlength="15" value="anon"
+                                title="Your username">
+                        </div>
+                        <input type="text" id="chatInput" placeholder="Ask $SCHIZO anything..." maxlength="500">
+                        <button id="sendBtn">Send</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section id="trades-container">
+            <h2>Recent Trades</h2>
+            <table id="trades">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Token</th>
+                        <th>Amount</th>
+                        <th>Signature</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+    </main>
+
+    <!-- Chart Popup -->
+    <div id="chart-popup" class="popup-overlay" onclick="closeChart()">
+        <div class="popup-content" onclick="event.stopPropagation()">
+            <button class="popup-close" onclick="closeChart()">✕</button>
+            <iframe id="chart-iframe" src="" frameborder="0"></iframe>
+        </div>
+    </div>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script src="trench-radio.js"></script>
+    <script src="app.js"></script>
+    <script type="module" src="schizo-3d.js"></script>
+
+    <!-- Fixed About Button - Bottom Right -->
+    <a href="/about.html" class="about-btn-fixed" title="How It Works">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4M12 8h.01" />
+        </svg>
+        <span>About</span>
+    </a>
+
+    <!-- Trench Radio Controls - Bottom Left -->
+    <div id="trench-radio-controls" class="trench-radio-panel">
+        <div class="trench-radio-header">
+            <span class="trench-radio-title">TRENCH RADIO</span>
+            <span id="trench-radio-state" class="trench-radio-state">OFF</span>
+        </div>
+        <div class="trench-radio-body">
+            <button id="trench-radio-toggle" class="trench-radio-btn">
+                <svg id="radio-icon-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                    <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+                <svg id="radio-icon-on" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" style="display:none;">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+            </button>
+            <input type="range" id="trench-radio-volume" min="0" max="100" value="50" class="trench-radio-slider">
+        </div>
+    </div>
+
+</body>
+
+</html>
 </file>
 
 <file path="src/trading/pumpportal-client.ts">
@@ -18214,288 +18509,6 @@ export class PumpPortalClient {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-}
-</file>
-
-<file path="src/trading/token-validator.ts">
-import { dexscreener, type TokenMetadata } from '../api/dexscreener.js';
-import { createLogger } from '../lib/logger.js';
-import type { RiskProfile } from './types.js';
-import type { PumpNewTokenEvent } from '../api/pumpportal-data.js';
-
-const logger = createLogger('token-validator');
-
-export interface ValidationResult {
-  mint: string;
-  passes: boolean;
-  reason?: string;
-  metadata?: TokenMetadata;
-  isBondingCurve?: boolean; // True if validated via bonding curve data
-}
-
-export interface BondingCurveValidationResult {
-  mint: string;
-  passes: boolean;
-  reason?: string;
-  marketCapSol: number;
-  bondingProgress: number; // 0-100% progress toward graduation
-}
-
-export interface ValidatorConfig {
-  riskProfile: RiskProfile;
-  minLiquidityUsd?: number; // Overrides risk profile if set
-  minVolume1hUsd?: number;  // Overrides risk profile if set
-  requireSocials: boolean;
-}
-
-const DEFAULT_CONFIG: ValidatorConfig = {
-  riskProfile: 'BALANCED',
-  requireSocials: false,
-};
-
-// Graduation threshold: ~400 SOL in bonding curve = ~$69k market cap
-const GRADUATION_THRESHOLD_SOL = 400;
-
-/**
- * TokenValidator
- * Validates tokens using DexScreener data to ensure quality before trading
- */
-export class TokenValidator {
-  private config: ValidatorConfig;
-
-  constructor(config: Partial<ValidatorConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    logger.info({ config: this.config }, 'TokenValidator initialized');
-  }
-
-  /**
-   * Validate a token
-   */
-  async validate(mint: string): Promise<ValidationResult> {
-    try {
-      // Fetch metadata from DexScreener
-      const metadata = await dexscreener.getTokenMetadata(mint);
-
-      if (!metadata) {
-        return {
-          mint,
-          passes: false,
-          reason: 'No DexScreener data found (too new or dead)',
-        };
-      }
-
-      // 1. RISK DIAL SETTINGS
-      const profile = this.config.riskProfile;
-      
-      const liquidityThresholds = {
-        CONSERVATIVE: 15000,
-        BALANCED: 5000,
-        AGGRESSIVE: 1500,
-        ENTERTAINMENT: 500, // Very low threshold for micro bets
-      };
-
-      const maxAgeMinutes = {
-        CONSERVATIVE: 15,
-        BALANCED: 8,
-        AGGRESSIVE: 3,
-        ENTERTAINMENT: 60, // Allow older tokens for entertainment
-      };
-
-      const minBuyPressure = {
-        CONSERVATIVE: 1.8,
-        BALANCED: 1.0,
-        AGGRESSIVE: 1.05,
-        ENTERTAINMENT: 0.8, // Lower threshold - just needs some activity
-      };
-
-      // Determine active thresholds
-      const minLiquidity = this.config.minLiquidityUsd || liquidityThresholds[profile];
-      const maxAge = maxAgeMinutes[profile];
-      const pressureThreshold = minBuyPressure[profile];
-      const minVolume = this.config.minVolume1hUsd || minLiquidity; // Volume should match liquidity roughly
-
-      // Check 1: Liquidity
-      if (metadata.liquidity < minLiquidity) {
-        return {
-          mint,
-          passes: false,
-          reason: `Low liquidity: $${metadata.liquidity.toFixed(0)} < $${minLiquidity} (${profile})`,
-          metadata,
-        };
-      }
-
-      // Check 2: Age (Sniping Window)
-      // IF we are AGGRESSIVE, we want FRESH tokens (age < maxAge). 
-      // Existing logic (minAge) was to avoid scams. New logic (maxAge) is to catch pumps.
-      // BUT, we should probably support both flows.
-      // For this specific 'Sniper' flow, passing a token means it is READY to buy.
-      
-      // If we are 'sniping', we want tokens that are YOUNG enough to be early, 
-      // but OLD enough to have some data. 
-      // Actually, the new prompt says: "If ageMinutes <= maxAgeMinutes -> allow".
-      // This implies we ONLY want young tokens for this strategy.
-      if (metadata.ageMinutes && metadata.ageMinutes > maxAge) {
-         // Optionally, we could allow older tokens if they have massive volume?
-         // For now, stick to the prompt: strict age window for 'Sniping'
-         // result: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
-         // BUT user requested to remove age filter entirely, so we log but DO NOT REJECT
-         if (metadata.ageMinutes > maxAge) {
-             logger.debug({ mint, age: metadata.ageMinutes, maxAge }, 'Token older than maxAge - proceeding anyway due to relaxed filter');
-         }
-         /*
-         return {
-            mint,
-            passes: false,
-            reason: `Too old for ${profile} entry: ${metadata.ageMinutes}m > ${maxAge}m limit`,
-            metadata
-         };
-         */
-      }
-
-      // Check 3: Buy Pressure (New)
-      // buyPressure = buys5m / Math.max(1, sells5m)
-      const buys = metadata.buys5m || 0;
-      const sells = metadata.sells5m || 0;
-      const buyPressure = buys / Math.max(1, sells);
-      
-      if (buyPressure < pressureThreshold) {
-          return {
-              mint,
-              passes: false,
-              reason: `Weak buy pressure: ${buyPressure.toFixed(2)} < ${pressureThreshold} (${profile})`,
-              metadata
-          }
-      }
-
-      // Check 4: Volume
-      const volumeScore = metadata.volume1h > 0 
-        ? metadata.volume1h 
-        : (metadata.volume24h > 0 ? metadata.volume24h : metadata.buys5m * 100); 
-
-      if (volumeScore < minVolume) {
-        return {
-          mint,
-          passes: false,
-          reason: `Low volume: $${volumeScore.toFixed(0)} < $${minVolume}`,
-          metadata,
-        };
-      }
-
-      // Check 5: Suspicious Patterns (Rug Check)
-      if (metadata.priceChange1h < -90) {
-        return {
-          mint,
-          passes: false,
-          reason: `Rug detected: Price down ${metadata.priceChange1h.toFixed(1)}% in 1h`,
-          metadata,
-        };
-      }
-
-      return {
-        mint,
-        passes: true,
-        metadata,
-      };
-
-    } catch (error) {
-      logger.error({ mint, error }, 'Error validating token');
-      return {
-        mint,
-        passes: false,
-        reason: 'Validation error',
-      };
-    }
-  }
-
-  /**
-   * Validate a bonding curve token using PumpPortal data
-   * This is for tokens still on the pump.fun bonding curve (not yet graduated)
-   */
-  validateBondingCurve(token: PumpNewTokenEvent): BondingCurveValidationResult {
-    const profile = this.config.riskProfile;
-
-    // Calculate bonding progress (0-100%)
-    // Tokens graduate at ~400 SOL in bonding curve
-    const bondingProgress = Math.min(100, (token.vSolInBondingCurve / GRADUATION_THRESHOLD_SOL) * 100);
-
-    // Market cap thresholds in SOL (since bonding curve tokens are priced in SOL)
-    // Most tokens start at ~28 SOL mcap - thresholds set to catch early momentum
-    const minMarketCapSol = {
-      CONSERVATIVE: 50,    // ~$8.5k at $170/SOL
-      BALANCED: 28,        // ~$4.8k - catch early momentum (lowered from 30 to match reality)
-      AGGRESSIVE: 28,      // ~$4.8k - very early entry
-      ENTERTAINMENT: 0,    // No minimum - catch everything
-    };
-
-    // Minimum bonding progress (% toward graduation)
-    // Lower thresholds - we want to catch tokens with some momentum
-    const minBondingProgress = {
-      CONSERVATIVE: 15,    // 15% = ~60 SOL in curve
-      BALANCED: 5,         // 5% = ~20 SOL in curve
-      AGGRESSIVE: 2,       // 2% = ~8 SOL in curve
-      ENTERTAINMENT: 1,    // 1% = ~4 SOL in curve - almost any activity
-    };
-
-    const minMcap = minMarketCapSol[profile];
-    const minProgress = minBondingProgress[profile];
-
-    // Check 1: Minimum market cap
-    if (token.marketCapSol < minMcap) {
-      return {
-        mint: token.mint,
-        passes: false,
-        reason: `Low market cap: ${token.marketCapSol.toFixed(1)} SOL < ${minMcap} SOL (${profile})`,
-        marketCapSol: token.marketCapSol,
-        bondingProgress,
-      };
-    }
-
-    // Check 2: Minimum bonding progress (shows there's buying activity)
-    if (bondingProgress < minProgress) {
-      return {
-        mint: token.mint,
-        passes: false,
-        reason: `Low bonding progress: ${bondingProgress.toFixed(1)}% < ${minProgress}% (${profile})`,
-        marketCapSol: token.marketCapSol,
-        bondingProgress,
-      };
-    }
-
-    // Check 3: Creator didn't dump immediately (initialBuy > 0 means dev bought)
-    // If dev didn't buy at all, slightly suspicious but not a deal breaker
-    if (token.initialBuy === 0) {
-      logger.debug({ mint: token.mint }, 'Dev did not buy - proceeding with caution');
-    }
-
-    // Check 4: Suspicious name patterns
-    const suspiciousPatterns = [/rug/i, /scam/i, /honeypot/i, /fake/i, /exit/i];
-    for (const pattern of suspiciousPatterns) {
-      if (pattern.test(token.symbol) || pattern.test(token.name)) {
-        return {
-          mint: token.mint,
-          passes: false,
-          reason: `Suspicious token name: ${token.name}`,
-          marketCapSol: token.marketCapSol,
-          bondingProgress,
-        };
-      }
-    }
-
-    logger.info({
-      mint: token.mint,
-      symbol: token.symbol,
-      marketCapSol: token.marketCapSol.toFixed(2),
-      bondingProgress: bondingProgress.toFixed(1),
-      profile,
-    }, '✅ Bonding curve token validated');
-
-    return {
-      mint: token.mint,
-      passes: true,
-      marketCapSol: token.marketCapSol,
-      bondingProgress,
-    };
   }
 }
 </file>
@@ -19462,6 +19475,442 @@ function handleSimulateAPI(
     logger.error({ error, action }, 'HTTP API simulation failed');
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: `Simulation failed: ${error}` }));
+  }
+}
+</file>
+
+<file path="src/trading/sniper-pipeline.ts">
+import { pumpPortalData, type PumpNewTokenEvent } from '../api/pumpportal-data.js';
+import { logger } from '../lib/logger.js';
+import { TokenValidator, type ValidatorConfig } from './token-validator.js';
+import type { TradingEngine } from './trading-engine.js';
+import { agentEvents } from '../events/emitter.js';
+import { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
+import type { RiskProfile } from './types.js';
+
+export interface SniperPipelineConfig {
+  riskProfile: RiskProfile;
+  validationDelayMs: number; // Will be auto-set by risk profile if default
+  maxQueueSize: number;
+  enableTrading: boolean;
+  maxRetries: number;
+  retryDelayMs: number;
+}
+
+const DEFAULT_CONFIG: SniperPipelineConfig = {
+  riskProfile: 'BALANCED',
+  validationDelayMs: 0, // 0 = Auto-calculate based on risk
+  maxQueueSize: 1000,
+  enableTrading: false,
+  // Smarter retry logic - use env var, default to 5 (was 10)
+  // Most tokens that fail validation will never pass - reduce wasted API calls
+  maxRetries: parseInt(process.env.MAX_VALIDATION_RETRIES || '5', 10),
+  retryDelayMs: 30000,   // 30 seconds between retries
+};
+
+export interface QueuedToken {
+  token: PumpNewTokenEvent;
+  receivedAt: number;
+  validateAfter: number;
+  retryCount: number;
+}
+
+/**
+ * Sniper Pipeline
+ * "Filter-First" architecture: 
+ * PumpPortal (Trigger) -> Wait (Filter) -> DexScreener (Validate) -> Helius (Execute)
+ */
+export class SniperPipeline {
+  private config: SniperPipelineConfig;
+  private validator: TokenValidator;
+  private tradingEngine?: TradingEngine;
+  private tokenSafety?: TokenSafetyAnalyzer;
+  
+  private queue: QueuedToken[] = [];
+  private isProcessing = false;
+  private processingInterval?: NodeJS.Timeout;
+  private isRunning = false;
+
+  constructor(
+    config: Partial<SniperPipelineConfig>,
+    validatorConfig: Partial<ValidatorConfig>,
+    tradingEngine?: TradingEngine,
+    tokenSafety?: TokenSafetyAnalyzer
+  ) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    
+    // Auto-set delay based on risk profile if not explicitly set
+    if (this.config.validationDelayMs === 0) {
+        if (this.config.riskProfile === 'AGGRESSIVE') {
+            this.config.validationDelayMs = 30000; // 30 seconds
+        } else if (this.config.riskProfile === 'CONSERVATIVE') {
+            this.config.validationDelayMs = 300000; // 5 minutes
+        } else {
+            this.config.validationDelayMs = 120000; // 2 minutes (Balanced)
+        }
+    }
+    
+    // Pass risk profile to validator
+    this.validator = new TokenValidator({
+        ...validatorConfig,
+        riskProfile: this.config.riskProfile
+    });
+    
+    this.tradingEngine = tradingEngine;
+    this.tokenSafety = tokenSafety;
+
+    logger.info({ 
+      pipelineConfig: this.config,
+      validatorConfig 
+    }, 'Sniper Pipeline initialized');
+  }
+
+  /**
+   * Start the pipeline
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) return;
+    this.isRunning = true;
+
+    logger.info('Starting Sniper Pipeline...');
+
+    // 1. Connect to PumpPortal (The Trigger)
+    try {
+      await pumpPortalData.connect();
+      pumpPortalData.subscribeNewTokens();
+      
+      pumpPortalData.onNewToken((token) => {
+        this.enqueueToken(token);
+      });
+
+      logger.info('🔌 Connected to PumpPortal - Listening for new tokens');
+    } catch (error) {
+      logger.error({ error }, 'Failed to connect to PumpPortal');
+    }
+
+    // 2. Start Processing Loop (The Wait Filter)
+    this.processingInterval = setInterval(() => {
+      this.processQueue();
+    }, 10000); // Check queue every 10 seconds
+
+    logger.info(`⏳ Pipeline active. Tokens will be held for ${(this.config.validationDelayMs / 60000).toFixed(1)} minutes before validation.`);
+  }
+
+  /**
+   * Stop the pipeline
+   */
+  stop(): void {
+    this.isRunning = false;
+    if (this.processingInterval) {
+      clearInterval(this.processingInterval);
+    }
+    pumpPortalData.disconnect();
+    logger.info('Sniper Pipeline stopped');
+  }
+
+  /**
+   * Add new token to the delayed queue
+   * Pre-filters tokens that are unlikely to pass validation
+   */
+  private enqueueToken(token: PumpNewTokenEvent): void {
+    // Basic deduplication
+    if (this.queue.some(t => t.token.mint === token.mint)) return;
+
+    // PRE-FILTER: Skip tokens that are extremely unlikely to pass validation
+    // This saves API calls and reduces queue congestion
+
+    // 1. Minimum market cap filter - extremely low mcap tokens are usually dead
+    // Lowered to 25 SOL to catch early momentum (tokens start at ~28 SOL)
+    const MIN_MCAP_SOL = 25;
+    if (token.marketCapSol < MIN_MCAP_SOL) {
+      logger.debug({
+        mint: token.mint,
+        symbol: token.symbol,
+        marketCapSol: token.marketCapSol.toFixed(2)
+      }, 'Skipped: Market cap too low for queue');
+      return;
+    }
+
+    // 2. Suspicious name filter - common rug patterns
+    const suspiciousPatterns = [/test/i, /rug/i, /scam/i, /honeypot/i, /fake/i];
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(token.symbol) || pattern.test(token.name)) {
+        logger.debug({
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name
+        }, 'Skipped: Suspicious token name');
+        return;
+      }
+    }
+
+    // Queue limiting
+    if (this.queue.length >= this.config.maxQueueSize) {
+      // Remove oldest
+      this.queue.shift();
+    }
+
+    const now = Date.now();
+    this.queue.push({
+      token,
+      receivedAt: now,
+      validateAfter: now + this.config.validationDelayMs,
+      retryCount: 0,
+    });
+
+    logger.info({
+      mint: token.mint,
+      symbol: token.symbol,
+      marketCapSol: token.marketCapSol.toFixed(2),
+      queueSize: this.queue.length,
+      validateAfter: new Date(now + this.config.validationDelayMs).toISOString()
+    }, '📥 Token queued for delayed validation');
+  }
+
+  /**
+   * Process mature tokens in the queue
+   */
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
+    // Log queue status every cycle for debugging
+    if (this.queue.length > 0) {
+      const now = Date.now();
+      const readyCount = this.queue.filter(t => t.validateAfter <= now).length;
+      logger.info({ queueSize: this.queue.length, readyForValidation: readyCount }, '⏰ Queue check');
+    }
+
+    try {
+      const now = Date.now();
+      
+      // Find tokens ready for validation
+      const readyTokens = this.queue.filter(t => t.validateAfter <= now);
+      
+      // Remove them from main queue
+      if (readyTokens.length > 0) {
+        this.queue = this.queue.filter(t => t.validateAfter > now);
+        
+        logger.info({ 
+          count: readyTokens.length, 
+          remainingInQueue: this.queue.length 
+        }, 'Processing mature tokens...');
+
+        // Process in batches to respect rate limits (DexScreener ~60/min)
+        // We'll do 5 at a time
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < readyTokens.length; i += BATCH_SIZE) {
+          const batch = readyTokens.slice(i, i + BATCH_SIZE);
+          await Promise.all(batch.map(t => this.validateAndExecute(t)));
+          
+          // Small delay between batches to be nice to APIs
+          if (i + BATCH_SIZE < readyTokens.length) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+
+    } catch (error) {
+      logger.error({ error }, 'Error processing pipeline queue');
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Validate a single token and pass to execution if good
+   * Emits SCAN event on entry, REJECT event on failure with full observability
+   */
+  private async validateAndExecute(queued: QueuedToken): Promise<void> {
+    const { token } = queued;
+    const analysisLogs: string[] = [];
+
+    analysisLogs.push(`Token: ${token.symbol} (${token.mint.slice(0, 8)}...)`);
+    analysisLogs.push(`Source: PUMP_FUN`);
+    analysisLogs.push(`Wait time: ${(this.config.validationDelayMs / 60000).toFixed(1)} min`);
+
+    // EMIT SCAN EVENT - Token is being analyzed
+    agentEvents.emit({
+      type: 'SCAN',
+      timestamp: Date.now(),
+      data: {
+        reasoning: `Analyzing ${token.symbol} from PumpPortal - survived ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay`,
+        logs: [...analysisLogs],
+        mint: token.mint,
+        symbol: token.symbol,
+        name: token.name,
+        source: 'PUMP_FUN',
+        liquidity: 0, // Will be updated after validation
+        marketCap: token.marketCapSol * 170,
+      },
+    });
+
+    // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
+    agentEvents.emit({
+      type: 'ANALYSIS_THOUGHT',
+      timestamp: Date.now(),
+      data: {
+        mint: token.mint,
+        symbol: token.symbol,
+        name: token.name,
+        marketCapSol: token.marketCapSol,
+        stage: 'scanning',
+        thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
+      }
+    });
+
+    logger.info({ mint: token.mint, symbol: token.symbol, marketCapSol: token.marketCapSol.toFixed(2) }, '🔍 Validating bonding curve token...');
+
+    // 3. The Validator (Bonding Curve - uses PumpPortal data, not DexScreener)
+    // Bonding curve tokens have $0 DEX liquidity, so we validate using market cap and bonding progress
+    const result = this.validator.validateBondingCurve(token);
+
+    if (result.passes) {
+      // Emit validation success for frontend
+      agentEvents.emit({
+        type: 'ANALYSIS_THOUGHT',
+        timestamp: Date.now(),
+        data: {
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name,
+          liquidity: 0, // Bonding curve = no DEX liquidity
+          marketCapSol: result.marketCapSol,
+          stage: 'safety',
+          thought: `${token.symbol} at ${result.marketCapSol.toFixed(1)} SOL mcap (${result.bondingProgress.toFixed(1)}% to graduation). Looking promising...`
+        }
+      });
+
+      logger.info({
+        mint: token.mint,
+        symbol: token.symbol,
+        marketCapSol: result.marketCapSol,
+        bondingProgress: result.bondingProgress,
+        reason: 'Passed bonding curve validation'
+      }, '✅ Bonding curve token validated! Passing to Execution...');
+
+      // Notify system
+      agentEvents.emit({
+        type: 'TOKEN_DISCOVERED',
+        timestamp: Date.now(),
+        data: {
+          mint: token.mint,
+          symbol: token.symbol,
+          name: token.name,
+          marketCapSol: result.marketCapSol,
+          bondingProgress: result.bondingProgress,
+          source: 'SNIPER_PIPELINE',
+          isBondingCurve: true,
+        } as any
+      });
+
+      // 4. The Executor (Helius via TradingEngine)
+      if (this.config.enableTrading && this.tradingEngine) {
+        if (this.tokenSafety) {
+            // Safety check
+            const safety = await this.tokenSafety.analyze(token.mint);
+            analysisLogs.push(`Safety check: ${safety.isSafe ? 'PASSED' : 'FAILED'}`);
+
+            if (!safety.isSafe) {
+                const rejectReason = safety.risks.join(', ');
+                analysisLogs.push(`Rejected: ${rejectReason}`);
+
+                // Emit rejection with REJECT event
+                agentEvents.emit({
+                  type: 'REJECT',
+                  timestamp: Date.now(),
+                  data: {
+                    reasoning: `${token.symbol} rejected due to safety risks: ${rejectReason}`,
+                    logs: analysisLogs,
+                    mint: token.mint,
+                    symbol: token.symbol,
+                    rejectReason,
+                    stage: 'safety',
+                  },
+                });
+
+                // Also emit ANALYSIS_THOUGHT for compatibility
+                agentEvents.emit({
+                  type: 'ANALYSIS_THOUGHT',
+                  timestamp: Date.now(),
+                  data: {
+                    mint: token.mint,
+                    symbol: token.symbol,
+                    stage: 'decision',
+                    thought: `NOPE. ${token.symbol} has ${safety.risks.join(', ')}. Hard pass.`,
+                    details: { isSafe: false, risks: safety.risks, shouldTrade: false }
+                  }
+                });
+                logger.warn({ mint: token.mint, risks: safety.risks }, '❌ Safety check failed after validation');
+                return;
+            }
+        }
+
+        // Emit decision to buy
+        agentEvents.emit({
+          type: 'ANALYSIS_THOUGHT',
+          timestamp: Date.now(),
+          data: {
+            mint: token.mint,
+            symbol: token.symbol,
+            stage: 'decision',
+            thought: `${token.symbol} passes all checks. BUYING.`,
+            details: { shouldTrade: true }
+          }
+        });
+
+        // Execute via Trading Engine (bonding curve token)
+        this.tradingEngine.executeBuy(token.mint, {
+             marketCapSol: result.marketCapSol,
+             liquidity: 0, // Bonding curve = no DEX liquidity
+             symbol: token.symbol,
+             name: token.name,
+             imageUrl: token.imageUrl,
+        });
+      }
+
+    } else {
+      const rejectReason = result.reason || 'Bonding curve validation failed';
+      analysisLogs.push(`Validation: FAILED`);
+      analysisLogs.push(`Rejected: ${rejectReason}`);
+
+      // Validation failed - emit REJECT event
+      agentEvents.emit({
+        type: 'REJECT',
+        timestamp: Date.now(),
+        data: {
+          reasoning: `${token.symbol} rejected: ${rejectReason}`,
+          logs: analysisLogs,
+          mint: token.mint,
+          symbol: token.symbol,
+          rejectReason,
+          stage: 'validation',
+        },
+      });
+
+      // Also emit ANALYSIS_THOUGHT for compatibility
+      agentEvents.emit({
+        type: 'ANALYSIS_THOUGHT',
+        timestamp: Date.now(),
+        data: {
+          mint: token.mint,
+          symbol: token.symbol,
+          stage: 'decision',
+          thought: `${token.symbol} rejected: ${result.reason}. Moving on.`,
+          details: { shouldTrade: false, reasons: [result.reason || 'Unknown'] }
+        }
+      });
+
+      // No retry needed for bonding curve validation - we already have all the data
+      // Token either passes now (market cap + bonding progress criteria) or it doesn't
+      logger.info({
+        mint: token.mint,
+        symbol: token.symbol,
+        marketCapSol: result.marketCapSol.toFixed(2),
+        bondingProgress: result.bondingProgress.toFixed(1),
+        reason: result.reason
+      }, `❌ Token rejected: ${result.reason}`);
+    }
   }
 }
 </file>
@@ -20875,12 +21324,16 @@ button:active {
 
 /* Token Stream Content Area */
 #token-stream {
+    display: none;
     flex: 1;
     overflow-y: auto;
     padding: 15px;
-    display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+#token-stream.active {
+    display: flex;
 }
 
 .event {
@@ -22138,442 +22591,6 @@ td a:hover {
 }
 </file>
 
-<file path="src/trading/sniper-pipeline.ts">
-import { pumpPortalData, type PumpNewTokenEvent } from '../api/pumpportal-data.js';
-import { logger } from '../lib/logger.js';
-import { TokenValidator, type ValidatorConfig } from './token-validator.js';
-import type { TradingEngine } from './trading-engine.js';
-import { agentEvents } from '../events/emitter.js';
-import { TokenSafetyAnalyzer } from '../analysis/token-safety.js';
-import type { RiskProfile } from './types.js';
-
-export interface SniperPipelineConfig {
-  riskProfile: RiskProfile;
-  validationDelayMs: number; // Will be auto-set by risk profile if default
-  maxQueueSize: number;
-  enableTrading: boolean;
-  maxRetries: number;
-  retryDelayMs: number;
-}
-
-const DEFAULT_CONFIG: SniperPipelineConfig = {
-  riskProfile: 'BALANCED',
-  validationDelayMs: 0, // 0 = Auto-calculate based on risk
-  maxQueueSize: 1000,
-  enableTrading: false,
-  // Smarter retry logic - use env var, default to 5 (was 10)
-  // Most tokens that fail validation will never pass - reduce wasted API calls
-  maxRetries: parseInt(process.env.MAX_VALIDATION_RETRIES || '5', 10),
-  retryDelayMs: 30000,   // 30 seconds between retries
-};
-
-export interface QueuedToken {
-  token: PumpNewTokenEvent;
-  receivedAt: number;
-  validateAfter: number;
-  retryCount: number;
-}
-
-/**
- * Sniper Pipeline
- * "Filter-First" architecture: 
- * PumpPortal (Trigger) -> Wait (Filter) -> DexScreener (Validate) -> Helius (Execute)
- */
-export class SniperPipeline {
-  private config: SniperPipelineConfig;
-  private validator: TokenValidator;
-  private tradingEngine?: TradingEngine;
-  private tokenSafety?: TokenSafetyAnalyzer;
-  
-  private queue: QueuedToken[] = [];
-  private isProcessing = false;
-  private processingInterval?: NodeJS.Timeout;
-  private isRunning = false;
-
-  constructor(
-    config: Partial<SniperPipelineConfig>,
-    validatorConfig: Partial<ValidatorConfig>,
-    tradingEngine?: TradingEngine,
-    tokenSafety?: TokenSafetyAnalyzer
-  ) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    
-    // Auto-set delay based on risk profile if not explicitly set
-    if (this.config.validationDelayMs === 0) {
-        if (this.config.riskProfile === 'AGGRESSIVE') {
-            this.config.validationDelayMs = 30000; // 30 seconds
-        } else if (this.config.riskProfile === 'CONSERVATIVE') {
-            this.config.validationDelayMs = 300000; // 5 minutes
-        } else {
-            this.config.validationDelayMs = 120000; // 2 minutes (Balanced)
-        }
-    }
-    
-    // Pass risk profile to validator
-    this.validator = new TokenValidator({
-        ...validatorConfig,
-        riskProfile: this.config.riskProfile
-    });
-    
-    this.tradingEngine = tradingEngine;
-    this.tokenSafety = tokenSafety;
-
-    logger.info({ 
-      pipelineConfig: this.config,
-      validatorConfig 
-    }, 'Sniper Pipeline initialized');
-  }
-
-  /**
-   * Start the pipeline
-   */
-  async start(): Promise<void> {
-    if (this.isRunning) return;
-    this.isRunning = true;
-
-    logger.info('Starting Sniper Pipeline...');
-
-    // 1. Connect to PumpPortal (The Trigger)
-    try {
-      await pumpPortalData.connect();
-      pumpPortalData.subscribeNewTokens();
-      
-      pumpPortalData.onNewToken((token) => {
-        this.enqueueToken(token);
-      });
-
-      logger.info('🔌 Connected to PumpPortal - Listening for new tokens');
-    } catch (error) {
-      logger.error({ error }, 'Failed to connect to PumpPortal');
-    }
-
-    // 2. Start Processing Loop (The Wait Filter)
-    this.processingInterval = setInterval(() => {
-      this.processQueue();
-    }, 10000); // Check queue every 10 seconds
-
-    logger.info(`⏳ Pipeline active. Tokens will be held for ${(this.config.validationDelayMs / 60000).toFixed(1)} minutes before validation.`);
-  }
-
-  /**
-   * Stop the pipeline
-   */
-  stop(): void {
-    this.isRunning = false;
-    if (this.processingInterval) {
-      clearInterval(this.processingInterval);
-    }
-    pumpPortalData.disconnect();
-    logger.info('Sniper Pipeline stopped');
-  }
-
-  /**
-   * Add new token to the delayed queue
-   * Pre-filters tokens that are unlikely to pass validation
-   */
-  private enqueueToken(token: PumpNewTokenEvent): void {
-    // Basic deduplication
-    if (this.queue.some(t => t.token.mint === token.mint)) return;
-
-    // PRE-FILTER: Skip tokens that are extremely unlikely to pass validation
-    // This saves API calls and reduces queue congestion
-
-    // 1. Minimum market cap filter - extremely low mcap tokens are usually dead
-    // Lowered to 25 SOL to catch early momentum (tokens start at ~28 SOL)
-    const MIN_MCAP_SOL = 25;
-    if (token.marketCapSol < MIN_MCAP_SOL) {
-      logger.debug({
-        mint: token.mint,
-        symbol: token.symbol,
-        marketCapSol: token.marketCapSol.toFixed(2)
-      }, 'Skipped: Market cap too low for queue');
-      return;
-    }
-
-    // 2. Suspicious name filter - common rug patterns
-    const suspiciousPatterns = [/test/i, /rug/i, /scam/i, /honeypot/i, /fake/i];
-    for (const pattern of suspiciousPatterns) {
-      if (pattern.test(token.symbol) || pattern.test(token.name)) {
-        logger.debug({
-          mint: token.mint,
-          symbol: token.symbol,
-          name: token.name
-        }, 'Skipped: Suspicious token name');
-        return;
-      }
-    }
-
-    // Queue limiting
-    if (this.queue.length >= this.config.maxQueueSize) {
-      // Remove oldest
-      this.queue.shift();
-    }
-
-    const now = Date.now();
-    this.queue.push({
-      token,
-      receivedAt: now,
-      validateAfter: now + this.config.validationDelayMs,
-      retryCount: 0,
-    });
-
-    logger.info({
-      mint: token.mint,
-      symbol: token.symbol,
-      marketCapSol: token.marketCapSol.toFixed(2),
-      queueSize: this.queue.length,
-      validateAfter: new Date(now + this.config.validationDelayMs).toISOString()
-    }, '📥 Token queued for delayed validation');
-  }
-
-  /**
-   * Process mature tokens in the queue
-   */
-  private async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-
-    // Log queue status every cycle for debugging
-    if (this.queue.length > 0) {
-      const now = Date.now();
-      const readyCount = this.queue.filter(t => t.validateAfter <= now).length;
-      logger.info({ queueSize: this.queue.length, readyForValidation: readyCount }, '⏰ Queue check');
-    }
-
-    try {
-      const now = Date.now();
-      
-      // Find tokens ready for validation
-      const readyTokens = this.queue.filter(t => t.validateAfter <= now);
-      
-      // Remove them from main queue
-      if (readyTokens.length > 0) {
-        this.queue = this.queue.filter(t => t.validateAfter > now);
-        
-        logger.info({ 
-          count: readyTokens.length, 
-          remainingInQueue: this.queue.length 
-        }, 'Processing mature tokens...');
-
-        // Process in batches to respect rate limits (DexScreener ~60/min)
-        // We'll do 5 at a time
-        const BATCH_SIZE = 5;
-        for (let i = 0; i < readyTokens.length; i += BATCH_SIZE) {
-          const batch = readyTokens.slice(i, i + BATCH_SIZE);
-          await Promise.all(batch.map(t => this.validateAndExecute(t)));
-          
-          // Small delay between batches to be nice to APIs
-          if (i + BATCH_SIZE < readyTokens.length) {
-            await new Promise(r => setTimeout(r, 2000));
-          }
-        }
-      }
-
-    } catch (error) {
-      logger.error({ error }, 'Error processing pipeline queue');
-    } finally {
-      this.isProcessing = false;
-    }
-  }
-
-  /**
-   * Validate a single token and pass to execution if good
-   * Emits SCAN event on entry, REJECT event on failure with full observability
-   */
-  private async validateAndExecute(queued: QueuedToken): Promise<void> {
-    const { token } = queued;
-    const analysisLogs: string[] = [];
-
-    analysisLogs.push(`Token: ${token.symbol} (${token.mint.slice(0, 8)}...)`);
-    analysisLogs.push(`Source: PUMP_FUN`);
-    analysisLogs.push(`Wait time: ${(this.config.validationDelayMs / 60000).toFixed(1)} min`);
-
-    // EMIT SCAN EVENT - Token is being analyzed
-    agentEvents.emit({
-      type: 'SCAN',
-      timestamp: Date.now(),
-      data: {
-        reasoning: `Analyzing ${token.symbol} from PumpPortal - survived ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay`,
-        logs: [...analysisLogs],
-        mint: token.mint,
-        symbol: token.symbol,
-        name: token.name,
-        source: 'PUMP_FUN',
-        liquidity: 0, // Will be updated after validation
-        marketCap: token.marketCapSol * 170,
-      },
-    });
-
-    // Stage 1: SCANNING - Emit for frontend "Currently Analyzing" display
-    agentEvents.emit({
-      type: 'ANALYSIS_THOUGHT',
-      timestamp: Date.now(),
-      data: {
-        mint: token.mint,
-        symbol: token.symbol,
-        name: token.name,
-        marketCapSol: token.marketCapSol,
-        stage: 'scanning',
-        thought: `Checking ${token.symbol}... survived the ${(this.config.validationDelayMs / 60000).toFixed(1)} min delay. Let's see if it's worth anything.`
-      }
-    });
-
-    logger.info({ mint: token.mint, symbol: token.symbol, marketCapSol: token.marketCapSol.toFixed(2) }, '🔍 Validating bonding curve token...');
-
-    // 3. The Validator (Bonding Curve - uses PumpPortal data, not DexScreener)
-    // Bonding curve tokens have $0 DEX liquidity, so we validate using market cap and bonding progress
-    const result = this.validator.validateBondingCurve(token);
-
-    if (result.passes) {
-      // Emit validation success for frontend
-      agentEvents.emit({
-        type: 'ANALYSIS_THOUGHT',
-        timestamp: Date.now(),
-        data: {
-          mint: token.mint,
-          symbol: token.symbol,
-          name: token.name,
-          liquidity: 0, // Bonding curve = no DEX liquidity
-          marketCapSol: result.marketCapSol,
-          stage: 'safety',
-          thought: `${token.symbol} at ${result.marketCapSol.toFixed(1)} SOL mcap (${result.bondingProgress.toFixed(1)}% to graduation). Looking promising...`
-        }
-      });
-
-      logger.info({
-        mint: token.mint,
-        symbol: token.symbol,
-        marketCapSol: result.marketCapSol,
-        bondingProgress: result.bondingProgress,
-        reason: 'Passed bonding curve validation'
-      }, '✅ Bonding curve token validated! Passing to Execution...');
-
-      // Notify system
-      agentEvents.emit({
-        type: 'TOKEN_DISCOVERED',
-        timestamp: Date.now(),
-        data: {
-          mint: token.mint,
-          symbol: token.symbol,
-          name: token.name,
-          marketCapSol: result.marketCapSol,
-          bondingProgress: result.bondingProgress,
-          source: 'SNIPER_PIPELINE',
-          isBondingCurve: true,
-        } as any
-      });
-
-      // 4. The Executor (Helius via TradingEngine)
-      if (this.config.enableTrading && this.tradingEngine) {
-        if (this.tokenSafety) {
-            // Safety check
-            const safety = await this.tokenSafety.analyze(token.mint);
-            analysisLogs.push(`Safety check: ${safety.isSafe ? 'PASSED' : 'FAILED'}`);
-
-            if (!safety.isSafe) {
-                const rejectReason = safety.risks.join(', ');
-                analysisLogs.push(`Rejected: ${rejectReason}`);
-
-                // Emit rejection with REJECT event
-                agentEvents.emit({
-                  type: 'REJECT',
-                  timestamp: Date.now(),
-                  data: {
-                    reasoning: `${token.symbol} rejected due to safety risks: ${rejectReason}`,
-                    logs: analysisLogs,
-                    mint: token.mint,
-                    symbol: token.symbol,
-                    rejectReason,
-                    stage: 'safety',
-                  },
-                });
-
-                // Also emit ANALYSIS_THOUGHT for compatibility
-                agentEvents.emit({
-                  type: 'ANALYSIS_THOUGHT',
-                  timestamp: Date.now(),
-                  data: {
-                    mint: token.mint,
-                    symbol: token.symbol,
-                    stage: 'decision',
-                    thought: `NOPE. ${token.symbol} has ${safety.risks.join(', ')}. Hard pass.`,
-                    details: { isSafe: false, risks: safety.risks, shouldTrade: false }
-                  }
-                });
-                logger.warn({ mint: token.mint, risks: safety.risks }, '❌ Safety check failed after validation');
-                return;
-            }
-        }
-
-        // Emit decision to buy
-        agentEvents.emit({
-          type: 'ANALYSIS_THOUGHT',
-          timestamp: Date.now(),
-          data: {
-            mint: token.mint,
-            symbol: token.symbol,
-            stage: 'decision',
-            thought: `${token.symbol} passes all checks. BUYING.`,
-            details: { shouldTrade: true }
-          }
-        });
-
-        // Execute via Trading Engine (bonding curve token)
-        this.tradingEngine.executeBuy(token.mint, {
-             marketCapSol: result.marketCapSol,
-             liquidity: 0, // Bonding curve = no DEX liquidity
-             symbol: token.symbol,
-             name: token.name,
-             imageUrl: token.imageUrl,
-        });
-      }
-
-    } else {
-      const rejectReason = result.reason || 'Bonding curve validation failed';
-      analysisLogs.push(`Validation: FAILED`);
-      analysisLogs.push(`Rejected: ${rejectReason}`);
-
-      // Validation failed - emit REJECT event
-      agentEvents.emit({
-        type: 'REJECT',
-        timestamp: Date.now(),
-        data: {
-          reasoning: `${token.symbol} rejected: ${rejectReason}`,
-          logs: analysisLogs,
-          mint: token.mint,
-          symbol: token.symbol,
-          rejectReason,
-          stage: 'validation',
-        },
-      });
-
-      // Also emit ANALYSIS_THOUGHT for compatibility
-      agentEvents.emit({
-        type: 'ANALYSIS_THOUGHT',
-        timestamp: Date.now(),
-        data: {
-          mint: token.mint,
-          symbol: token.symbol,
-          stage: 'decision',
-          thought: `${token.symbol} rejected: ${result.reason}. Moving on.`,
-          details: { shouldTrade: false, reasons: [result.reason || 'Unknown'] }
-        }
-      });
-
-      // No retry needed for bonding curve validation - we already have all the data
-      // Token either passes now (market cap + bonding progress criteria) or it doesn't
-      logger.info({
-        mint: token.mint,
-        symbol: token.symbol,
-        marketCapSol: result.marketCapSol.toFixed(2),
-        bondingProgress: result.bondingProgress.toFixed(1),
-        reason: result.reason
-      }, `❌ Token rejected: ${result.reason}`);
-    }
-  }
-}
-</file>
-
 <file path="src/trading/trading-loop.ts">
 /**
  * Trading Loop - Automatic token monitoring and trading
@@ -23357,17 +23374,26 @@ export class TradingLoop {
         type: 'POSITIONS_UPDATE',
         timestamp: Date.now(),
         data: {
-          positions: positions.map(p => ({
-            tokenMint: p.tokenMint,
-            tokenSymbol: p.tokenSymbol,
-            tokenName: p.tokenName,
-            entryAmountSol: p.entryAmountSol,
-            entryAmountTokens: p.entryAmountTokens,
-            entryPrice: p.entryPrice,
-            entryTimestamp: p.entryTimestamp,
-            currentPrice: p.currentPrice,
-            unrealizedPnLPercent: p.unrealizedPnLPercent,
-          })),
+          positions: positions.map(p => {
+            // Calculate unrealized P&L in SOL for this position
+            let unrealizedPnLSol = 0;
+            if (p.currentPrice && p.entryPrice) {
+              const currentValue = p.entryAmountTokens * p.currentPrice;
+              unrealizedPnLSol = currentValue - p.entryAmountSol;
+            }
+            return {
+              tokenMint: p.tokenMint,
+              tokenSymbol: p.tokenSymbol,
+              tokenName: p.tokenName,
+              entryAmountSol: p.entryAmountSol,
+              entryAmountTokens: p.entryAmountTokens,
+              entryPrice: p.entryPrice,
+              entryTimestamp: p.entryTimestamp,
+              currentPrice: p.currentPrice,
+              unrealizedPnLPercent: p.unrealizedPnLPercent,
+              unrealizedPnLSol, // NEW: actual SOL P&L for debugging
+            };
+          }),
         },
       });
     } catch (error) {
@@ -24110,6 +24136,34 @@ async function main(): Promise<void> {
       log.info({ deletedCount }, 'Cleared stale sync trades from database');
     }
 
+    // Clean up known phantom positions (tokens no longer in wallet)
+    // These positions show in DB but wallet has 0 tokens - causing incorrect P&L
+    const phantomMints = [
+      'G9tnG6Z4KDrNepi2fYQUZYEhuBtfwg6TwbzekxWMpump', // doge
+      'C4br6g4C', // HonorPump (partial mint)
+      'DPypP1iY', // FaPEPE
+      '9R4zqfea', // RyanAir
+      'VTCQxY6b', // CITY
+      'DRtvTCzf', // ChiefPussy
+      '96zMCM9n', // HUGGI
+      'HKWqwDuU', // XEPE
+      'X8vikGpF', // LAUDE
+    ];
+    let totalPhantomDeleted = 0;
+    for (const mint of phantomMints) {
+      // Use LIKE for partial mints
+      const deleted = mint.length < 20
+        ? dbWithRepos.db.prepare("DELETE FROM trades WHERE token_mint LIKE ?").run(`${mint}%`).changes
+        : dbWithRepos.trades.deleteByTokenMint(mint);
+      if (deleted > 0) {
+        log.info({ mint, deleted }, 'Cleaned up phantom position');
+        totalPhantomDeleted += deleted;
+      }
+    }
+    if (totalPhantomDeleted > 0) {
+      log.info({ totalPhantomDeleted }, 'Total phantom positions cleaned');
+    }
+
     // Historical IMPOSTOR trade - CLOSED (user sold manually at +73%)
     // Buy entry
     const historicalBuy = {
@@ -24150,8 +24204,9 @@ async function main(): Promise<void> {
     }
     const helius = new HeliusClient({ apiKey: heliusApiKey } as any);
 
-    // Initialize Solana connection
-    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    // Use Helius RPC for reliable connection (public RPC has heavy rate limits)
+    const connection = helius.getConnection();
+    log.info('Using Helius RPC for Solana connection');
 
     // Load Risk Profile early for safety analyzer configuration
     const riskProfile = (process.env.RISK_PROFILE || 'BALANCED') as RiskProfile;
@@ -24964,6 +25019,10 @@ function handleEvent(event) {
       const emoji = stageEmojis[event.data.stage] || '🤔';
       const label = stageLabels[event.data.stage] || 'ANALYSIS';
       addToFeed(`${emoji} [${label}] ${event.data.symbol}: "${event.data.thought}"`, `analysis-${event.data.stage}`, event.data.mint);
+      // Also add to analysis stream for scanning stage
+      if (event.data.stage === 'scanning') {
+        addToAnalysisStream(event.data);
+      }
       break;
     case 'SAFETY_CHECK':
       // Silent - ANALYSIS_THOUGHT handles the voiced commentary
@@ -25057,12 +25116,6 @@ function handleEvent(event) {
     case 'VOICE_AUDIO':
       playVoiceAudio(event.data);
       break;
-    case 'ANALYSIS_THOUGHT':
-      // Only show tokens entering analysis (scanning stage)
-      if (event.data.stage === 'scanning') {
-        addToAnalysisStream(event.data);
-      }
-      break;
     case 'TOKEN_COMMENTARY':
       // Claude's random commentary on tokens (voice only, but show in stream)
       highlightTokenCommentary(event.data.mint, event.data.commentary);
@@ -25137,6 +25190,12 @@ function addToAnalysisStream(token) {
   // Limit to 15 items (fewer since they have more content)
   while (container.children.length > 15) {
     container.removeChild(container.lastChild);
+  }
+
+  // Update analyzing count
+  const countEl = document.getElementById('analyzing-count');
+  if (countEl) {
+    countEl.textContent = `(${container.children.length})`;
   }
 
   // Flash effect for new token
@@ -25768,8 +25827,10 @@ function updateHoldings(positions) {
         // Use name if available, otherwise show CA
         const name = pos.tokenName || formatMint(pos.tokenMint);
         const pnlPercent = pos.unrealizedPnLPercent || 0;
+        const pnlSol = pos.unrealizedPnLSol || 0; // NEW: P&L in SOL
         const pnlClass = pnlPercent >= 0 ? 'profit' : 'loss';
         const pnlSign = pnlPercent >= 0 ? '+' : '';
+        const solSign = pnlSol >= 0 ? '+' : '';
         const entryAge = getTimeAgo(pos.entryTimestamp);
 
         // Show actual token image if available, otherwise fallback to $ icon
@@ -25789,7 +25850,7 @@ function updateHoldings(positions) {
             </div>
             <div class="holding-right">
                 <span class="holding-value">${pos.entryAmountSol.toFixed(3)} SOL</span>
-                <span class="holding-pnl ${pnlClass}">${pnlSign}${pnlPercent.toFixed(1)}%</span>
+                <span class="holding-pnl ${pnlClass}">${pnlSign}${pnlPercent.toFixed(1)}% (${solSign}${pnlSol.toFixed(3)})</span>
                 <span class="holding-entry">Entry: ${entryAge}</span>
             </div>
         `;
@@ -27452,13 +27513,13 @@ export class TradingEngine {
           logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'RPC fallback returned tokens');
         } catch (rpcError) {
           logger.error({ error: rpcError }, 'RPC fallback also failed');
-          // Use stale cache if available
-          if (this.walletCache) {
-            logger.warn({ age: now - this.walletCache.timestamp }, 'Using stale wallet cache');
+          // Use stale cache if available (up to 5 minutes old during rate limits)
+          if (this.walletCache && now - this.walletCache.timestamp < 300000) {
+            logger.warn({ age: Math.floor((now - this.walletCache.timestamp) / 1000) + 's' }, 'Using stale wallet cache due to API failures');
             walletTokens = this.walletCache.tokens;
           } else {
             // Final fallback: Use database to reconstruct positions
-            logger.warn('No wallet data available - using database fallback');
+            logger.warn('No wallet data available and cache too old - using database fallback');
             return this.getPositionsFromDatabase();
           }
         }
@@ -27575,6 +27636,14 @@ export class TradingEngine {
   private getPositionsFromDatabase(): OpenPosition[] {
     const DUST_THRESHOLD_SOL = 0.0005;
     const allTrades = this.db.trades.getRecent(1000);
+
+    // Log what trades we're working with for debugging
+    const buyTrades = allTrades.filter(t => t.type === 'BUY' && !t.metadata?.isBuyback);
+    logger.debug({
+      totalTrades: allTrades.length,
+      buyTrades: buyTrades.length,
+      buyMints: buyTrades.map(t => ({ mint: t.tokenMint.slice(0,8), symbol: t.tokenSymbol, sol: t.amountSol }))
+    }, 'Database trades for position reconstruction');
     
     // 1. Group trades by token
     const tradesByToken = new Map<string, typeof allTrades>();
@@ -27651,11 +27720,32 @@ export class TradingEngine {
                entryPrice: entryPrice,
                entryTimestamp: earliestBuyTimestamp,
              });
+             logger.debug({
+               mint,
+               symbol: meta?.symbol,
+               currentTokens,
+               currentCostBasis,
+               entryPrice,
+             }, 'DB position reconstructed');
          }
       }
     }
 
-    logger.info({ positionCount: openPositions.length }, 'Open positions reconstructed from database (WACB)');
+    // Log position details for debugging P&L issues
+    if (openPositions.length > 0) {
+      logger.info({
+        positionCount: openPositions.length,
+        positions: openPositions.map(p => ({
+          mint: p.tokenMint.slice(0,8),
+          symbol: p.tokenSymbol,
+          tokens: p.entryAmountTokens,
+          entrySol: p.entryAmountSol.toFixed(4),
+          entryPrice: p.entryPrice
+        }))
+      }, 'Open positions reconstructed from database (WACB)');
+    } else {
+      logger.info({ positionCount: 0 }, 'Open positions reconstructed from database (WACB)');
+    }
     return openPositions;
   }
 
@@ -27727,8 +27817,28 @@ export class TradingEngine {
       if (position.currentPrice && position.entryPrice) {
         const currentValue = position.entryAmountTokens * position.currentPrice;
         const entryCost = position.entryAmountSol;
-        unrealizedPnL += currentValue - entryCost;
+        const positionPnL = currentValue - entryCost;
+
+        // Log individual position P&L for debugging large values
+        if (Math.abs(positionPnL) > 1) {
+          logger.info({
+            symbol: position.tokenSymbol,
+            mint: position.tokenMint,
+            tokens: position.entryAmountTokens,
+            entryPrice: position.entryPrice,
+            currentPrice: position.currentPrice,
+            entryCost,
+            currentValue,
+            positionPnL,
+          }, 'Large position P&L detected');
+        }
+
+        unrealizedPnL += positionPnL;
       }
+    }
+
+    if (Math.abs(unrealizedPnL) > 10) {
+      logger.warn({ unrealizedPnL, positionCount: positions.length }, 'Unusually large unrealized P&L');
     }
 
     return unrealizedPnL;

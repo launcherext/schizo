@@ -1,10 +1,16 @@
 /**
  * PumpPortal API client for trade execution
+ *
+ * Optimized with Helius smart transactions (Jan 2026):
+ * - Jito tips for MEV protection
+ * - Dynamic priority fees from Helius API
+ * - Smart retry with polling and rebroadcast
  */
 
 import { Keypair, Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 import type { TokenInfo, TradeParams, TradeResult, TradeAction } from './types.js';
 import { logger } from '../lib/logger.js';
+import { SmartTransactionSender, createSmartTransactionSender } from '../api/smart-transaction.js';
 
 /**
  * Configuration for PumpPortal client
@@ -15,6 +21,10 @@ export interface PumpPortalConfig {
   rpcUrl: string;
   maxRetries: number;
   retryDelayMs: number;
+  /** Helius API key for smart transactions (recommended) */
+  heliusApiKey?: string;
+  /** Enable smart transaction sending with Jito tips (default: true if heliusApiKey provided) */
+  enableSmartTx?: boolean;
 }
 
 /**
@@ -37,15 +47,31 @@ export class PumpPortalClient {
   private cachedPriorityFee: number = 0.0005; // Default 0.0005 SOL
   private lastPriorityFeeCheck: number = 0;
   private readonly PRIORITY_FEE_CACHE_MS = 30000; // Cache for 30 seconds
+  private smartTxSender: SmartTransactionSender | null = null;
 
   constructor(config: PumpPortalConfig, wallet: Keypair) {
     this.config = config;
     this.wallet = wallet;
-    this.connection = new Connection(config.rpcUrl, 'confirmed');
+    this.connection = new Connection(config.rpcUrl, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 60000,
+    });
+
+    // Initialize smart transaction sender if Helius API key provided
+    if (config.heliusApiKey && config.enableSmartTx !== false) {
+      this.smartTxSender = createSmartTransactionSender(config.heliusApiKey, wallet, {
+        enableJitoTips: true,
+        minJitoTipSol: 0.0002,
+        maxJitoTipSol: 0.002, // Higher max for pump trades
+        timeoutMs: 60000,
+      });
+      logger.info('Smart transaction sender enabled with Jito tips');
+    }
 
     logger.info({
       baseUrl: config.baseUrl,
       wallet: wallet.publicKey.toBase58(),
+      smartTxEnabled: !!this.smartTxSender,
     }, 'PumpPortal client initialized');
   }
 
@@ -233,18 +259,22 @@ export class PumpPortalClient {
 
       transaction.sign([this.wallet]);
 
-      // Send transaction
-      const signature = await this.connection.sendTransaction(transaction, {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      });
+      // Send transaction using smart sender if available
+      let signature: string;
+      if (this.smartTxSender) {
+        signature = await this.smartTxSender.sendExternalTransaction(transaction, {
+          urgent: false,
+          skipPreflight: false,
+        });
+      } else {
+        signature = await this.connection.sendTransaction(transaction, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        });
+        await this.waitForConfirmation(signature);
+      }
 
-      logger.info({ signature, pool }, 'Fee claim transaction sent');
-
-      // Wait for confirmation
-      await this.waitForConfirmation(signature);
-
-      logger.info({ signature }, 'Creator fees claimed successfully');
+      logger.info({ signature, pool }, 'Creator fees claimed successfully');
       return signature;
     } catch (error) {
       logger.error({ pool, error }, 'Failed to claim creator fees');
@@ -292,12 +322,21 @@ export class PumpPortalClient {
         const tx = VersionedTransaction.deserialize(new Uint8Array(data));
         tx.sign([this.wallet]);
 
-        const signature = await this.connection.sendTransaction(tx, {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        });
+        // Send transaction using smart sender if available
+        let signature: string;
+        if (this.smartTxSender) {
+          signature = await this.smartTxSender.sendExternalTransaction(tx, {
+            urgent: false,
+            skipPreflight: false,
+          });
+        } else {
+          signature = await this.connection.sendTransaction(tx, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          });
+          await this.waitForConfirmation(signature);
+        }
 
-        await this.waitForConfirmation(signature);
         logger.info({ signature, mint }, 'Creator rewards claimed successfully');
         return signature;
       } else {
@@ -463,16 +502,27 @@ export class PumpPortalClient {
     // Sign transaction
     transaction.sign([this.wallet]);
 
-    // Send transaction
-    const signature = await this.connection.sendTransaction(transaction, {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    });
+    // Send transaction using smart sender if available (includes Jito tips, retry, polling)
+    let signature: string;
+    if (this.smartTxSender) {
+      logger.debug({ isUrgent }, 'Sending via smart transaction sender with Jito tips');
+      signature = await this.smartTxSender.sendExternalTransaction(transaction, {
+        urgent: isUrgent,
+        skipPreflight: false,
+      });
+      logger.info({ signature, smartTx: true }, 'Transaction confirmed via smart sender');
+    } else {
+      // Fallback to regular send
+      signature = await this.connection.sendTransaction(transaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
 
-    logger.info({ signature }, 'Transaction sent to network');
+      logger.info({ signature }, 'Transaction sent to network');
 
-    // Wait for confirmation
-    await this.waitForConfirmation(signature);
+      // Wait for confirmation
+      await this.waitForConfirmation(signature);
+    }
 
     return signature;
   }

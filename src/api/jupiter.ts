@@ -8,11 +8,16 @@
  *
  * Use Jupiter for tokens that have GRADUATED from pump.fun to Raydium.
  * For active pump.fun bonding curve tokens, use PumpPortal instead.
+ *
+ * Optimized with Helius smart transactions (Jan 2026):
+ * - Smart retry with polling and rebroadcast
+ * - Better transaction confirmation
  */
 
 import { createJupiterApiClient, QuoteResponse } from '@jup-ag/api';
 import { Connection, Keypair, VersionedTransaction, PublicKey } from '@solana/web3.js';
 import { createLogger } from '../lib/logger.js';
+import { SmartTransactionSender, createSmartTransactionSender } from './smart-transaction.js';
 
 const logger = createLogger('jupiter');
 
@@ -54,6 +59,10 @@ export interface JupiterClientConfig {
   wallet: Keypair;
   defaultSlippageBps?: number;  // Default: 50 (0.5%)
   maxPriceImpactPct?: number;   // Default: 5 (5%)
+  /** Helius API key for smart transactions (recommended) */
+  heliusApiKey?: string;
+  /** Enable smart transaction sending (default: true if heliusApiKey provided) */
+  enableSmartTx?: boolean;
 }
 
 /**
@@ -65,6 +74,7 @@ export class JupiterClient {
   private wallet: Keypair;
   private defaultSlippageBps: number;
   private maxPriceImpactPct: number;
+  private smartTxSender: SmartTransactionSender | null = null;
 
   constructor(config: JupiterClientConfig) {
     this.jupiter = createJupiterApiClient();
@@ -73,9 +83,19 @@ export class JupiterClient {
     this.defaultSlippageBps = config.defaultSlippageBps ?? 50; // 0.5%
     this.maxPriceImpactPct = config.maxPriceImpactPct ?? 5;    // 5%
 
+    // Initialize smart transaction sender if Helius API key provided
+    if (config.heliusApiKey && config.enableSmartTx !== false) {
+      this.smartTxSender = createSmartTransactionSender(config.heliusApiKey, config.wallet, {
+        enableJitoTips: false, // Jupiter already handles tips via prioritizationFeeLamports
+        timeoutMs: 60000,
+      });
+      logger.info('Smart transaction sender enabled for Jupiter swaps');
+    }
+
     logger.info({
       defaultSlippageBps: this.defaultSlippageBps,
       maxPriceImpactPct: this.maxPriceImpactPct,
+      smartTxEnabled: !!this.smartTxSender,
     }, 'JupiterClient initialized');
   }
 
@@ -215,24 +235,35 @@ export class JupiterClient {
     // Sign transaction
     transaction.sign([this.wallet]);
 
-    // Send transaction
-    const signature = await this.connection.sendTransaction(transaction, {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
+    // Send transaction using smart sender if available (includes retry, polling)
+    let signature: string;
+    if (this.smartTxSender) {
+      logger.debug('Sending Jupiter swap via smart transaction sender');
+      signature = await this.smartTxSender.sendExternalTransaction(transaction, {
+        urgent: false, // Jupiter swaps can use normal priority
+        skipPreflight: false,
+      });
+      logger.info({ signature, smartTx: true }, 'Jupiter swap confirmed via smart sender');
+    } else {
+      // Fallback to regular send
+      signature = await this.connection.sendTransaction(transaction, {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
 
-    // Wait for confirmation
-    const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
+      // Wait for confirmation
+      const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
 
-    if (confirmation.value.err) {
-      throw new Error(`Swap failed: ${JSON.stringify(confirmation.value.err)}`);
+      if (confirmation.value.err) {
+        throw new Error(`Swap failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+
+      logger.info({
+        signature,
+        inputAmount: quote.inputAmount,
+        outputAmount: quote.outputAmount,
+      }, 'Jupiter swap executed successfully');
     }
-
-    logger.info({
-      signature,
-      inputAmount: quote.inputAmount,
-      outputAmount: quote.outputAmount,
-    }, 'Jupiter swap executed successfully');
 
     return {
       signature,
