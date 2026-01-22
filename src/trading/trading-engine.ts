@@ -139,6 +139,7 @@ export class TradingEngine {
   private learningEngine?: LearningEngine; // Learning from trade outcomes
   private entryFeatures: Map<string, { features: TradeFeatures; confidence: number; entryPrice: number }> = new Map();
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map(); // Cache prices for 10s
+  private walletCache: { tokens: Array<{ mint: string; balance: number }>; timestamp: number } | null = null; // Cache wallet holdings for 30s
 
   constructor(
     config: TradingConfig,
@@ -1415,35 +1416,53 @@ export class TradingEngine {
    */
   async getOpenPositions(): Promise<OpenPosition[]> {
     const DUST_THRESHOLD_SOL = 0.0005; 
+    const WALLET_CACHE_TTL = 30000; // 30 second cache
+    const now = Date.now();
     
     logger.debug('Fetching positions from actual wallet balance...');
     
-    // Get actual wallet holdings via Helius DAS API
+    // Get actual wallet holdings via Helius DAS API with caching
     let walletTokens: Array<{ mint: string; balance: number }> = [];
-    try {
-      walletTokens = await this.helius.getAssetsByOwner(this.walletAddress);
-      logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'Helius DAS returned tokens');
-    } catch (error) {
-      logger.warn({ error }, 'Helius DAS failed, using RPC fallback');
+    
+    // Check cache first
+    if (this.walletCache && now - this.walletCache.timestamp < WALLET_CACHE_TTL) {
+      walletTokens = this.walletCache.tokens;
+      logger.debug({ tokenCount: walletTokens.length, cached: true }, 'Using cached wallet holdings');
+    } else {
+      // Fetch fresh data
       try {
-        // Fallback to RPC
-        const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-          new PublicKey(this.walletAddress),
-          { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-        );
-        walletTokens = tokenAccounts.value
-          .map(acc => {
-            const info = acc.account.data.parsed.info;
-            return {
-              mint: info.mint,
-              balance: parseFloat(info.tokenAmount.uiAmountString),
-            };
-          })
-          .filter(t => t.balance > 0);
-        logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'RPC fallback returned tokens');
-      } catch (rpcError) {
-        logger.error({ error: rpcError }, 'RPC fallback also failed');
-        return [];
+        walletTokens = await this.helius.getAssetsByOwner(this.walletAddress);
+        this.walletCache = { tokens: walletTokens, timestamp: now };
+        logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'Helius DAS returned tokens');
+      } catch (error) {
+        logger.warn({ error }, 'Helius DAS failed, using RPC fallback');
+        try {
+          // Fallback to RPC
+          const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+            new PublicKey(this.walletAddress),
+            { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+          );
+          walletTokens = tokenAccounts.value
+            .map(acc => {
+              const info = acc.account.data.parsed.info;
+              return {
+                mint: info.mint,
+                balance: parseFloat(info.tokenAmount.uiAmountString),
+              };
+            })
+            .filter(t => t.balance > 0);
+          this.walletCache = { tokens: walletTokens, timestamp: now };
+          logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'RPC fallback returned tokens');
+        } catch (rpcError) {
+          logger.error({ error: rpcError }, 'RPC fallback also failed');
+          // Use stale cache if available
+          if (this.walletCache) {
+            logger.warn({ age: now - this.walletCache.timestamp }, 'Using stale wallet cache');
+            walletTokens = this.walletCache.tokens;
+          } else {
+            return [];
+          }
+        }
       }
     }
 
@@ -1559,7 +1578,7 @@ export class TradingEngine {
     const positions = await this.getOpenPositions();
     const positionsWithPrices: OpenPosition[] = [];
     const now = Date.now();
-    const PRICE_CACHE_TTL = 10000; // 10 second cache
+    const PRICE_CACHE_TTL = 30000; // Increased from 10s to 30s to reduce API calls
 
     for (const position of positions) {
       try {

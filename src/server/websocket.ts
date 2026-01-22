@@ -340,7 +340,7 @@ export function createWebSocketServer(
 
   logger.info({ port }, 'WebSocket server started');
 
-  // Start periodic position broadcasting (every 5 seconds)
+  // Start periodic position broadcasting (every 30 seconds to avoid rate limits)
   if (tradingEngine) {
     setInterval(async () => {
       try {
@@ -382,7 +382,7 @@ export function createWebSocketServer(
       } catch (error) {
         logger.error({ error }, 'Error broadcasting periodic position updates');
       }
-    }, 5000);
+    }, 30000); // Changed from 5000ms to 30000ms
   }
 
   return wss;
