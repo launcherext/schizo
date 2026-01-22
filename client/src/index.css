@@ -798,11 +798,69 @@ body::before {
   backdrop-filter: blur(20px);
 }
 
-/* X Profile Link */
-.x-profile-link {
+/* Floating Controls */
+.floating-controls {
   position: fixed;
   bottom: 24px;
   right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 100;
+}
+
+/* Wallet Pill */
+.wallet-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 0 20px;
+  height: 48px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.wallet-pill:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-light);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.wallet-pill:active {
+  transform: translateY(0);
+}
+
+.wallet-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+.wallet-address {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.wallet-pill svg {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.wallet-pill:hover svg {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+/* X Profile Link */
+.x-profile-link {
   width: 48px;
   height: 48px;
   display: flex;
@@ -813,7 +871,6 @@ body::before {
   border-radius: 12px;
   color: var(--text-muted);
   transition: all 0.2s ease;
-  z-index: 100;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 

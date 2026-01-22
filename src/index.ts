@@ -763,9 +763,20 @@ class TradingBot {
       }
     }
 
-    // NEW: Override action to HOLD if confidence is below threshold
+    // Handle action override based on confidence
     let finalAction = action;
-    if (action === Action.BUY && confidence < requiredConfidence) {
+
+    // In exploration mode with good confidence, FORCE BUY (don't rely on random action)
+    if (isExplorationMode && confidence >= requiredConfidence) {
+      finalAction = Action.BUY;
+      logger.info({
+        mint: mint?.substring(0, 15),
+        confidence: confidence.toFixed(2),
+        requiredConfidence: requiredConfidence.toFixed(2),
+        originalAction: Action[action],
+      }, 'EXPLORATION MODE: Forcing BUY (confidence above threshold)');
+    } else if (action === Action.BUY && confidence < requiredConfidence) {
+      // Normal mode: Block BUY if confidence is below threshold
       finalAction = Action.HOLD;
       logger.info({
         mint: mint?.substring(0, 15),
