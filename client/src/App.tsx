@@ -40,7 +40,7 @@ function App() {
         <div className="main-grid">
           <div className="left-column">
             <ChallengeCard stats={stats} />
-            <TokenScanner data={scannerData || undefined} isScanning={isScanning} />
+            <TokenScanner data={scannerData || undefined} isScanning={isScanning} tokensScanned={stats.tokensScanned} />
             <EquityChart history={equityHistory} walletBalance={walletState?.solBalance} />
             <Positions positions={positions} summary={positionsSummary} />
           </div>

@@ -107,19 +107,19 @@ export const config = {
   jitoBribeSol: 0.00001,     // Jito bribe (if enabled)
 
   // Velocity-based entry for new tokens (no price history)
-  // Balance: fast enough to catch pumps, but filter out wash trading
+  // Tightened thresholds to avoid rugs and garbage tokens
   velocityEntry: {
     enabled: false,          // DISABLED: AI decides entry, not velocity
-    minTxCount: 5,           // Lowered from 10 - tokens evaluated quickly after creation
-    minUniqueBuyers: 3,      // Lowered from 5 - need at least 3 different wallets
-    minBuyPressure: 0.50,    // 50% buys - lowered for testing
-    maxMarketCapSol: 60,     // Increased - tokens with traction often hit 40-50 SOL quickly
+    minTxCount: 15,          // Increased: need real activity, not just a few buys
+    minUniqueBuyers: 7,      // Increased: need 7+ unique wallets to filter wash trading
+    minBuyPressure: 0.60,    // 60% buys - higher threshold for quality
+    maxMarketCapSol: 100,    // Allow slightly larger caps for tokens with real traction
   },
 
   // Token Watchlist - AI-driven entry (NEW)
   watchlist: {
     minDataPoints: 10,       // Need 10+ price updates before AI can analyze
-    minAgeSeconds: 60,       // NEW: Token must be at least 60 seconds old
+    minAgeSeconds: 180,      // 3 MINUTES: token must survive initial dump period
     minConfidence: 0.55,     // LOWERED: Base confidence (dynamic scaling adds more)
     maxConfidence: 0.70,     // NEW: Max confidence threshold for older tokens
     maxDrawdown: 0.30,       // Hard reject if crashed >30% from peak

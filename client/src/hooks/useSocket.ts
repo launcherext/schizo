@@ -152,8 +152,9 @@ export const useSocket = (): UseSocketReturn => {
     // Note: In development with Vite proxy, '/' works if proxy is set.
     // Otherwise might need absolute URL.
     const newSocket = io('/', {
-      transports: ['websocket'],
-      reconnectionAttempts: 5
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 5,
+      upgrade: true,
     });
 
     newSocket.on('connect', () => {

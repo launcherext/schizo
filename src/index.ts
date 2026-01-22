@@ -826,29 +826,46 @@ class TradingBot {
 
     // CRITICAL: Verify actual token balance before creating position
     // This prevents phantom positions when buy tx fails silently
-    await this.sleep(2000); // Wait for tx to settle
-    const actualBalance = await txManager.getTokenBalance(mint);
+    // In paper trading mode, skip balance check and use simulated amount
+    let amountTokens: number;
+    let actualPrice: number;
 
-    if (actualBalance <= 0) {
-      logger.error({
+    if (config.paperTrading) {
+      // Paper trading: use simulated output amount
+      amountTokens = result.outputAmount || (sizeSol * 1_000_000); // Fallback estimate
+      actualPrice = sizeSol / amountTokens;
+      logger.info({
         mint,
-        signature: result.signature,
-        expectedTokens: result.outputAmount || 'unknown',
-        actualBalance
-      }, 'Buy tx succeeded but no tokens received - NOT creating position');
-      priceFeed.removeFromWatchList(mint);
-      return;
-    }
+        mode: 'PAPER',
+        simulatedTokens: amountTokens,
+        calculatedPrice: actualPrice
+      }, 'Paper trade: using simulated token amount');
+    } else {
+      // Real trading: verify actual on-chain balance
+      await this.sleep(2000); // Wait for tx to settle
+      const actualBalance = await txManager.getTokenBalance(mint);
 
-    // Use actual balance instead of estimate
-    let amountTokens = actualBalance;
-    let actualPrice = sizeSol / amountTokens;
+      if (actualBalance <= 0) {
+        logger.error({
+          mint,
+          signature: result.signature,
+          expectedTokens: result.outputAmount || 'unknown',
+          actualBalance
+        }, 'Buy tx succeeded but no tokens received - NOT creating position');
+        priceFeed.removeFromWatchList(mint);
+        return;
+      }
+
+      amountTokens = actualBalance;
+      actualPrice = sizeSol / amountTokens;
+    }
 
     logger.info({
       mint,
-      actualBalance,
-      calculatedPrice: actualPrice
-    }, 'Verified token balance after buy');
+      amountTokens,
+      calculatedPrice: actualPrice,
+      mode: config.paperTrading ? 'PAPER' : 'LIVE'
+    }, 'Position ready to open');
 
     // Open position
     const position = await positionManager.openPosition({
