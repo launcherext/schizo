@@ -852,23 +852,60 @@ class TradingBot {
         calculatedPrice: actualPrice
       }, 'Paper trade: using simulated token amount');
     } else {
-      // Real trading: verify actual on-chain balance
-      await this.sleep(2000); // Wait for tx to settle
-      const actualBalance = await txManager.getTokenBalance(mint);
-
-      if (actualBalance <= 0) {
-        logger.error({
+      // Real trading: use outputAmount from swap if available (parsed from postTokenBalances)
+      // Fall back to balance check with retries only if outputAmount is 0
+      if (result.outputAmount && result.outputAmount > 0) {
+        amountTokens = result.outputAmount;
+        actualPrice = sizeSol / amountTokens;
+        logger.info({
           mint,
-          signature: result.signature,
-          expectedTokens: result.outputAmount || 'unknown',
-          actualBalance
-        }, 'Buy tx succeeded but no tokens received - NOT creating position');
-        priceFeed.removeFromWatchList(mint);
-        return;
-      }
+          amountTokens,
+          actualPrice,
+          source: 'postTokenBalances',
+        }, 'Using token amount from transaction postTokenBalances');
+      } else {
+        // Fallback: verify actual on-chain balance with retries
+        // Token accounts may take time to be indexed, so retry multiple times
+        let actualBalance = 0;
+        const maxRetries = 5;
+        const retryDelays = [2000, 3000, 3000, 4000, 5000]; // Total max wait: 17 seconds
 
-      amountTokens = actualBalance;
-      actualPrice = sizeSol / amountTokens;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          await this.sleep(retryDelays[attempt]);
+          actualBalance = await txManager.getTokenBalance(mint);
+
+          if (actualBalance > 0) {
+            logger.info({
+              mint,
+              actualBalance,
+              attempt: attempt + 1,
+            }, 'Token balance confirmed via getTokenBalance');
+            break;
+          }
+
+          logger.warn({
+            mint,
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: retryDelays[attempt],
+          }, 'Token balance still 0, retrying...');
+        }
+
+        if (actualBalance <= 0) {
+          logger.error({
+            mint,
+            signature: result.signature,
+            expectedTokens: result.outputAmount || 'unknown',
+            actualBalance,
+            retriesAttempted: maxRetries,
+          }, 'Buy tx succeeded but no tokens received after retries - NOT creating position');
+          priceFeed.removeFromWatchList(mint);
+          return;
+        }
+
+        amountTokens = actualBalance;
+        actualPrice = sizeSol / amountTokens;
+      }
     }
 
     logger.info({

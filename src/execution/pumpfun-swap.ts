@@ -129,13 +129,42 @@ export class PumpFunSwap {
         );
       }
 
-      logger.info({ signature, amountSol }, 'PumpFun buy successful');
+      // Parse transaction to get actual token amount received from postTokenBalances
+      let outputAmount = 0;
+      try {
+        const txDetails = await this.connection.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+
+        if (txDetails?.meta?.postTokenBalances) {
+          const walletAddress = this.wallet.publicKey.toBase58();
+          // Find the token balance entry for our wallet and the purchased token
+          const tokenBalance = txDetails.meta.postTokenBalances.find(
+            (balance) =>
+              balance.owner === walletAddress &&
+              balance.mint === tokenMint
+          );
+
+          if (tokenBalance?.uiTokenAmount?.uiAmount) {
+            outputAmount = tokenBalance.uiTokenAmount.uiAmount;
+            logger.info({
+              signature,
+              outputAmount,
+              decimals: tokenBalance.uiTokenAmount.decimals,
+            }, 'Parsed token amount from transaction postTokenBalances');
+          }
+        }
+      } catch (parseError) {
+        logger.warn({ signature, error: parseError }, 'Failed to parse transaction for token amount');
+      }
+
+      logger.info({ signature, amountSol, outputAmount }, 'PumpFun buy successful');
 
       return {
         success: true,
         signature,
         inputAmount: amountSol * LAMPORTS_PER_SOL,
-        outputAmount: 0, // Will be updated by position manager
+        outputAmount,
         priceImpact: 0,
         fees: {
           platformFee: amountSol * LAMPORTS_PER_SOL * 0.01, // 1% pump.fun fee
