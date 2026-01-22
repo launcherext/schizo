@@ -67,6 +67,11 @@ export interface PositionRecord {
   trailing_stop: number | null;
   status: string;
   pool_type: string;
+  // Performance-based TP tracking
+  initial_recovered?: boolean;
+  scaled_exits_taken?: number;
+  initial_investment?: number;
+  realized_pnl?: number;
 }
 
 export interface ModelRecord {

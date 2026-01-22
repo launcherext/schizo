@@ -180,17 +180,19 @@ export class PumpPortalWs extends EventEmitter {
   }
 
   private processBondingCurveData(data: PumpPortalNewToken | PumpPortalTrade): BondingCurveData {
-    // Calculate price from virtual reserves
-    // price = (vSol / 1e9) / (vTokens / 1e6)
+    // Calculate price from market cap (most reliable)
+    // PumpPortal's marketCapSol is in human-readable SOL, total supply is 1 billion
+    const TOTAL_SUPPLY = 1_000_000_000; // 1 billion tokens
+
+    // Price in SOL per token = market cap / total supply
+    const priceSol = data.marketCapSol > 0 ? data.marketCapSol / TOTAL_SUPPLY : 0;
+
     const vSol = data.vSolInBondingCurve;
     const vTokens = data.vTokensInBondingCurve;
 
-    // Price in SOL per token
-    const priceSol = vTokens > 0 ? (vSol / 1e9) / (vTokens / 1e6) : 0;
-
-    // Liquidity is the SOL in the bonding curve
-    // For new tokens, this starts around 30 SOL (virtual) + real SOL from buys
-    const liquiditySol = vSol / 1e9;
+    // Liquidity: vSol appears to be in SOL already (not lamports) based on API response
+    // If vSol > 1000, it's likely in lamports and needs conversion
+    const liquiditySol = vSol > 1000 ? vSol / 1e9 : vSol;
 
     // Token graduates when bonding curve fills (~$69k mcap, ~400 SOL)
     // vSolInBondingCurve reaches ~85 SOL real + virtual when graduated

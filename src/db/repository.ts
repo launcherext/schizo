@@ -164,21 +164,27 @@ export class Repository {
     await this.pool.query(`
       INSERT INTO positions (id, mint, symbol, entry_price, current_price, amount,
                             amount_sol, entry_time, highest_price, lowest_price,
-                            stop_loss, take_profit_json, tp_sold_json, status, pool_type)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                            stop_loss, take_profit_json, tp_sold_json, status, pool_type,
+                            initial_recovered, scaled_exits_taken, initial_investment, realized_pnl)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       ON CONFLICT (id) DO UPDATE SET
         current_price = EXCLUDED.current_price,
         highest_price = GREATEST(positions.highest_price, EXCLUDED.current_price),
         lowest_price = LEAST(positions.lowest_price, EXCLUDED.current_price),
         tp_sold_json = EXCLUDED.tp_sold_json,
         status = EXCLUDED.status,
+        initial_recovered = EXCLUDED.initial_recovered,
+        scaled_exits_taken = EXCLUDED.scaled_exits_taken,
+        realized_pnl = EXCLUDED.realized_pnl,
         last_update = NOW()
     `, [
       position.id, position.mint, position.symbol, position.entry_price,
       position.current_price, position.amount, position.amount_sol,
       position.entry_time, position.highest_price, position.lowest_price,
       position.stop_loss, position.take_profit_json, position.tp_sold_json,
-      position.status, position.pool_type
+      position.status, position.pool_type,
+      position.initial_recovered, position.scaled_exits_taken,
+      position.initial_investment, position.realized_pnl
     ]);
   }
 

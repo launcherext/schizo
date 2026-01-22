@@ -146,6 +146,11 @@ export class PositionManager extends EventEmitter {
       tp_sold_json: JSON.stringify(position.tpSold),
       status: position.status,
       pool_type: position.poolType,
+      // Performance-based TP tracking
+      initial_recovered: position.initialRecovered,
+      scaled_exits_taken: position.scaledExitsTaken,
+      initial_investment: position.initialInvestment,
+      realized_pnl: position.realizedPnl,
     });
 
     this.emit('positionOpened', position);
@@ -612,6 +617,11 @@ export class PositionManager extends EventEmitter {
       tp_sold_json: JSON.stringify(position.tpSold),
       status: position.status,
       pool_type: position.poolType,
+      // Performance-based TP tracking
+      initial_recovered: position.initialRecovered,
+      scaled_exits_taken: position.scaledExitsTaken,
+      initial_investment: position.initialInvestment,
+      realized_pnl: position.realizedPnl,
     });
   }
 
