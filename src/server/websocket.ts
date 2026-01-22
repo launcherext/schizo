@@ -123,9 +123,9 @@ export function createWebSocketServer(
           }
 
           const events = JSON.parse(body) as HeliusWebhookEvent[];
-          const walletAddress = process.env.WALLET_PUBLIC_KEY || '';
+          const walletAddress = process.env.WALLET_PUBLIC_KEY || process.env.SOLANA_WALLET_ADDRESS || 'DR4d6RUYHay79dCbUEhU9BphWioVxvoExu4uULq6kJpG';
 
-          logger.info({ eventCount: events.length }, '📡 Helius webhook received');
+          logger.info({ eventCount: events.length, walletAddress }, '📡 Helius webhook received');
 
           // Handle events asynchronously
           await handleHeliusWebhook(events, walletAddress);

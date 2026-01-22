@@ -1410,6 +1410,7 @@ export class TradingEngine {
 
   /**
    * Get all open positions (tokens with net positive holdings)
+   * Cross-checks against actual wallet balances to filter sold positions
    */
   async getOpenPositions(): Promise<OpenPosition[]> {
     // Dust threshold: ignore positions worth less than ~$0.10 (at $200/SOL)
@@ -1459,14 +1460,52 @@ export class TradingEngine {
       positions.set(trade.tokenMint, current);
     }
 
+    // Get actual wallet token balances for cross-check using Helius DAS API
+    let actualBalances: Map<string, number>;
+    try {
+      const tokens = await this.helius.getAssetsByOwner(this.walletAddress);
+      actualBalances = new Map(tokens.map(t => [t.mint, t.balance]));
+      logger.debug({ tokenCount: tokens.length }, 'Fetched wallet balances via Helius DAS');
+    } catch (error) {
+      logger.warn({ error }, 'Failed to fetch wallet token balances via Helius, using RPC fallback');
+      // Fallback to RPC if Helius fails
+      try {
+        const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+          new PublicKey(this.walletAddress),
+          { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+        );
+        actualBalances = new Map(
+          tokenAccounts.value.map(acc => {
+            const info = acc.account.data.parsed.info;
+            return [info.mint, parseFloat(info.tokenAmount.uiAmountString)];
+          })
+        );
+      } catch (rpcError) {
+        logger.error({ error: rpcError }, 'RPC fallback also failed');
+        actualBalances = new Map(); // Continue without cross-check
+      }
+    }
+
     // Filter to positions with net positive token holdings
     const openPositions: OpenPosition[] = [];
 
     for (const [, pos] of positions) {
       const netTokens = pos.totalTokensBought - pos.totalTokensSold;
       
-      // Skip if no tokens left
+      // Skip if no tokens left according to trades
       if (netTokens <= 0) continue;
+
+      // Cross-check: If we have actual balance data and it's zero, skip even if trades show balance
+      const actualBalance = actualBalances.get(pos.tokenMint);
+      if (actualBalance !== undefined && actualBalance <= 0) {
+        logger.debug({
+          mint: pos.tokenMint,
+          netTokensFromTrades: netTokens,
+          actualBalance,
+          reason: 'Wallet balance is zero - position already closed'
+        }, 'Filtering out phantom position');
+        continue;
+      }
 
       // Calculate average entry price
       const entryPrice = pos.totalSolSpent / pos.totalTokensBought;
