@@ -1583,6 +1583,14 @@ export class TradingEngine {
   private getPositionsFromDatabase(): OpenPosition[] {
     const DUST_THRESHOLD_SOL = 0.0005;
     const allTrades = this.db.trades.getRecent(1000);
+
+    // Log what trades we're working with for debugging
+    const buyTrades = allTrades.filter(t => t.type === 'BUY' && !t.metadata?.isBuyback);
+    logger.debug({
+      totalTrades: allTrades.length,
+      buyTrades: buyTrades.length,
+      buyMints: buyTrades.map(t => ({ mint: t.tokenMint.slice(0,8), symbol: t.tokenSymbol, sol: t.amountSol }))
+    }, 'Database trades for position reconstruction');
     
     // 1. Group trades by token
     const tradesByToken = new Map<string, typeof allTrades>();
@@ -1670,7 +1678,21 @@ export class TradingEngine {
       }
     }
 
-    logger.info({ positionCount: openPositions.length }, 'Open positions reconstructed from database (WACB)');
+    // Log position details for debugging P&L issues
+    if (openPositions.length > 0) {
+      logger.info({
+        positionCount: openPositions.length,
+        positions: openPositions.map(p => ({
+          mint: p.tokenMint.slice(0,8),
+          symbol: p.tokenSymbol,
+          tokens: p.entryAmountTokens,
+          entrySol: p.entryAmountSol.toFixed(4),
+          entryPrice: p.entryPrice
+        }))
+      }, 'Open positions reconstructed from database (WACB)');
+    } else {
+      logger.info({ positionCount: 0 }, 'Open positions reconstructed from database (WACB)');
+    }
     return openPositions;
   }
 
