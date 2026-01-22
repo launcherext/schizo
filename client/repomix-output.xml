@@ -54,8 +54,10 @@ src/App.tsx
 src/assets/react.svg
 src/components/AIStatus.tsx
 src/components/ChallengeCard.tsx
+src/components/EquityChart.tsx
 src/components/Header.tsx
 src/components/NarrativeStream.tsx
+src/components/Positions.tsx
 src/components/StatsGrid.tsx
 src/components/TokenScanner.tsx
 src/components/TradeList.tsx
@@ -315,6 +317,8 @@ import { TokenScanner } from './components/TokenScanner';
 import { TradeList } from './components/TradeList';
 import { AIStatus } from './components/AIStatus';
 import { Watchlist } from './components/Watchlist';
+import { Positions } from './components/Positions';
+import { EquityChart } from './components/EquityChart';
 import { useSocket } from './hooks/useSocket';
 
 function App() {
@@ -322,6 +326,10 @@ function App() {
     isConnected,
     stats,
     trades,
+    positions,
+    positionsSummary,
+    walletState,
+    equityHistory,
     scannerData,
     isScanning,
     toasts,
@@ -340,13 +348,15 @@ function App() {
         <div className="main-grid">
           <div className="left-column">
             <ChallengeCard stats={stats} />
+            <EquityChart history={equityHistory} walletBalance={walletState?.solBalance} />
+            <Positions positions={positions} summary={positionsSummary} />
             <TokenScanner data={scannerData || undefined} isScanning={isScanning} />
-            <Watchlist tokens={watchlistTokens} stats={watchlistStats} />
           </div>
 
           <div className="right-column">
             <TradeList trades={trades} />
             <AIStatus stats={stats} decision={aiDecision} />
+            <Watchlist tokens={watchlistTokens} stats={watchlistStats} />
           </div>
         </div>
       </div>
@@ -542,6 +552,137 @@ export const ChallengeCard: React.FC<ChallengeCardProps> = ({ stats }) => {
 };
 </file>
 
+<file path="src/components/EquityChart.tsx">
+import React, { useMemo } from 'react';
+import type { EquitySnapshot } from '../hooks/useSocket';
+
+interface EquityChartProps {
+  history: EquitySnapshot[];
+  walletBalance?: number;
+}
+
+export const EquityChart: React.FC<EquityChartProps> = ({ history, walletBalance }) => {
+  const chartData = useMemo(() => {
+    if (history.length < 2) return null;
+
+    const values = history.map(s => s.totalEquity);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = maxVal - minVal || 1;
+
+    // Chart dimensions
+    const width = 300;
+    const height = 60;
+    const padding = 4;
+
+    // Calculate points
+    const points = values.map((val, i) => {
+      const x = padding + (i / (values.length - 1)) * (width - padding * 2);
+      const y = height - padding - ((val - minVal) / range) * (height - padding * 2);
+      return `${x},${y}`;
+    }).join(' ');
+
+    // Determine trend
+    const firstVal = values[0];
+    const lastVal = values[values.length - 1];
+    const isUp = lastVal >= firstVal;
+    const change = lastVal - firstVal;
+    const changePercent = firstVal > 0 ? (change / firstVal) * 100 : 0;
+
+    return {
+      points,
+      width,
+      height,
+      isUp,
+      change,
+      changePercent,
+      current: lastVal,
+      min: minVal,
+      max: maxVal,
+    };
+  }, [history]);
+
+  if (!chartData) {
+    return (
+      <div className="card equity-chart-card">
+        <div className="card-header">
+          <span className="card-title">Equity</span>
+        </div>
+        <div className="equity-chart-empty">
+          <span>Collecting data...</span>
+          {walletBalance !== undefined && (
+            <span className="wallet-balance">{walletBalance.toFixed(4)} SOL</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card equity-chart-card">
+      <div className="card-header">
+        <span className="card-title">Equity</span>
+        <span className={`card-badge ${chartData.isUp ? 'positive' : 'negative'}`}>
+          {chartData.isUp ? '+' : ''}{chartData.changePercent.toFixed(2)}%
+        </span>
+      </div>
+      <div className="equity-chart-content">
+        <div className="equity-current">
+          <span className="equity-value">{chartData.current.toFixed(4)}</span>
+          <span className="equity-label">SOL</span>
+        </div>
+        <svg
+          className="equity-sparkline"
+          viewBox={`0 0 ${chartData.width} ${chartData.height}`}
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop
+                offset="0%"
+                stopColor={chartData.isUp ? '#10b981' : '#ef4444'}
+                stopOpacity="0.3"
+              />
+              <stop
+                offset="100%"
+                stopColor={chartData.isUp ? '#10b981' : '#ef4444'}
+                stopOpacity="0"
+              />
+            </linearGradient>
+          </defs>
+          <polygon
+            points={`${4},${chartData.height - 4} ${chartData.points} ${chartData.width - 4},${chartData.height - 4}`}
+            fill="url(#equityGradient)"
+          />
+          <polyline
+            points={chartData.points}
+            fill="none"
+            stroke={chartData.isUp ? '#10b981' : '#ef4444'}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <div className="equity-range">
+          <span>{chartData.min.toFixed(2)}</span>
+          <span>{chartData.max.toFixed(2)}</span>
+        </div>
+      </div>
+      <div className="equity-footer">
+        <span className={chartData.isUp ? 'positive' : 'negative'}>
+          {chartData.isUp ? '+' : ''}{chartData.change.toFixed(4)} SOL (24h)
+        </span>
+        {walletBalance !== undefined && (
+          <span className="wallet-indicator">
+            Wallet: {walletBalance.toFixed(4)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+</file>
+
 <file path="src/components/Header.tsx">
 import React from 'react';
 
@@ -628,6 +769,98 @@ export const NarrativeStream: React.FC<NarrativeStreamProps> = ({ signal }) => {
           ))}
         </div>
       </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/Positions.tsx">
+import React from 'react';
+import type { Position } from '../hooks/useSocket';
+
+interface PositionsProps {
+  positions: Position[];
+  summary: { totalUnrealizedPnl: string; totalExposure: string; positionCount: number } | null;
+}
+
+const formatHoldTime = (ms: number): string => {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+};
+
+export const Positions: React.FC<PositionsProps> = ({ positions, summary }) => {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Open Positions</span>
+        {summary && (
+          <span className={`card-badge ${parseFloat(summary.totalUnrealizedPnl) >= 0 ? 'positive' : 'negative'}`}>
+            {parseFloat(summary.totalUnrealizedPnl) >= 0 ? '+' : ''}{parseFloat(summary.totalUnrealizedPnl).toFixed(4)} SOL
+          </span>
+        )}
+      </div>
+      <div className="positions-list">
+        {positions.length === 0 ? (
+          <div className="empty-state">No open positions</div>
+        ) : (
+          positions.map((p) => {
+            const unrealizedPnl = parseFloat(String(p.unrealizedPnl));
+            const unrealizedPnlPercent = parseFloat(String(p.unrealizedPnlPercent));
+            const realizedPnl = p.realizedPnl ? parseFloat(String(p.realizedPnl)) : 0;
+            const isProfit = unrealizedPnl >= 0;
+            const holdTime = formatHoldTime(p.holdTime);
+
+            return (
+              <div key={p.id} className="position-item">
+                <div className={`position-indicator ${isProfit ? 'profit' : 'loss'}`} />
+                <div className="position-info">
+                  <div className="position-header">
+                    <span className="position-symbol">${p.symbol || p.mint.substring(0, 6).toUpperCase()}</span>
+                    <span className="position-pool">{p.poolType}</span>
+                  </div>
+                  <div className="position-details">
+                    <span className="position-size">{p.amountSol.toFixed(4)} SOL</span>
+                    <span className="position-hold">{holdTime}</span>
+                  </div>
+                </div>
+                <div className="position-pnl">
+                  <div className={`position-unrealized ${isProfit ? 'positive' : 'negative'}`}>
+                    {isProfit ? '+' : ''}{unrealizedPnl.toFixed(4)}
+                    <span className="position-pnl-percent">({unrealizedPnlPercent.toFixed(1)}%)</span>
+                  </div>
+                  {realizedPnl !== 0 && (
+                    <div className="position-realized">
+                      Realized: {realizedPnl >= 0 ? '+' : ''}{realizedPnl.toFixed(4)}
+                    </div>
+                  )}
+                </div>
+                <div className="position-status">
+                  {p.initialRecovered && <span className="status-badge recovered">IR</span>}
+                  {p.scaledExitsTaken && p.scaledExitsTaken > 0 && (
+                    <span className="status-badge exits">x{p.scaledExitsTaken}</span>
+                  )}
+                  {p.trailingStop && <span className="status-badge trailing">TS</span>}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      {summary && positions.length > 0 && (
+        <div className="positions-footer">
+          <span>Total Exposure: {summary.totalExposure} SOL</span>
+          <span>{summary.positionCount} position{summary.positionCount !== 1 ? 's' : ''}</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -1087,11 +1320,55 @@ import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { Stats, ScannerData, Trade, ToastData, AIDecisionData, NarrativeSignal, WatchlistToken, WatchlistStats } from '../types';
 
+export interface Position {
+  id: string;
+  mint: string;
+  symbol: string;
+  amount: number;
+  amountSol: number;
+  entryPrice: number;
+  currentPrice: number;
+  highestPrice: number;
+  unrealizedPnl: number;
+  unrealizedPnlPercent: number;
+  realizedPnl?: number;
+  totalPnl?: number;
+  totalPnlPercent?: number;
+  stopLoss: number;
+  trailingStop?: number;
+  initialRecovered?: boolean;
+  scaledExitsTaken?: number;
+  status: string;
+  poolType: string;
+  entryTime: string;
+  holdTime: number;
+}
+
+export interface WalletState {
+  solBalance: number;
+  lastSync: string | null;
+  isHealthy: boolean;
+  totalEquity?: number;
+}
+
+export interface EquitySnapshot {
+  timestamp: string;
+  totalEquity: number;
+  walletBalance: number;
+  positionsValue: number;
+  unrealizedPnl: number;
+  positionCount: number;
+}
+
 interface UseSocketReturn {
   socket: Socket | null;
   isConnected: boolean;
   stats: Stats;
   trades: Trade[];
+  positions: Position[];
+  positionsSummary: { totalUnrealizedPnl: string; totalExposure: string; positionCount: number } | null;
+  walletState: WalletState | null;
+  equityHistory: EquitySnapshot[];
   scannerData: ScannerData | null;
   isScanning: boolean;
   toasts: ToastData[];
@@ -1117,6 +1394,10 @@ export const useSocket = (): UseSocketReturn => {
     winStreak: 0
   });
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [positionsSummary, setPositionsSummary] = useState<{ totalUnrealizedPnl: string; totalExposure: string; positionCount: number } | null>(null);
+  const [walletState, setWalletState] = useState<WalletState | null>(null);
+  const [equityHistory, setEquityHistory] = useState<EquitySnapshot[]>([]);
   const [scannerData, setScannerData] = useState<ScannerData | null>(null);
   const [isScanning, setIsScanning] = useState(true);
   const [toasts, setToasts] = useState<ToastData[]>([]);
@@ -1144,12 +1425,33 @@ export const useSocket = (): UseSocketReturn => {
     // Initial fetch
     const fetchData = async () => {
       try {
-        const [statsRes, tradesRes] = await Promise.all([
+        const [statsRes, tradesRes, positionsRes, walletRes, equityRes] = await Promise.all([
           fetch('/api/stats'),
-          fetch('/api/trades?limit=10')
+          fetch('/api/trades?limit=10'),
+          fetch('/api/positions/realtime'),
+          fetch('/api/wallet'),
+          fetch('/api/equity-history?hours=24')
         ]);
         if (statsRes.ok) setStats(await statsRes.json());
         if (tradesRes.ok) setTrades(await tradesRes.json());
+        if (positionsRes.ok) {
+          const posData = await positionsRes.json();
+          setPositions(posData.positions || []);
+          setPositionsSummary(posData.summary || null);
+        }
+        if (walletRes.ok) {
+          const walletData = await walletRes.json();
+          setWalletState({
+            solBalance: walletData.solBalance,
+            lastSync: walletData.lastSync,
+            isHealthy: walletData.isHealthy,
+            totalEquity: walletData.equity?.total
+          });
+        }
+        if (equityRes.ok) {
+          const equityData = await equityRes.json();
+          setEquityHistory(equityData.history || []);
+        }
       } catch (err) {
         console.error("Failed to fetch initial data", err);
       }
@@ -1279,6 +1581,45 @@ export const useSocket = (): UseSocketReturn => {
       addToast(data);
     });
 
+    // Position updates (real-time PnL)
+    newSocket.on('positions:initial', (data: { positions: Position[]; totalUnrealizedPnl: string; totalExposure: string; positionCount: number }) => {
+      setPositions(data.positions || []);
+      setPositionsSummary({ totalUnrealizedPnl: data.totalUnrealizedPnl, totalExposure: data.totalExposure, positionCount: data.positionCount });
+    });
+
+    newSocket.on('positions:update', (data: { positions: Position[]; totalUnrealizedPnl: string; totalExposure: string; positionCount: number }) => {
+      setPositions(data.positions || []);
+      setPositionsSummary({ totalUnrealizedPnl: data.totalUnrealizedPnl, totalExposure: data.totalExposure, positionCount: data.positionCount });
+    });
+
+    // Wallet updates
+    newSocket.on('wallet:update', (data: WalletState) => {
+      setWalletState(data);
+    });
+
+    // Equity snapshots
+    newSocket.on('equity:snapshot', (snapshot: EquitySnapshot) => {
+      setEquityHistory(prev => {
+        const updated = [...prev, snapshot];
+        // Keep last 1440 snapshots (24 hours at 1 min intervals)
+        if (updated.length > 1440) {
+          return updated.slice(-1440);
+        }
+        return updated;
+      });
+    });
+
+    // Reconciliation notifications
+    newSocket.on('reconciliation:phantoms', (data: { count: number; phantoms: any[] }) => {
+      if (data.count > 0) {
+        addToast({
+          type: 'warning',
+          title: 'Phantom Positions Detected',
+          message: `Found ${data.count} position(s) with no tokens`
+        });
+      }
+    });
+
     setSocket(newSocket);
 
     return () => {
@@ -1286,7 +1627,24 @@ export const useSocket = (): UseSocketReturn => {
     };
   }, []);
 
-  return { socket, isConnected, stats, trades, scannerData, isScanning, toasts, aiDecision, narrativeSignal, watchlistTokens, watchlistStats, removeToast };
+  return {
+    socket,
+    isConnected,
+    stats,
+    trades,
+    positions,
+    positionsSummary,
+    walletState,
+    equityHistory,
+    scannerData,
+    isScanning,
+    toasts,
+    aiDecision,
+    narrativeSignal,
+    watchlistTokens,
+    watchlistStats,
+    removeToast
+  };
 };
 </file>
 
@@ -2196,6 +2554,252 @@ body::before {
 
 .animate-number.updating {
   transform: scale(1.05);
+}
+
+/* Positions Component */
+.positions-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.positions-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.positions-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.positions-list::-webkit-scrollbar-thumb {
+  background: #44403C;
+  border-radius: 4px;
+}
+
+.position-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  transition: background 0.15s ease;
+}
+
+.position-item:hover {
+  background: var(--bg-elevated);
+}
+
+.position-item:last-child {
+  border-bottom: none;
+}
+
+.position-indicator {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+}
+
+.position-indicator.profit {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success-glow);
+}
+
+.position-indicator.loss {
+  background: var(--error);
+}
+
+.position-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.position-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.position-symbol {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.position-pool {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.position-details {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.position-pnl {
+  text-align: right;
+}
+
+.position-unrealized {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.position-unrealized.positive {
+  color: var(--success);
+}
+
+.position-unrealized.negative {
+  color: var(--error);
+}
+
+.position-pnl-percent {
+  font-size: 11px;
+  opacity: 0.8;
+  margin-left: 4px;
+}
+
+.position-realized {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.position-status {
+  display: flex;
+  gap: 4px;
+}
+
+.status-badge {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.status-badge.recovered {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.status-badge.exits {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.status-badge.trailing {
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+}
+
+.positions-footer {
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.card-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.card-badge.positive {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.card-badge.negative {
+  background: var(--error-subtle);
+  color: var(--error);
+}
+
+/* Equity Chart Component */
+.equity-chart-card {
+  min-height: 180px;
+}
+
+.equity-chart-content {
+  padding: 16px 24px;
+}
+
+.equity-chart-empty {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wallet-balance {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.equity-current {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.equity-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.equity-label {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.equity-sparkline {
+  width: 100%;
+  height: 60px;
+  display: block;
+}
+
+.equity-range {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.equity-footer {
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.equity-footer .positive {
+  color: var(--success);
+}
+
+.equity-footer .negative {
+  color: var(--error);
+}
+
+.wallet-indicator {
+  color: var(--text-muted);
 }
 </file>
 

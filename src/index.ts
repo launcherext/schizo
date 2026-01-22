@@ -5,7 +5,7 @@ import { createTables } from './db/schema';
 import { repository } from './db/repository';
 
 // Data Layer
-import { heliusWs, priceFeed, whaleTracker, NewTokenEvent, PriceData } from './data';
+import { heliusWs, priceFeed, whaleTracker, NewTokenEvent, PriceData, WhaleActivity } from './data';
 import { pumpPortalWs, BondingCurveData } from './data/pumpportal-ws';
 
 // Signal Processing Layer
@@ -191,7 +191,7 @@ class TradingBot {
     });
 
     // Whale activity
-    whaleTracker.on('whaleActivity', (activity) => {
+    whaleTracker.on('whaleActivity', (activity: WhaleActivity) => {
       logger.info({
         wallet: activity.wallet,
         action: activity.action,
@@ -283,7 +283,7 @@ class TradingBot {
     });
 
     // Price events
-    priceFeed.on('significantPriceChange', (data) => {
+    priceFeed.on('significantPriceChange', (data: { mint: string; change: number; data: PriceData }) => {
       logger.debug({
         mint: data.mint,
         change: data.change.toFixed(2),
