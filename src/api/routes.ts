@@ -548,6 +548,68 @@ export function setupRoutes(app: Express): void {
     }
   });
 
+  // Reset drawdown guard - unpause trading and reset peak equity
+  app.post('/api/drawdown/reset', async (req: Request, res: Response) => {
+    try {
+      const beforeState = drawdownGuard.getState();
+
+      await drawdownGuard.resetAll();
+
+      const afterState = drawdownGuard.getState();
+
+      logger.info({ beforeState, afterState }, 'Drawdown guard reset via API');
+
+      res.json({
+        success: true,
+        message: 'Drawdown guard reset successfully',
+        before: {
+          isPaused: beforeState.isPaused,
+          pauseReason: beforeState.pauseReason,
+          currentDrawdown: (beforeState.currentDrawdown * 100).toFixed(2) + '%',
+          peakEquity: beforeState.peakEquity,
+          currentEquity: beforeState.currentEquity,
+        },
+        after: {
+          isPaused: afterState.isPaused,
+          currentDrawdown: (afterState.currentDrawdown * 100).toFixed(2) + '%',
+          peakEquity: afterState.peakEquity,
+          currentEquity: afterState.currentEquity,
+        },
+      });
+    } catch (error: any) {
+      logger.error({ error }, 'Failed to reset drawdown guard');
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Resume trading without full reset (just unpause)
+  app.post('/api/drawdown/resume', async (req: Request, res: Response) => {
+    try {
+      const beforeState = drawdownGuard.getState();
+
+      drawdownGuard.resumeTrading('Manual resume via API');
+
+      const afterState = drawdownGuard.getState();
+
+      logger.info('Trading resumed via API');
+
+      res.json({
+        success: true,
+        message: 'Trading resumed',
+        before: {
+          isPaused: beforeState.isPaused,
+          pauseReason: beforeState.pauseReason,
+        },
+        after: {
+          isPaused: afterState.isPaused,
+        },
+      });
+    } catch (error: any) {
+      logger.error({ error }, 'Failed to resume trading');
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Manual test buy endpoint
   app.post('/api/test/buy', async (req: Request, res: Response) => {
     try {
