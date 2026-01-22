@@ -717,9 +717,11 @@ class TradingBot {
     // Adjust confidence based on signals
     let confidence: number;
     if (isExplorationMode && entryBuyPressure !== undefined) {
-      // In exploration mode, use entry evaluation's buy pressure as confidence
-      // This allows trading based on real market signals while model learns
-      confidence = entryBuyPressure * (rugScore.total / 100);
+      // In exploration mode, use entry evaluation's buy pressure directly as confidence
+      // Entry evaluation already validated the token (5+ txs, 3+ buyers, good buy pressure)
+      // Rug score was already validated separately (>45 threshold)
+      // So use buyPressure directly - 67% buy pressure = 0.67 confidence
+      confidence = entryBuyPressure;
       logger.info({
         mint: mint?.substring(0, 15),
         entryBuyPressure: entryBuyPressure.toFixed(2),
@@ -737,7 +739,12 @@ class TradingBot {
     let requiredConfidence = config.watchlist?.minConfidence || 0.55;
     let hasMomentumOverride = false;
 
-    if (mint) {
+    // In exploration mode, lower the threshold to allow trading while model learns
+    // This matches the velocity tracker's minBuyPressure of 0.50
+    if (isExplorationMode) {
+      requiredConfidence = 0.50;
+      logger.debug({ requiredConfidence }, 'Exploration mode: lowered confidence threshold');
+    } else if (mint) {
       // Dynamic confidence threshold based on token age
       requiredConfidence = tokenWatchlist.getDynamicConfidenceThreshold(mint);
 
