@@ -1,0 +1,2396 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.gitignore
+eslint.config.js
+index.html
+package.json
+public/header_full.png
+public/header_logo.png
+public/logo.png
+public/vite.svg
+README.md
+src/App.css
+src/App.tsx
+src/assets/react.svg
+src/components/AIStatus.tsx
+src/components/ChallengeCard.tsx
+src/components/Header.tsx
+src/components/NarrativeStream.tsx
+src/components/StatsGrid.tsx
+src/components/TokenScanner.tsx
+src/components/TradeList.tsx
+src/components/Watchlist.tsx
+src/hooks/useSocket.ts
+src/index.css
+src/main.tsx
+src/types.ts
+tsconfig.app.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".gitignore">
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+</file>
+
+<file path="eslint.config.js">
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+  },
+])
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>client</title>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
+</file>
+
+<file path="package.json">
+{
+  "name": "client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "^7.2.4"
+  }
+}
+</file>
+
+<file path="public/vite.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+</file>
+
+<file path="README.md">
+# React + TypeScript + Vite
+
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+
+Currently, two official plugins are available:
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+
+## React Compiler
+
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+
+```js
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+
+      // Remove tseslint.configs.recommended and replace with this
+      tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      tseslint.configs.stylisticTypeChecked,
+
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
+```
+
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
+```
+</file>
+
+<file path="src/App.css">
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+</file>
+
+<file path="src/App.tsx">
+import { Header } from './components/Header';
+import { StatsGrid } from './components/StatsGrid';
+import { ChallengeCard } from './components/ChallengeCard';
+import { TokenScanner } from './components/TokenScanner';
+import { TradeList } from './components/TradeList';
+import { AIStatus } from './components/AIStatus';
+import { Watchlist } from './components/Watchlist';
+import { useSocket } from './hooks/useSocket';
+
+function App() {
+  const {
+    isConnected,
+    stats,
+    trades,
+    scannerData,
+    isScanning,
+    toasts,
+    aiDecision,
+    watchlistTokens,
+    watchlistStats
+  } = useSocket();
+
+  return (
+    <>
+      <div className="dashboard">
+        <Header isConnected={isConnected} />
+        
+        <StatsGrid stats={stats} />
+
+        <div className="main-grid">
+          <div className="left-column">
+            <ChallengeCard stats={stats} />
+            <TokenScanner data={scannerData || undefined} isScanning={isScanning} />
+            <Watchlist tokens={watchlistTokens} stats={watchlistStats} />
+          </div>
+
+          <div className="right-column">
+            <TradeList trades={trades} />
+            <AIStatus stats={stats} decision={aiDecision} />
+          </div>
+        </div>
+      </div>
+
+      <div className="toast-container">
+        {toasts.map((toast, i) => (
+          <div key={i} className={`toast ${toast.type}`}>
+            <div className="toast-title">{toast.title}</div>
+            <div className="toast-message">{toast.message}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export default App;
+</file>
+
+<file path="src/assets/react.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+</file>
+
+<file path="src/components/AIStatus.tsx">
+import React, { useEffect, useState } from 'react';
+import type { Stats, AIDecisionData } from '../types';
+
+interface AIStatusProps {
+  stats: Stats;
+  decision: AIDecisionData | null;
+}
+
+export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
+  const [statusText, setStatusText] = useState('Initializing AI Model...');
+  const winRate = parseFloat(stats.winRate || "0");
+  const winStreak = stats.winStreak || 0;
+
+  useEffect(() => {
+    if (!decision) return;
+
+    // Map action to text
+    const actions = ['HOLD', 'BUY', 'SELL'];
+    const actionText = actions[decision.action];
+    
+    // Map regime to text
+    const regimes = ['BULL MARKET', 'VOLATILE', 'CRASH DETECTED'];
+    const regimeText = regimes[decision.regime];
+
+    setStatusText(`${regimeText}: Considering ${actionText} on $${decision.symbol}`);
+  }, [decision]);
+
+  // Fallback animation if no decision yet
+  useEffect(() => {
+    if (decision) return;
+    const statuses = ['Analyzing market structure', 'Calculating Q-values', 'Scanning liquidity'];
+    let index = 0;
+    const interval = setInterval(() => {
+      index = (index + 1) % statuses.length;
+      setStatusText(statuses[index]);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [decision]);
+
+  // Visualize Q-Values (Buy vs Hold vs Sell reward expectations)
+  // Normalize for display: find max absolute value to scale bars
+  const qValues = decision?.qValues || [0, 0, 0]; // [Hold, Buy, Sell] typically
+  const maxQ = Math.max(...qValues.map(Math.abs), 1); // Avoid div by zero
+  
+  // Confidence for the bar
+  // Scale factor: AI confidence is often raw difference in Q-values (0.01-0.1 range)
+  // We apply a sigmoid-like scaling to make it visible on the 0-100% bar
+  const rawConfidence = decision ? decision.confidence : (winRate / 100);
+  const scaledConfidence = Math.min(100, Math.max(0, rawConfidence * 500)); // Boost factor
+  
+  const confidence = decision ? scaledConfidence : Math.min(100, Math.max(0, winRate * 1.2));
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">AI Engine</span>
+      </div>
+      <div className="ai-content">
+        <div className="ai-indicator">
+          <div className="ai-ring-outer"></div>
+          <div className="ai-ring" style={{ animationDuration: decision ? '0.5s' : '1.5s' }}></div>
+          <div className="ai-ring-inner"></div>
+          <div className="ai-center">
+            <div className="ai-center-dot" style={{ 
+              background: decision?.action === 1 ? 'var(--success)' : 
+                          decision?.action === 2 ? 'var(--error)' : '#FAFAF9' 
+            }}></div>
+          </div>
+        </div>
+        
+        <div className="ai-status" style={{ minHeight: '40px' }}>{statusText}</div>
+
+        {/* Q-Value Visualization */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', height: '60px', alignItems: 'flex-end' }}>
+          {['HOLD', 'BUY', 'SELL'].map((label, i) => {
+            const val = qValues[i] || 0;
+            const height = Math.abs(val) / maxQ * 100;
+            const color = val > 0 ? 'var(--success)' : 'var(--error)';
+            const isSelected = decision?.action === i;
+            
+            return (
+              <div key={label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: isSelected ? 1 : 0.5 }}>
+                 <div style={{ 
+                   width: '100%', 
+                   height: `${Math.max(10, height)}%`, 
+                   background: color,
+                   borderRadius: '4px',
+                   transition: 'all 0.3s ease'
+                 }}></div>
+                 <span style={{ fontSize: '10px', marginTop: '4px', color: 'var(--text-muted)' }}>{label}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="confidence-bar">
+          <div className="confidence-header">
+            <span>Confidence</span>
+            <span>{confidence.toFixed(0)}%</span>
+          </div>
+          <div className="confidence-track">
+            <div 
+              className="confidence-fill" 
+              style={{ width: `${confidence}%` }}
+            ></div>
+          </div>
+        </div>
+        <div className="win-streak-box">
+          <div className="win-streak-value animate-number">{winStreak}</div>
+          <div className="win-streak-label">Win streak</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/ChallengeCard.tsx">
+import React, { useEffect, useState } from 'react';
+import type { Stats } from '../types';
+
+interface ChallengeCardProps {
+  stats: Stats;
+}
+
+export const ChallengeCard: React.FC<ChallengeCardProps> = ({ stats }) => {
+  const multiplier = parseFloat(stats.multiplier || "1");
+  const equity = parseFloat(stats.currentEquity || stats.initialCapital || "1");
+  const initial = parseFloat(stats.initialCapital || "1");
+  
+  // Progress calculation (logarithmic scale feels better but linear for now as per original)
+  // Max at 100x
+  const progress = Math.min(100, Math.max(1, multiplier));
+
+  const [displayMultiplier, setDisplayMultiplier] = useState(multiplier);
+  
+  useEffect(() => {
+    setDisplayMultiplier(multiplier);
+  }, [multiplier]);
+
+  return (
+    <div className="card">
+      <div className="challenge-card">
+        <div className="challenge-label">THE 1 → 100 CHALLENGE</div>
+        <div className="challenge-value animate-number">
+          {displayMultiplier.toFixed(2)}<span>x</span>
+        </div>
+        <div className="challenge-sub">
+          {equity.toFixed(2)} SOL from {initial} SOL start
+        </div>
+        <div className="progress-bar-container">
+          <div className="progress-bar">
+            <div 
+              className="progress-fill" 
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+          <div className="progress-markers">
+            <span className={multiplier >= 1 ? 'active' : ''}>1x</span>
+            <span className={multiplier >= 10 ? 'active' : ''}>10x</span>
+            <span className={multiplier >= 25 ? 'active' : ''}>25x</span>
+            <span className={multiplier >= 50 ? 'active' : ''}>50x</span>
+            <span className={multiplier >= 100 ? 'active' : ''}>100x</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/Header.tsx">
+import React from 'react';
+
+interface HeaderProps {
+  isConnected: boolean;
+}
+
+export const Header: React.FC<HeaderProps> = ({ isConnected }) => {
+  return (
+    <header className="header">
+      <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', width: '300px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <img src="/header_full.png" alt="1 to 100 Sol Challenge" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+      </div>
+      <div 
+        className="live-badge" 
+        style={{
+          background: isConnected ? 'var(--success-subtle)' : 'var(--error-subtle)',
+          borderColor: isConnected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+          color: isConnected ? 'var(--success)' : 'var(--error)'
+        }}
+      >
+        {isConnected && <span className="live-dot"></span>}
+        <span>{isConnected ? 'Live' : 'Disconnected'}</span>
+      </div>
+    </header>
+  );
+};
+</file>
+
+<file path="src/components/NarrativeStream.tsx">
+import React from 'react';
+import type { NarrativeSignal } from '../types';
+
+interface NarrativeStreamProps {
+  signal: NarrativeSignal | null;
+}
+
+export const NarrativeStream: React.FC<NarrativeStreamProps> = ({ signal }) => {
+  if (!signal) return null;
+
+  return (
+    <div className="card" style={{ marginTop: '24px' }}>
+      <div className="card-header">
+        <span className="card-title">Narrative Stream</span>
+        <div style={{
+          padding: '4px 12px',
+          borderRadius: '20px',
+          fontSize: '11px',
+          background: signal.sentiment === 'bullish' ? 'var(--success-subtle)' : 
+                      signal.sentiment === 'bearish' ? 'var(--error-subtle)' : 'var(--bg-elevated)',
+          color: signal.sentiment === 'bullish' ? 'var(--success)' :
+                 signal.sentiment === 'bearish' ? 'var(--error)' : 'var(--text-muted)'
+        }}>
+          {signal.sentiment.toUpperCase()}
+        </div>
+      </div>
+      <div style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div>
+            <div className="stat-label">Bullish Score</div>
+            <div className="metric-value" style={{ fontSize: '18px' }}>
+              {signal.bullishnessScore.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div className="stat-label">Hype Score</div>
+            <div className="metric-value" style={{ fontSize: '18px', color: 'var(--accent)' }}>
+              {(signal.hypeScore * 100).toFixed(0)}%
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {signal.keywords.map((k, i) => (
+            <span key={i} style={{
+              background: 'rgba(255,255,255,0.05)',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              color: 'var(--text-secondary)'
+            }}>
+              #{k}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/StatsGrid.tsx">
+import React, { useEffect, useState } from 'react';
+import type { Stats } from '../types';
+
+interface StatsGridProps {
+  stats: Stats;
+}
+
+const NumberDisplay: React.FC<{ value: string | number; className?: string }> = ({ value, className = "" }) => {
+  const [displayValue, setDisplayValue] = useState(value);
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    if (value !== displayValue) {
+      setUpdating(true);
+      setDisplayValue(value);
+      const timer = setTimeout(() => setUpdating(false), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [value, displayValue]);
+
+  return (
+    <div className={`animate-number ${updating ? 'updating' : ''} ${className}`}>
+      {value}
+    </div>
+  );
+};
+
+export const StatsGrid: React.FC<StatsGridProps> = ({ stats }) => {
+  const equity = parseFloat(stats.currentEquity || "0");
+  const initial = parseFloat(stats.initialCapital || "0");
+  const profit = equity - initial;
+  const isProfit = profit >= 0;
+
+  return (
+    <div className="stats-grid">
+      <div className="stat-card highlight">
+        <div className="stat-label">Multiplier</div>
+        <NumberDisplay value={`${parseFloat(stats.multiplier || "1").toFixed(2)}x`} className="stat-value accent" />
+        <div className={`stat-sub ${isProfit ? 'positive' : ''}`}>
+          <span className="arrow">↑</span>
+          <span>{isProfit ? '+' : ''}{profit.toFixed(2)} SOL profit</span>
+        </div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Win Rate</div>
+        <NumberDisplay value={`${stats.winRate}%`} className="stat-value" />
+        <div className="stat-sub positive">
+          <span className="arrow">↑</span>
+          <span>Creating alpha</span>
+        </div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Total Trades</div>
+        <NumberDisplay value={stats.totalTrades} className="stat-value" />
+        <div className="stat-sub">Lifetime</div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Tokens Scanned</div>
+        <NumberDisplay value={stats.tokensScanned} className="stat-value" />
+        <div className="stat-sub">Last 24 hours</div>
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/TokenScanner.tsx">
+import React, { useEffect, useState } from 'react';
+import type { ScannerData } from '../types';
+
+interface TokenScannerProps {
+  data?: ScannerData;
+  isScanning: boolean;
+}
+
+// Helper to generate chart bars
+const MiniChart: React.FC = () => {
+  const [bars, setBars] = useState<Array<{ height: number; isUp: boolean }>>([]);
+
+  useEffect(() => {
+    // Generate static random chart on mount, or could animate
+    const newBars = Array.from({ length: 40 }, () => ({
+      height: Math.random() * 70 + 20,
+      isUp: Math.random() > 0.4
+    }));
+    setBars(newBars);
+  }, []);
+
+  return (
+    <div className="mini-chart">
+      {bars.map((bar, i) => (
+        <div 
+          key={i} 
+          className={`chart-bar ${bar.isUp ? 'up' : 'down'}`}
+          style={{ height: `${bar.height}%` }}
+        />
+      ))}
+    </div>
+  );
+};
+
+export const TokenScanner: React.FC<TokenScannerProps> = ({ data, isScanning }) => {
+  // Simulating metrics for visual flair if data is generic
+  // In real app, these should come from backend
+  const [metrics, setMetrics] = useState({
+    safetyScore: '--',
+    sentiment: '--',
+    volume: '--',
+    holders: '--'
+  });
+
+  useEffect(() => {
+    if (data && data.mint) {
+      // Simulate "analysis" result display
+      setMetrics({
+        safetyScore: String(Math.floor(Math.random() * 30 + 70)),
+        sentiment: '+' + (Math.random() * 0.8 + 0.2).toFixed(1),
+        volume: '$' + (Math.random() * 900000 + 100000).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+        holders: (Math.random() * 5000 + 1000).toFixed(0)
+      });
+    } else {
+      setMetrics({
+        safetyScore: '--',
+        sentiment: '--',
+        volume: '--',
+        holders: '--'
+      });
+    }
+  }, [data]);
+
+  const tokenName = data?.mint ? `$${data.mint.substring(0, 6).toUpperCase()}` : 'Waiting...';
+
+  return (
+    <div className="card scanner-card">
+      <div className="card-header">
+        <span className="card-title">Token Scanner</span>
+      </div>
+      <div className="scanner-content">
+        <div className="scanner-token">
+          <div className={`scanner-icon ${!isScanning && !data?.mint ? 'idle' : ''}`}>
+            ⟳
+          </div>
+          <div className="scanner-token-info">
+            <h4>{tokenName}</h4>
+            <p>{isScanning ? 'Scanning for tokens' : 'Analyzing...'}</p>
+          </div>
+        </div>
+        <div className="scanner-metrics">
+          <div className="metric-box">
+            <div className="metric-value accent">{metrics.safetyScore}</div>
+            <div className="metric-label">Safety Score</div>
+          </div>
+          <div className="metric-box">
+            <div className="metric-value success">{metrics.sentiment}</div>
+            <div className="metric-label">Sentiment</div>
+          </div>
+          <div className="metric-box">
+            <div className="metric-value">{metrics.volume}</div>
+            <div className="metric-label">24H Volume</div>
+          </div>
+          <div className="metric-box">
+            <div className="metric-value">{metrics.holders}</div>
+            <div className="metric-label">Holders</div>
+          </div>
+        </div>
+        <MiniChart />
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/TradeList.tsx">
+import React from 'react';
+import type { Trade } from '../types';
+
+interface TradeListProps {
+  trades: Trade[];
+}
+
+export const TradeList: React.FC<TradeListProps> = ({ trades }) => {
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Recent Trades</span>
+      </div>
+      <div className="trades-list">
+        {trades.length === 0 ? (
+          <div className="empty-state">No trades yet</div>
+        ) : (
+          trades.map((t, i) => {
+            const pnl = parseFloat(t.pnlSol || "0");
+            const pnlPercent = parseFloat(t.pnlPercent || "0");
+            const isProfit = pnl >= 0;
+            const time = new Date(t.exitTime || t.entryTime).toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            });
+
+            return (
+              <div key={i} className="trade-item">
+                <div className={`trade-arrow ${isProfit ? 'up' : 'down'}`}>
+                  {isProfit ? '↑' : '↓'}
+                </div>
+                <div className="trade-info">
+                  <div className="trade-token">
+                    ${t.symbol || t.mint.substring(0, 6).toUpperCase()}
+                  </div>
+                  <div className="trade-time">{time}</div>
+                </div>
+                <div className="trade-pnl">
+                  <div className={`trade-pnl-value ${isProfit ? 'positive' : 'negative'}`}>
+                    {isProfit ? '+' : ''}{pnl.toFixed(3)} SOL
+                  </div>
+                  {isProfit && (
+                    <div className="trade-pnl-percent">+{pnlPercent.toFixed(0)}%</div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/components/Watchlist.tsx">
+import React from 'react';
+import type { WatchlistToken, WatchlistStats } from '../types';
+
+interface WatchlistProps {
+  tokens: WatchlistToken[];
+  stats: WatchlistStats;
+}
+
+const getStatusColor = (status: WatchlistToken['status']) => {
+  switch (status) {
+    case 'collecting': return 'var(--text-muted)';
+    case 'ready': return 'var(--accent)';
+    case 'analyzing': return 'var(--warning)';
+    case 'rejected': return 'var(--error)';
+    case 'bought': return 'var(--success)';
+    default: return 'var(--text-muted)';
+  }
+};
+
+const getStatusBg = (status: WatchlistToken['status']) => {
+  switch (status) {
+    case 'collecting': return 'rgba(255,255,255,0.05)';
+    case 'ready': return 'var(--accent-subtle)';
+    case 'analyzing': return 'var(--warning-subtle)';
+    case 'rejected': return 'var(--error-subtle)';
+    case 'bought': return 'var(--success-subtle)';
+    default: return 'rgba(255,255,255,0.05)';
+  }
+};
+
+const formatAge = (firstSeen: number) => {
+  const ageMs = Date.now() - firstSeen;
+  const ageSec = Math.floor(ageMs / 1000);
+  if (ageSec < 60) return `${ageSec}s`;
+  const ageMin = Math.floor(ageSec / 60);
+  if (ageMin < 60) return `${ageMin}m`;
+  return `${Math.floor(ageMin / 60)}h`;
+};
+
+export const Watchlist: React.FC<WatchlistProps> = ({ tokens, stats }) => {
+  return (
+    <div className="card" style={{ marginTop: '24px' }}>
+      <div className="card-header">
+        <span className="card-title">Token Watchlist</span>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style={{
+            padding: '4px 12px',
+            borderRadius: '20px',
+            fontSize: '11px',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text-muted)'
+          }}>
+            {stats.total} watching
+          </div>
+          <div style={{
+            padding: '4px 12px',
+            borderRadius: '20px',
+            fontSize: '11px',
+            background: 'var(--accent-subtle)',
+            color: 'var(--accent)'
+          }}>
+            {stats.ready} ready
+          </div>
+          {stats.devSold > 0 && (
+            <div style={{
+              padding: '4px 12px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              background: 'var(--error-subtle)',
+              color: 'var(--error)'
+            }}>
+              {stats.devSold} dev sold
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: '16px', maxHeight: '400px', overflowY: 'auto' }}>
+        {tokens.length === 0 ? (
+          <div style={{
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            padding: '24px',
+            fontSize: '13px'
+          }}>
+            Waiting for new tokens...
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {tokens.map((token) => (
+              <div
+                key={token.mint}
+                style={{
+                  background: 'var(--bg-elevated)',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  border: token.devSold ? '1px solid var(--error)' : '1px solid transparent'
+                }}
+              >
+                {/* Header Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>
+                      {token.symbol || token.mint.substring(0, 8) + '...'}
+                    </span>
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      background: getStatusBg(token.status),
+                      color: getStatusColor(token.status),
+                      textTransform: 'uppercase'
+                    }}>
+                      {token.status}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    {formatAge(token.firstSeen)} old
+                  </span>
+                </div>
+
+                {/* Progress Bar for Data Collection */}
+                {token.status === 'collecting' && (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.1)',
+                      borderRadius: '4px',
+                      height: '4px',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        background: 'var(--accent)',
+                        height: '100%',
+                        width: `${Math.min(token.dataPoints * 10, 100)}%`,
+                        transition: 'width 0.3s ease'
+                      }} />
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      {token.dataPoints}/10 data points
+                    </div>
+                  </div>
+                )}
+
+                {/* Rejection Reason */}
+                {token.status === 'rejected' && token.rejectReason && (
+                  <div style={{
+                    fontSize: '11px',
+                    color: 'var(--error)',
+                    marginBottom: '8px'
+                  }}>
+                    {token.rejectReason}
+                  </div>
+                )}
+
+                {/* Metrics Row */}
+                {(token.status === 'ready' || token.status === 'analyzing') && (
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Price</div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: token.priceChange >= 0 ? 'var(--success)' : 'var(--error)'
+                      }}>
+                        {token.priceChange >= 0 ? '+' : ''}{(token.priceChange * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Drawdown</div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: token.drawdown > 0.2 ? 'var(--error)' : 'var(--text-secondary)'
+                      }}>
+                        -{(token.drawdown * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Buy Pressure</div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: token.buyPressure > 0.6 ? 'var(--success)' : 'var(--text-secondary)'
+                      }}>
+                        {(token.buyPressure * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Traders</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {token.uniqueTraders}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dev Sold Warning */}
+                {token.devSold && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginTop: '8px',
+                    padding: '6px 10px',
+                    background: 'var(--error-subtle)',
+                    borderRadius: '4px'
+                  }}>
+                    <span style={{ fontSize: '14px' }}>!</span>
+                    <span style={{ fontSize: '11px', color: 'var(--error)' }}>DEV SOLD</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+</file>
+
+<file path="src/hooks/useSocket.ts">
+import { useEffect, useState } from 'react';
+import { io, type Socket } from 'socket.io-client';
+import type { Stats, ScannerData, Trade, ToastData, AIDecisionData, NarrativeSignal, WatchlistToken, WatchlistStats } from '../types';
+
+interface UseSocketReturn {
+  socket: Socket | null;
+  isConnected: boolean;
+  stats: Stats;
+  trades: Trade[];
+  scannerData: ScannerData | null;
+  isScanning: boolean;
+  toasts: ToastData[];
+  aiDecision: AIDecisionData | null;
+  narrativeSignal: NarrativeSignal | null;
+  watchlistTokens: WatchlistToken[];
+  watchlistStats: WatchlistStats;
+  removeToast: (index: number) => void;
+}
+
+export const useSocket = (): UseSocketReturn => {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  
+  // Data State
+  const [stats, setStats] = useState<Stats>({
+    multiplier: "1.00",
+    currentEquity: "0",
+    initialCapital: "0",
+    winRate: "0",
+    totalTrades: 0,
+    tokensScanned: 0,
+    winStreak: 0
+  });
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [scannerData, setScannerData] = useState<ScannerData | null>(null);
+  const [isScanning, setIsScanning] = useState(true);
+  const [toasts, setToasts] = useState<ToastData[]>([]);
+  const [aiDecision, setAiDecision] = useState<AIDecisionData | null>(null);
+  const [narrativeSignal, setNarrativeSignal] = useState<NarrativeSignal | null>(null);
+  const [watchlistTokens, setWatchlistTokens] = useState<WatchlistToken[]>([]);
+  const [watchlistStats, setWatchlistStats] = useState<WatchlistStats>({ total: 0, ready: 0, devSold: 0 });
+
+  // Use ref to access latest functions in event callbacks if needed, 
+  // but state setters are stable.
+
+  const addToast = (toast: ToastData) => {
+    setToasts(prev => [...prev, toast]);
+    // Auto remove after 4s
+    setTimeout(() => {
+      setToasts(prev => prev.slice(1)); // Simple FIFO removal, might change reference index
+    }, 4000);
+  };
+
+  const removeToast = (index: number) => {
+    setToasts(prev => prev.filter((_, i) => i !== index));
+  };
+
+  useEffect(() => {
+    // Initial fetch
+    const fetchData = async () => {
+      try {
+        const [statsRes, tradesRes] = await Promise.all([
+          fetch('/api/stats'),
+          fetch('/api/trades?limit=10')
+        ]);
+        if (statsRes.ok) setStats(await statsRes.json());
+        if (tradesRes.ok) setTrades(await tradesRes.json());
+      } catch (err) {
+        console.error("Failed to fetch initial data", err);
+      }
+    };
+    fetchData();
+
+    // Socket Connection
+    // Note: In development with Vite proxy, '/' works if proxy is set.
+    // Otherwise might need absolute URL.
+    const newSocket = io('/', {
+      transports: ['websocket'],
+      reconnectionAttempts: 5
+    });
+
+    newSocket.on('connect', () => {
+      setIsConnected(true);
+      fetchData(); // Refresh on reconnect
+    });
+
+    newSocket.on('disconnect', () => {
+      setIsConnected(false);
+    });
+
+    // Event Handlers
+    newSocket.on('stats:initial', (data: Stats) => setStats(data));
+    newSocket.on('stats:update', (data: Stats) => setStats(data));
+    
+    // Trades
+    newSocket.on('trades:initial', (data: Trade[]) => setTrades(data));
+    
+    newSocket.on('trade:open', (trade: Trade) => {
+      addToast({
+        type: 'info',
+        title: 'Position Opened',
+        message: `Bought ${trade.symbol || trade.mint.substring(0, 8)} for ${trade.amountSol} SOL`
+      });
+      // Trade list is usually updated via rest fetch or full list push? 
+      // The original code didn't update the list on 'trade:open', only on 'trade:close'.
+      // But let's verify if we should.
+    });
+
+    newSocket.on('trade:close', (trade: Trade) => {
+      const pnl = parseFloat(trade.pnlSol || "0");
+      if (pnl > 0) {
+        addToast({
+          type: 'success',
+          title: `+${trade.pnlSol} SOL`,
+          message: `${trade.symbol} closed at ${trade.pnlPercent}%`
+        });
+      } else {
+        addToast({
+          type: 'error',
+          title: `${trade.pnlSol} SOL`,
+          message: `${trade.symbol} stopped out`
+        });
+      }
+      // Refresh trades list
+      fetch('/api/trades?limit=10')
+        .then(r => r.json())
+        .then(data => setTrades(data));
+    });
+
+    // Scanner
+    newSocket.on('scanner:token', (data: ScannerData) => {
+      setScannerData(data);
+      setIsScanning(false);
+      // Also update tokenScanned count in stats immediately if provided in data
+      if (data.tokensScanned) {
+        setStats(prev => ({ ...prev, tokensScanned: data.tokensScanned }));
+      }
+    });
+
+    newSocket.on('scanner:idle', (data: ScannerData) => {
+      setScannerData(null);
+      setIsScanning(true);
+      if (data && data.tokensScanned) {
+        setStats(prev => ({ ...prev, tokensScanned: data.tokensScanned }));
+      }
+    });
+
+    newSocket.on('ai:decision', (data: AIDecisionData) => {
+      setAiDecision(data);
+    });
+
+    newSocket.on('signal:narrative', (data: NarrativeSignal) => {
+      setNarrativeSignal(data);
+    });
+
+    // Watchlist events
+    newSocket.on('watchlist:update', (data: { tokens: WatchlistToken[]; stats: WatchlistStats }) => {
+      setWatchlistTokens(data.tokens);
+      setWatchlistStats(data.stats);
+    });
+
+    newSocket.on('watchlist:tokenAdded', (token: WatchlistToken) => {
+      setWatchlistTokens(prev => {
+        // Add or update token
+        const exists = prev.findIndex(t => t.mint === token.mint);
+        if (exists >= 0) {
+          const updated = [...prev];
+          updated[exists] = token;
+          return updated;
+        }
+        return [token, ...prev].slice(0, 20); // Keep latest 20
+      });
+    });
+
+    newSocket.on('watchlist:tokenRemoved', (data: { mint: string }) => {
+      setWatchlistTokens(prev => prev.filter(t => t.mint !== data.mint));
+    });
+
+    newSocket.on('watchlist:devSold', (data: { mint: string }) => {
+      setWatchlistTokens(prev => prev.map(t =>
+        t.mint === data.mint ? { ...t, devSold: true, status: 'rejected' as const, rejectReason: 'Dev sold' } : t
+      ));
+    });
+
+    newSocket.on('status:paused', (data: { reason: string }) => {
+      addToast({
+        type: 'warning',
+        title: 'Trading Paused',
+        message: data.reason
+      });
+    });
+
+    newSocket.on('toast', (data: ToastData) => {
+      addToast(data);
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
+
+  return { socket, isConnected, stats, trades, scannerData, isScanning, toasts, aiDecision, narrativeSignal, watchlistTokens, watchlistStats, removeToast };
+};
+</file>
+
+<file path="src/index.css">
+:root {
+  /* Claude dark mode inspired palette - warm browns */
+  --bg-page: #1C1917;
+  --bg-card: #262320;
+  --bg-card-hover: #2E2A26;
+  --bg-elevated: #33302C;
+  --border: rgba(255, 245, 230, 0.08);
+  --border-light: rgba(255, 245, 230, 0.12);
+  --text-primary: #F5F5F4;
+  --text-secondary: #A8A29E;
+  --text-muted: #78716C;
+  --accent: #D97706;
+  --accent-secondary: #F59E0B;
+  --accent-glow: rgba(217, 119, 6, 0.3);
+  --accent-subtle: rgba(217, 119, 6, 0.12);
+  --success: #22C55E;
+  --success-glow: rgba(34, 197, 94, 0.25);
+  --success-subtle: rgba(34, 197, 94, 0.12);
+  --error: #EF4444;
+  --error-subtle: rgba(239, 68, 68, 0.12);
+  --warning: #F59E0B;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 24px 32px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle warm noise texture */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(217, 119, 6, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.dashboard {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 48px;
+  position: relative;
+  min-height: 80px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+}
+
+.logo-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 32px var(--accent-glow);
+}
+
+.logo-icon svg {
+  width: 26px;
+  height: 26px;
+  color: white;
+}
+
+.logo-text h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.logo-text p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 100px;
+  background: var(--success-subtle);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 12px var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 245, 230, 0.06), transparent);
+}
+
+.stat-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+}
+
+.stat-card.highlight {
+  background: linear-gradient(135deg, rgba(255, 107, 53, 0.08), rgba(255, 143, 92, 0.04));
+  border-color: rgba(255, 107, 53, 0.3);
+}
+
+.stat-card.highlight::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.stat-value.accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.stat-sub.positive {
+  color: var(--success);
+}
+
+.stat-sub .arrow {
+  font-size: 14px;
+}
+
+/* Main Layout */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 24px;
+}
+
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Card Base */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+  position: relative;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 245, 230, 0.05), transparent);
+}
+
+.card-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* Challenge Card */
+.challenge-card {
+  padding: 48px 32px;
+  text-align: center;
+  position: relative;
+}
+
+.challenge-card::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.challenge-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.challenge-value {
+  font-size: 84px;
+  font-weight: 300;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 0 80px var(--accent-glow);
+}
+
+.challenge-value span {
+  font-size: 42px;
+  background: linear-gradient(135deg, var(--text-muted), var(--text-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.challenge-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 12px;
+  margin-bottom: 32px;
+  position: relative;
+  z-index: 1;
+}
+
+.progress-bar-container {
+  position: relative;
+  z-index: 1;
+}
+
+.progress-bar {
+  height: 10px;
+  background: #3D3835;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+  border-radius: 10px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 245, 230, 0.2), transparent);
+  animation: shimmer 2.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.progress-markers {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.progress-markers span.active {
+  color: var(--accent);
+}
+
+/* Scanner Card */
+.scanner-card .card-header {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.scanner-content {
+  padding: 0 24px 24px;
+}
+
+.scanner-token {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  background: var(--bg-elevated);
+  border-radius: 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+}
+
+.scanner-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-subtle), transparent);
+  border: 1px solid rgba(255, 107, 53, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--accent);
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scanner-icon.idle {
+  animation: none;
+}
+
+.scanner-token-info h4 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.scanner-token-info p {
+  font-size: 12px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.scanner-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.metric-box:hover {
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
+}
+
+.metric-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.metric-value.accent {
+  color: var(--accent);
+}
+
+.metric-value.success {
+  color: var(--success);
+}
+
+.metric-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 6px;
+}
+
+/* Mini Chart */
+.mini-chart {
+  height: 60px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 12px 0;
+}
+
+.chart-bar {
+  flex: 1;
+  border-radius: 3px;
+  transition: all 0.3s ease;
+  min-height: 4px;
+}
+
+.chart-bar.up {
+  background: linear-gradient(to top, var(--success), rgba(34, 197, 94, 0.5));
+}
+
+.chart-bar.down {
+  background: linear-gradient(to top, #A8A29E, #78716C);
+}
+
+.chart-bar:hover {
+  opacity: 0.8;
+  transform: scaleY(1.1);
+}
+
+/* Recent Trades */
+.trades-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.trades-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.trades-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.trades-list::-webkit-scrollbar-thumb {
+  background: #44403C;
+  border-radius: 4px;
+}
+
+.trades-list::-webkit-scrollbar-thumb:hover {
+  background: #57534E;
+}
+
+.trade-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  gap: 14px;
+  transition: background 0.15s ease;
+}
+
+.trade-item:hover {
+  background: var(--bg-elevated);
+}
+
+.trade-item:last-child {
+  border-bottom: none;
+}
+
+.trade-arrow {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.trade-arrow.up {
+  background: var(--success-subtle);
+  color: var(--success);
+  box-shadow: 0 0 20px var(--success-glow);
+}
+
+.trade-arrow.down {
+  background: var(--error-subtle);
+  color: var(--error);
+}
+
+.trade-info {
+  flex: 1;
+}
+
+.trade-token {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trade-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.trade-pnl {
+  text-align: right;
+}
+
+.trade-pnl-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.trade-pnl-value.positive {
+  color: var(--success);
+}
+
+.trade-pnl-value.negative {
+  color: var(--text-secondary);
+}
+
+.trade-pnl-percent {
+  font-size: 11px;
+  color: var(--success);
+  margin-top: 2px;
+}
+
+/* AI Engine */
+.ai-content {
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.ai-indicator {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 20px;
+  position: relative;
+}
+
+.ai-ring-outer {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid #3D3835;
+}
+
+.ai-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  animation: spin 1.5s linear infinite;
+}
+
+.ai-ring-inner {
+  position: absolute;
+  width: 70%;
+  height: 70%;
+  top: 15%;
+  left: 15%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-secondary);
+  animation: spin 2s linear infinite reverse;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 30px var(--accent-glow);
+}
+
+.ai-center-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #FAFAF9;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.ai-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
+.confidence-bar {
+  margin-bottom: 24px;
+}
+
+.confidence-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.confidence-header span:first-child {
+  color: var(--text-muted);
+}
+
+.confidence-header span:last-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.confidence-track {
+  height: 6px;
+  background: #3D3835;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+  border-radius: 6px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.win-streak-box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+}
+
+.win-streak-value {
+  font-size: 48px;
+  font-weight: 300;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+.win-streak-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* Toast Notifications */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1000;
+}
+
+.toast {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  min-width: 300px;
+  animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(20px);
+}
+
+.toast.success {
+  border-left: 3px solid var(--success);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 40px var(--success-glow);
+}
+
+.toast.error {
+  border-left: 3px solid var(--error);
+}
+
+.toast.warning {
+  border-left: 3px solid var(--warning);
+}
+
+.toast.info {
+  border-left: 3px solid var(--accent);
+}
+
+.toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.toast.success .toast-title {
+  color: var(--success);
+}
+
+.toast.error .toast-title {
+  color: var(--error);
+}
+
+.toast-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%) scale(0.9);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Empty State */
+.empty-state {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body {
+    padding: 16px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .header-left {
+    width: 100%;
+  }
+
+  .live-badge {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+  }
+
+  .challenge-value {
+    font-size: 56px;
+  }
+}
+
+/* Number animation */
+.animate-number {
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+.animate-number.updating {
+  transform: scale(1.05);
+}
+</file>
+
+<file path="src/main.tsx">
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  // StrictMode disabled to prevent double-socket connection in dev
+  // or handle cleanup carefully in useEffect (which we did).
+  // Keeping it enabled is fine if cleanup is robust.
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+</file>
+
+<file path="src/types.ts">
+export interface Stats {
+  multiplier: string;
+  currentEquity: string;
+  initialCapital: string;
+  winRate: string;
+  totalTrades: number;
+  tokensScanned: number;
+  winStreak: number;
+}
+
+export interface Trade {
+  id?: string;
+  mint: string;
+  symbol: string;
+  amountSol: number;
+  amountTokens: number;
+  entryPrice: number;
+  exitPrice?: number;
+  pnlSol?: string;
+  pnlPercent?: string;
+  isOpen: boolean;
+  entryTime: string;
+  exitTime?: string;
+}
+
+export interface ScannerData {
+  mint: string;
+  tokensScanned: number;
+  timestamp: number;
+}
+
+export interface ToastData {
+  type: 'success' | 'error' | 'warning' | 'info';
+  title: string;
+  message: string;
+}
+
+export interface AIDecisionData {
+  action: 0 | 1 | 2; // HOLD=0, BUY=1, SELL=2
+  confidence: number;
+  regime: 0 | 1 | 2; // BULL=0, VOLATILE=1, CRASH=2
+  qValues: number[];
+  mint: string;
+  symbol: string;
+  timestamp: string;
+}
+
+export interface NarrativeSignal {
+  sentiment: 'bullish' | 'bearish' | 'neutral';
+  bullishnessScore: number;
+  hypeScore: number;
+  keywords: string[];
+  mint?: string;
+  symbol?: string;
+}
+
+// Token Watchlist Types
+export interface WatchlistToken {
+  mint: string;
+  symbol?: string;
+  firstSeen: number;
+  dataPoints: number;
+  priceChange: number;
+  volatility: number;
+  drawdown: number;
+  buyPressure: number;
+  uniqueTraders: number;
+  devSold: boolean;
+  status: 'collecting' | 'ready' | 'analyzing' | 'rejected' | 'bought';
+  rejectReason?: string;
+}
+
+export interface WatchlistStats {
+  total: number;
+  ready: number;
+  devSold: number;
+}
+</file>
+
+<file path="tsconfig.app.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "types": [
+      "vite/client"
+    ],
+    "skipLibCheck": true,
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": [
+    "src"
+  ]
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+</file>
+
+<file path="tsconfig.node.json">
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+</file>
+
+<file path="vite.config.ts">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3500',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:3500',
+        ws: true,
+      },
+    },
+  },
+})
+</file>
+
+</files>

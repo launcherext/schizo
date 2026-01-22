@@ -1,33 +1,11 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
-
-# Database files
-*.db
-*.db-wal
-*.db-shm
-
-# Environment
 .env
-
-# Sensitive files
-keystore.json
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
 *.log
-logs/
-promotional-video
-*.mp4
-*.mov
-*.avi
-*.mkv
+data/
+models/*.json
+!models/.gitkeep
+.DS_Store
+*.sqlite
+*.db
+puppeteer_data/
