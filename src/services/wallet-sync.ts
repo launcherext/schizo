@@ -119,6 +119,24 @@ export class WalletSync extends EventEmitter {
           actual: actual.toFixed(4),
           percentDiff: percentDiff.toFixed(2),
         }, 'Token balance discrepancy detected');
+
+        // AUTO-CLOSE GHOST POSITIONS: If actual balance is 0 but we expect tokens,
+        // the position is a "ghost" - close it immediately to stop sell loops
+        if (actual === 0 && expected > 0) {
+          logger.warn({
+            positionId: position.id,
+            mint: position.mint.substring(0, 15),
+            expectedAmount: expected,
+          }, 'Ghost position detected (0 tokens on-chain) - auto-closing');
+
+          // Close the ghost position - this will mark it as closed without trying to sell
+          try {
+            await positionManager.closeGhostPosition(position.id);
+            logger.info({ positionId: position.id }, 'Ghost position closed successfully');
+          } catch (err) {
+            logger.error({ positionId: position.id, error: err }, 'Failed to close ghost position');
+          }
+        }
       }
     }
 

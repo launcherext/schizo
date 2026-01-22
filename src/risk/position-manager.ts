@@ -622,6 +622,57 @@ export class PositionManager extends EventEmitter {
     }
   }
 
+  // Close a ghost position (0 tokens on-chain) without attempting to sell
+  async closeGhostPosition(positionId: string): Promise<void> {
+    const position = this.positions.get(positionId);
+
+    if (!position) {
+      logger.warn({ positionId }, 'Ghost position not found');
+      return;
+    }
+
+    if (position.status !== 'open') {
+      logger.warn({ positionId, status: position.status }, 'Ghost position not open');
+      return;
+    }
+
+    logger.info({
+      positionId,
+      mint: position.mint.substring(0, 15),
+      symbol: position.symbol,
+      amountSol: position.amountSol,
+    }, 'Closing ghost position (no sell attempt - 0 tokens on-chain)');
+
+    position.status = 'closed';
+    position.amount = 0;
+
+    // Total loss = entire investment (we have no tokens)
+    const totalPnlSol = -position.amountSol + (position.realizedPnl || 0);
+    const pnlPercent = (totalPnlSol / position.amountSol) * 100;
+
+    // Update database
+    await repository.closePosition(positionId);
+
+    // Clean up
+    priceFeed.removeFromWatchList(position.mint);
+    this.positions.delete(positionId);
+
+    this.emit('positionClosed', {
+      position,
+      reason: 'ghost_position',
+      exitPrice: 0,
+      pnlSol: totalPnlSol,
+      pnlPercent,
+      result: { success: false, error: 'Ghost position - 0 tokens on-chain' },
+    });
+
+    logger.info({
+      positionId,
+      totalPnlSol: totalPnlSol.toFixed(6),
+      pnlPercent: pnlPercent.toFixed(2),
+    }, 'Ghost position closed as loss');
+  }
+
   private async persistPosition(position: Position): Promise<void> {
     await repository.upsertPosition({
       id: position.id,
