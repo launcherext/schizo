@@ -519,6 +519,45 @@ export class PositionManager extends EventEmitter {
         pnlPercent: pnlPercent.toFixed(2),
       }, 'Position closed');
     } else {
+      // Check if actual balance is 0 - if so, close as total loss (ghost position)
+      if (result.actualBalance === 0) {
+        logger.warn({
+          positionId,
+          reason,
+          error: result.error,
+        }, 'Ghost position detected - no tokens on chain. Closing as total loss.');
+
+        position.status = 'closed';
+        position.amount = 0;
+
+        // Total loss = entire investment
+        const totalPnlSol = -position.amountSol;
+        const pnlPercent = -100;
+
+        // Update database
+        await repository.closePosition(positionId);
+
+        // Clean up
+        priceFeed.removeFromWatchList(position.mint);
+        this.positions.delete(positionId);
+
+        this.emit('positionClosed', {
+          position,
+          reason: 'ghost_position',
+          exitPrice: 0,
+          pnlSol: totalPnlSol,
+          pnlPercent,
+          result,
+        });
+
+        logger.info({
+          positionId,
+          totalPnlSol: totalPnlSol.toFixed(6),
+          pnlPercent: pnlPercent.toFixed(2),
+        }, 'Ghost position closed as total loss');
+        return;
+      }
+
       position.status = 'open'; // Revert status
       logger.error({
         positionId,
