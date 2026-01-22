@@ -60,14 +60,31 @@ async function main(): Promise<void> {
     }
 
     // Clean up known phantom positions (tokens no longer in wallet)
+    // These positions show in DB but wallet has 0 tokens - causing incorrect P&L
     const phantomMints = [
-      'G9tnG6Z4KDrNepi2fYQUZYEhuBtfwg6TwbzekxWMpump', // doge - phantom position causing +132 SOL P&L bug
+      'G9tnG6Z4KDrNepi2fYQUZYEhuBtfwg6TwbzekxWMpump', // doge
+      'C4br6g4C', // HonorPump (partial mint)
+      'DPypP1iY', // FaPEPE
+      '9R4zqfea', // RyanAir
+      'VTCQxY6b', // CITY
+      'DRtvTCzf', // ChiefPussy
+      '96zMCM9n', // HUGGI
+      'HKWqwDuU', // XEPE
+      'X8vikGpF', // LAUDE
     ];
+    let totalPhantomDeleted = 0;
     for (const mint of phantomMints) {
-      const deleted = dbWithRepos.trades.deleteByTokenMint(mint);
+      // Use LIKE for partial mints
+      const deleted = mint.length < 20
+        ? dbWithRepos.db.prepare("DELETE FROM trades WHERE token_mint LIKE ?").run(`${mint}%`).changes
+        : dbWithRepos.trades.deleteByTokenMint(mint);
       if (deleted > 0) {
         log.info({ mint, deleted }, 'Cleaned up phantom position');
+        totalPhantomDeleted += deleted;
       }
+    }
+    if (totalPhantomDeleted > 0) {
+      log.info({ totalPhantomDeleted }, 'Total phantom positions cleaned');
     }
 
     // Historical IMPOSTOR trade - CLOSED (user sold manually at +73%)
