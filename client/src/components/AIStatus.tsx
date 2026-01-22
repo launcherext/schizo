@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { Stats, AIDecisionData } from '../types';
+import { TokenBadge } from './TokenDisplay';
 
 interface AIStatusProps {
   stats: Stats;
@@ -22,7 +23,7 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
     const regimes = ['BULL MARKET', 'VOLATILE', 'CRASH DETECTED'];
     const regimeText = regimes[decision.regime];
 
-    setStatusText(`${regimeText}: Considering ${actionText} on $${decision.symbol}`);
+    setStatusText(`${regimeText}: Considering ${actionText}`);
   }, [decision]);
 
   // Fallback animation if no decision yet
@@ -53,7 +54,7 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-title">AI Engine</span>
+        <span className="card-title">Claude's Thoughts</span>
       </div>
       <div className="ai-content">
         <div className="ai-indicator">
@@ -68,7 +69,16 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
           </div>
         </div>
         
-        <div className="ai-status" style={{ minHeight: '40px' }}>{statusText}</div>
+        <div className="ai-status" style={{ minHeight: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span>{statusText}</span>
+          {decision && (
+            <TokenBadge
+              mint={decision.mint}
+              symbol={decision.symbol}
+              imageUrl={decision.imageUrl}
+            />
+          )}
+        </div>
 
         {/* Q-Value Visualization */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', height: '60px', alignItems: 'flex-end' }}>

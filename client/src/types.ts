@@ -11,7 +11,9 @@ export interface Stats {
 export interface Trade {
   id?: string;
   mint: string;
+  name?: string;
   symbol: string;
+  imageUrl?: string | null;
   amountSol: number;
   amountTokens: number;
   entryPrice: number;
@@ -25,6 +27,9 @@ export interface Trade {
 
 export interface ScannerData {
   mint: string;
+  name?: string;
+  symbol?: string;
+  imageUrl?: string | null;
   tokensScanned: number;
   timestamp: number;
 }
@@ -41,7 +46,9 @@ export interface AIDecisionData {
   regime: 0 | 1 | 2; // BULL=0, VOLATILE=1, CRASH=2
   qValues: number[];
   mint: string;
+  name?: string;
   symbol: string;
+  imageUrl?: string | null;
   timestamp: string;
 }
 
@@ -57,7 +64,9 @@ export interface NarrativeSignal {
 // Token Watchlist Types
 export interface WatchlistToken {
   mint: string;
+  name?: string;
   symbol?: string;
+  imageUrl?: string | null;
   firstSeen: number;
   dataPoints: number;
   priceChange: number;
@@ -74,4 +83,37 @@ export interface WatchlistStats {
   total: number;
   ready: number;
   devSold: number;
+}
+
+// C100 Token Types
+export interface C100TokenData {
+  mint: string;
+  name: string;
+  symbol: string;
+  priceSol: number;
+  priceUsd: number;
+  marketCapUsd: number;
+  volume24h: number;
+  priceChange24h: number;
+  lastUpdated: string;
+}
+
+export interface C100ClaimStats {
+  totalClaimedSol: number;
+  claimCount: number;
+  lastClaimTime: string | null;
+}
+
+export interface C100BuybackStats {
+  totalBuybackSol: number;
+  totalTokensBought: number;
+  buybackCount: number;
+  lastBuybackTime: string | null;
+}
+
+export interface C100Data {
+  enabled: boolean;
+  token: C100TokenData | null;
+  claims: C100ClaimStats;
+  buybacks: C100BuybackStats;
 }

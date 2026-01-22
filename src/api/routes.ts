@@ -5,8 +5,9 @@ import { tradeLogger, performanceAnalytics } from '../learning';
 import { tokenWatchlist, pumpDetector } from '../signals';
 import { ddqnAgent, regimeDetector, positionSizer } from '../ai';
 import { config } from '../config/settings';
-import { walletSync, equityTracker, positionReconciler } from '../services';
+import { walletSync, equityTracker, positionReconciler, c100Tracker, rewardClaimer, c100Buyback } from '../services';
 import { txManager } from '../execution/tx-manager';
+import { repository } from '../db/repository';
 
 const logger = createChildLogger('api-routes');
 
@@ -622,6 +623,132 @@ export function setupRoutes(app: Express): void {
       }
     } catch (error: any) {
       logger.error({ error }, 'Manual test buy failed');
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // =====================
+  // C100 Routes
+  // =====================
+
+  // Get C100 status - token info + claim/buyback totals
+  app.get('/api/c100/status', async (req: Request, res: Response) => {
+    try {
+      const tokenData = c100Tracker.getTokenData();
+      const claimStats = rewardClaimer.getStats();
+      const buybackStats = c100Buyback.getStats();
+
+      res.json({
+        enabled: c100Tracker.isEnabled(),
+        token: tokenData ? {
+          mint: tokenData.mint,
+          name: tokenData.name,
+          symbol: tokenData.symbol,
+          priceSol: tokenData.priceSol,
+          priceUsd: tokenData.priceUsd,
+          marketCapUsd: tokenData.marketCapUsd,
+          volume24h: tokenData.volume24h,
+          priceChange24h: tokenData.priceChange24h,
+          lastUpdated: tokenData.lastUpdated,
+        } : null,
+        claims: {
+          totalClaimedSol: claimStats.totalClaimedSol,
+          claimCount: claimStats.claimCount,
+          lastClaimTime: claimStats.lastClaimTime,
+          sources: claimStats.sources,
+        },
+        buybacks: {
+          totalBuybackSol: buybackStats.totalBuybackSol,
+          totalTokensBought: buybackStats.totalTokensBought,
+          buybackCount: buybackStats.buybackCount,
+          lastBuybackTime: buybackStats.lastBuybackTime,
+          avgPriceSol: buybackStats.avgPriceSol,
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get C100 status');
+      res.status(500).json({ error: 'Failed to get C100 status' });
+    }
+  });
+
+  // Get recent claim transactions
+  app.get('/api/c100/claims', async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const claims = await repository.getRecentC100Claims(limit);
+
+      res.json({
+        claims: claims.map(c => ({
+          id: c.id,
+          source: c.source,
+          amountSol: parseFloat(c.amount_sol.toString()),
+          signature: c.signature,
+          status: c.status,
+          timestamp: c.timestamp,
+        })),
+        count: claims.length,
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get C100 claims');
+      res.status(500).json({ error: 'Failed to get C100 claims' });
+    }
+  });
+
+  // Get recent buyback transactions
+  app.get('/api/c100/buybacks', async (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const buybacks = await repository.getRecentC100Buybacks(limit);
+
+      res.json({
+        buybacks: buybacks.map(b => ({
+          id: b.id,
+          amountSol: parseFloat(b.amount_sol.toString()),
+          amountTokens: b.amount_tokens ? parseFloat(b.amount_tokens.toString()) : null,
+          priceSol: b.price_sol ? parseFloat(b.price_sol.toString()) : null,
+          source: b.source,
+          signature: b.signature,
+          status: b.status,
+          timestamp: b.timestamp,
+        })),
+        count: buybacks.length,
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get C100 buybacks');
+      res.status(500).json({ error: 'Failed to get C100 buybacks' });
+    }
+  });
+
+  // Manual claim trigger (for testing)
+  app.post('/api/c100/claim', async (req: Request, res: Response) => {
+    try {
+      logger.info('Manual claim triggered');
+      const results = await rewardClaimer.claimAllRewards();
+
+      const totalClaimed = results.reduce((sum, r) => sum + (r.success ? r.amountSol : 0), 0);
+
+      res.json({
+        success: true,
+        totalClaimed,
+        results,
+      });
+    } catch (error: any) {
+      logger.error({ error }, 'Manual claim failed');
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Manual buyback trigger (for testing)
+  app.post('/api/c100/buyback', async (req: Request, res: Response) => {
+    try {
+      const { amountSol = 0.01 } = req.body;
+
+      logger.info({ amountSol }, 'Manual buyback triggered');
+      const result = await c100Buyback.executeBuyback(amountSol, 'manual');
+
+      res.json(result);
+    } catch (error: any) {
+      logger.error({ error }, 'Manual buyback failed');
       res.status(500).json({ error: error.message });
     }
   });

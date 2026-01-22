@@ -1,5 +1,6 @@
 import React from 'react';
 import type { WatchlistToken, WatchlistStats } from '../types';
+import { TokenDisplay } from './TokenDisplay';
 
 interface WatchlistProps {
   tokens: WatchlistToken[];
@@ -100,9 +101,15 @@ export const Watchlist: React.FC<WatchlistProps> = ({ tokens, stats }) => {
                 {/* Header Row */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>
-                      {token.symbol || token.mint.substring(0, 8) + '...'}
-                    </span>
+                    <TokenDisplay
+                      mint={token.mint}
+                      name={token.name}
+                      symbol={token.symbol}
+                      imageUrl={token.imageUrl}
+                      size="sm"
+                      showCopy={true}
+                      inline={true}
+                    />
                     <span style={{
                       padding: '2px 8px',
                       borderRadius: '4px',

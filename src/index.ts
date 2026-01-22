@@ -26,7 +26,7 @@ import { positionManager, capitalAllocator, drawdownGuard } from './risk';
 import { tradeLogger, performanceAnalytics, modelTrainer } from './learning';
 
 // Services Layer
-import { walletSync, equityTracker, positionReconciler } from './services';
+import { walletSync, equityTracker, positionReconciler, c100Tracker, rewardClaimer, c100Buyback } from './services';
 
 // API Layer
 import { apiServer } from './api';
@@ -113,6 +113,11 @@ class TradingBot {
           closed: reconcileResult.phantomsClosed,
         }, 'Startup reconciliation found phantom positions');
       }
+
+      // Start C100 services
+      await c100Tracker.start(30000);           // Price updates every 30s
+      await rewardClaimer.start(5 * 60 * 1000); // Claim every 5 minutes
+      await c100Buyback.initialize();
 
       this.isRunning = true;
       logger.info('Bot started successfully');
@@ -240,6 +245,13 @@ class TradingBot {
 
       // Add to training
       await modelTrainer.addTradeExperience(position.id);
+
+      // C100 Buyback on profitable close
+      if (pnlSol > 0) {
+        c100Buyback.onProfitableClose(pnlSol).catch(err => {
+          logger.error({ err }, 'C100 buyback failed');
+        });
+      }
 
       logger.info({
         positionId: position.id,
@@ -910,6 +922,10 @@ class TradingBot {
     // Stop new services
     walletSync.stop();
     equityTracker.stop();
+
+    // Stop C100 services
+    c100Tracker.stop();
+    rewardClaimer.stop();
 
     // Stop API server
     await apiServer.stop();

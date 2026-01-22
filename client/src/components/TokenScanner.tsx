@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { ScannerData } from '../types';
+import { TokenDisplay } from './TokenDisplay';
 
 interface TokenScannerProps {
   data?: ScannerData;
@@ -61,8 +62,6 @@ export const TokenScanner: React.FC<TokenScannerProps> = ({ data, isScanning }) 
     }
   }, [data]);
 
-  const tokenName = data?.mint ? `$${data.mint.substring(0, 6).toUpperCase()}` : 'Waiting...';
-
   return (
     <div className="card scanner-card">
       <div className="card-header">
@@ -74,8 +73,21 @@ export const TokenScanner: React.FC<TokenScannerProps> = ({ data, isScanning }) 
             ⟳
           </div>
           <div className="scanner-token-info">
-            <h4>{tokenName}</h4>
-            <p>{isScanning ? 'Scanning for tokens' : 'Analyzing...'}</p>
+            {data?.mint ? (
+              <TokenDisplay
+                mint={data.mint}
+                name={data.name}
+                symbol={data.symbol}
+                imageUrl={data.imageUrl}
+                size="lg"
+                showCopy={true}
+              />
+            ) : (
+              <>
+                <h4>Waiting...</h4>
+                <p>{isScanning ? 'Scanning for tokens' : 'Idle'}</p>
+              </>
+            )}
           </div>
         </div>
         <div className="scanner-metrics">

@@ -6,13 +6,16 @@ import { heliusWs } from '../data';
 import { tokenWatchlist } from '../signals';
 import { config } from '../config/settings';
 import { Position } from '../risk/types';
-import { walletSync, equityTracker, positionReconciler } from '../services';
+import { walletSync, equityTracker, positionReconciler, c100Tracker, rewardClaimer, c100Buyback } from '../services';
 
 const logger = createChildLogger('websocket');
 
 // Track scanner state
 let tokensScanned = 0;
-let currentScanningToken: { mint: string; symbol?: string } | null = null;
+let currentScanningToken: { mint: string; name?: string; symbol?: string; imageUrl?: string | null } | null = null;
+
+// Token metadata cache for quick lookups
+const tokenMetadataCache = new Map<string, { name?: string; symbol?: string; imageUrl?: string | null }>();
 
 export function setupWebSocket(io: SocketServer): void {
   // Handle client connections
@@ -84,13 +87,20 @@ async function sendInitialState(socket: Socket): Promise<void> {
 
 function setupEventBridges(io: SocketServer): void {
   // New token detected (scanner event)
-  heliusWs.on('newToken', (event: { mint: string; signature: string }) => {
+  heliusWs.on('newToken', (event: { mint: string; signature: string; name?: string; symbol?: string }) => {
     tokensScanned++;
-    currentScanningToken = { mint: event.mint };
+    currentScanningToken = { mint: event.mint, name: event.name, symbol: event.symbol };
+
+    // Cache metadata from event
+    if (event.name || event.symbol) {
+      tokenMetadataCache.set(event.mint, { name: event.name, symbol: event.symbol });
+    }
 
     io.emit('scanner:token', {
       mint: event.mint,
       signature: event.signature,
+      name: event.name,
+      symbol: event.symbol,
       tokensScanned,
     });
 
@@ -101,6 +111,25 @@ function setupEventBridges(io: SocketServer): void {
         io.emit('scanner:idle', { tokensScanned });
       }
     }, 10000);
+  });
+
+  // Token metadata updated (image fetched)
+  heliusWs.on('tokenMetadataUpdated', (data: { mint: string; name: string; symbol: string; imageUrl: string | null }) => {
+    // Update cache
+    tokenMetadataCache.set(data.mint, { name: data.name, symbol: data.symbol, imageUrl: data.imageUrl });
+
+    // Update current scanning token if it matches
+    if (currentScanningToken?.mint === data.mint) {
+      currentScanningToken = { ...currentScanningToken, ...data };
+    }
+
+    // Broadcast metadata update
+    io.emit('token:metadataUpdate', {
+      mint: data.mint,
+      name: data.name,
+      symbol: data.symbol,
+      imageUrl: data.imageUrl,
+    });
   });
 
   // Position opened
@@ -288,6 +317,35 @@ function setupEventBridges(io: SocketServer): void {
   positionReconciler.on('notification', (notification) => {
     io.emit('toast', notification);
   });
+
+  // C100 events
+  c100Tracker.on('priceUpdate', (data) => {
+    io.emit('c100:priceUpdate', data);
+  });
+
+  rewardClaimer.on('claimSuccess', (data) => {
+    io.emit('c100:claim', data);
+    io.emit('toast', {
+      type: 'success',
+      title: 'Reward Claimed',
+      message: `Claimed ${data.amountSol.toFixed(6)} SOL from ${data.source}`,
+    });
+  });
+
+  rewardClaimer.on('claimCycleComplete', (data) => {
+    if (data.totalClaimed > 0) {
+      io.emit('c100:claimCycle', data);
+    }
+  });
+
+  c100Buyback.on('buybackSuccess', (data) => {
+    io.emit('c100:buyback', data);
+    io.emit('toast', {
+      type: 'success',
+      title: 'C100 Buyback',
+      message: `Bought ${data.amountTokens.toFixed(0)} tokens for ${data.amountSol.toFixed(6)} SOL`,
+    });
+  });
 }
 
 function startPeriodicBroadcasts(io: SocketServer): void {
@@ -382,6 +440,34 @@ function startPeriodicBroadcasts(io: SocketServer): void {
       logger.error({ error }, 'Failed to broadcast wallet update');
     }
   }, 10000);
+
+  // Broadcast C100 status every 30 seconds
+  setInterval(() => {
+    try {
+      if (!c100Tracker.isEnabled()) return;
+
+      const tokenData = c100Tracker.getTokenData();
+      const claimStats = rewardClaimer.getStats();
+      const buybackStats = c100Buyback.getStats();
+
+      io.emit('c100:update', {
+        token: tokenData,
+        claims: {
+          totalClaimedSol: claimStats.totalClaimedSol,
+          claimCount: claimStats.claimCount,
+          lastClaimTime: claimStats.lastClaimTime,
+        },
+        buybacks: {
+          totalBuybackSol: buybackStats.totalBuybackSol,
+          totalTokensBought: buybackStats.totalTokensBought,
+          buybackCount: buybackStats.buybackCount,
+          lastBuybackTime: buybackStats.lastBuybackTime,
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to broadcast C100 update');
+    }
+  }, 30000);
 }
 
 function formatPositions(positions: Position[]): {
@@ -444,6 +530,7 @@ function formatTrade(trade: any): any {
 function formatWatchlistToken(mint: string, token: any): any {
   const features = tokenWatchlist.extractFeatures(mint);
   const filterResult = tokenWatchlist.passesHardFilters(mint);
+  const cachedMetadata = tokenMetadataCache.get(mint);
 
   let status: 'collecting' | 'ready' | 'analyzing' | 'rejected' | 'bought' = 'collecting';
   if (token.devSold) {
@@ -456,7 +543,9 @@ function formatWatchlistToken(mint: string, token: any): any {
 
   return {
     mint,
-    symbol: token.symbol,
+    name: cachedMetadata?.name || token.name,
+    symbol: cachedMetadata?.symbol || token.symbol,
+    imageUrl: cachedMetadata?.imageUrl || null,
     firstSeen: token.firstSeen,
     dataPoints: token.priceHistory?.length || 0,
     priceChange: features?.priceChange || 0,

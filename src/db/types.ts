@@ -12,6 +12,7 @@ export interface TokenRecord {
   creator: string;
   mint_revoked: boolean;
   freeze_revoked: boolean;
+  image_url: string | null;
   last_updated: Date;
 }
 
@@ -112,4 +113,24 @@ export interface WalletSyncLogRecord {
   sol_balance: number;
   token_positions_json: string;
   discrepancies_json: string;
+}
+
+export interface C100ClaimRecord {
+  id: number;
+  source: 'pump_creator' | 'pump_referral' | 'meteora_dbc';
+  amount_sol: number;
+  signature: string | null;
+  status: 'success' | 'failed' | 'pending';
+  timestamp: Date;
+}
+
+export interface C100BuybackRecord {
+  id: number;
+  amount_sol: number;
+  amount_tokens: number | null;
+  price_sol: number | null;
+  source: 'profit_share' | 'manual';
+  signature: string | null;
+  status: 'success' | 'failed' | 'pending';
+  timestamp: Date;
 }

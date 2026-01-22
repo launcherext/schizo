@@ -8,6 +8,7 @@ export interface TokenInfo {
   creator: string;
   mintAuthorityRevoked: boolean;
   freezeAuthorityRevoked: boolean;
+  imageUrl?: string | null;
 }
 
 export interface PriceData {
@@ -68,6 +69,9 @@ export interface NewTokenEvent {
   signature: string;
   timestamp: Date;
   creator: string;
+  name?: string;
+  symbol?: string;
+  imageUrl?: string | null;
 }
 
 export type DataEventType = 'new_token' | 'price_update' | 'trade' | 'whale_activity';

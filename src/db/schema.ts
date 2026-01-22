@@ -16,6 +16,7 @@ export const createTables = async (pool: Pool): Promise<void> => {
       creator VARCHAR(64),
       mint_revoked BOOLEAN DEFAULT FALSE,
       freeze_revoked BOOLEAN DEFAULT FALSE,
+      image_url VARCHAR(512),
       last_updated TIMESTAMP DEFAULT NOW()
     );
 
@@ -175,7 +176,42 @@ export const createTables = async (pool: Pool): Promise<void> => {
 
     CREATE INDEX IF NOT EXISTS idx_wallet_sync_time
       ON wallet_sync_log(timestamp DESC);
+
+    -- C100 claim tracking
+    CREATE TABLE IF NOT EXISTS c100_claims (
+      id SERIAL PRIMARY KEY,
+      source VARCHAR(32) NOT NULL,
+      amount_sol DECIMAL(20, 10) NOT NULL,
+      signature VARCHAR(128),
+      status VARCHAR(16) DEFAULT 'success',
+      timestamp TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_c100_claims_time
+      ON c100_claims(timestamp DESC);
+
+    -- C100 buyback tracking
+    CREATE TABLE IF NOT EXISTS c100_buybacks (
+      id SERIAL PRIMARY KEY,
+      amount_sol DECIMAL(20, 10) NOT NULL,
+      amount_tokens DECIMAL(20, 10),
+      price_sol DECIMAL(20, 15),
+      source VARCHAR(32) NOT NULL,
+      signature VARCHAR(128),
+      status VARCHAR(16) DEFAULT 'success',
+      timestamp TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_c100_buybacks_time
+      ON c100_buybacks(timestamp DESC);
   `);
+
+  // Migration: Add image_url column if it doesn't exist
+  await pool.query(`
+    ALTER TABLE tokens ADD COLUMN IF NOT EXISTS image_url VARCHAR(512);
+  `).catch(() => {
+    // Column already exists or table doesn't exist yet
+  });
 
   logger.info('Database tables created successfully');
 };

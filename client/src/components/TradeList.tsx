@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Trade } from '../types';
+import { TokenDisplay } from './TokenDisplay';
 
 interface TradeListProps {
   trades: Trade[];
@@ -31,9 +32,15 @@ export const TradeList: React.FC<TradeListProps> = ({ trades }) => {
                   {isProfit ? '↑' : '↓'}
                 </div>
                 <div className="trade-info">
-                  <div className="trade-token">
-                    ${t.symbol || t.mint.substring(0, 6).toUpperCase()}
-                  </div>
+                  <TokenDisplay
+                    mint={t.mint}
+                    name={t.name}
+                    symbol={t.symbol}
+                    imageUrl={t.imageUrl}
+                    size="sm"
+                    showCopy={true}
+                    inline={true}
+                  />
                   <div className="trade-time">{time}</div>
                 </div>
                 <div className="trade-pnl">

@@ -798,6 +798,38 @@ body::before {
   backdrop-filter: blur(20px);
 }
 
+/* X Profile Link */
+.x-profile-link {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.x-profile-link:hover {
+  transform: translateY(-2px);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.x-profile-link svg {
+  width: 20px;
+  height: 20px;
+}
+
 .toast.success {
   border-left: 3px solid var(--success);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 40px var(--success-glow);
@@ -1149,4 +1181,207 @@ body::before {
 
 .wallet-indicator {
   color: var(--text-muted);
+}
+
+/* C100 Card Styles */
+.c100-card {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.06), rgba(245, 158, 11, 0.02));
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.c100-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(217, 119, 6, 0.3), transparent);
+}
+
+.c100-card::after {
+  content: '';
+  position: absolute;
+  top: -100px;
+  right: -100px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.c100-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.c100-token-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.c100-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: white;
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+
+.c100-details h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.c100-ticker {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.c100-mint {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border);
+}
+
+.c100-mint:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.c100-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+.c100-stat {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.c100-stat:hover {
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
+}
+
+.c100-stat.highlight {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.08), rgba(245, 158, 11, 0.04));
+  border-color: rgba(217, 119, 6, 0.3);
+}
+
+.c100-stat.wide {
+  grid-column: span 1;
+}
+
+.c100-stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.c100-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  display: block;
+}
+
+.c100-stat-value.accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.c100-stat-value.large {
+  font-size: 24px;
+}
+
+.c100-stat-change {
+  font-size: 11px;
+  font-weight: 500;
+  display: block;
+  margin-top: 4px;
+}
+
+.c100-stat-change.positive {
+  color: var(--success);
+}
+
+.c100-stat-change.negative {
+  color: var(--error);
+}
+
+.c100-stat-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 4px;
+}
+
+/* Responsive adjustments for C100 card */
+@media (max-width: 900px) {
+  .c100-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .c100-stat.wide {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 600px) {
+  .c100-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .c100-stat.wide {
+    grid-column: span 2;
+  }
+
+  .c100-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .c100-mint {
+    align-self: flex-start;
+  }
 }

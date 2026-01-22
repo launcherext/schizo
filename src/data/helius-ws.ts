@@ -4,8 +4,12 @@ import bs58 from 'bs58';
 import { config } from '../config/settings';
 import { createChildLogger } from '../utils/logger';
 import { NewTokenEvent } from './types';
+import { repository } from '../db/repository';
 
 const logger = createChildLogger('helius-ws');
+
+// Metadata cache to avoid redundant fetches
+const metadataCache = new Map<string, { name: string; symbol: string; imageUrl: string | null }>();
 
 // CreateEvent discriminator from pump.fun IDL (sha256 hash of "event:CreateEvent" first 8 bytes)
 const CREATE_EVENT_DISCRIMINATOR = Buffer.from([27, 114, 169, 77, 222, 235, 99, 118]);
@@ -32,6 +36,68 @@ interface TokenData {
   mint: string;
   bondingCurve: string;
   creator: string;
+}
+
+interface TokenMetadata {
+  name?: string;
+  symbol?: string;
+  image?: string;
+}
+
+async function fetchTokenMetadata(uri: string, mint: string): Promise<{ name: string; symbol: string; imageUrl: string | null } | null> {
+  // Check cache first
+  const cached = metadataCache.get(mint);
+  if (cached) return cached;
+
+  try {
+    // Handle IPFS URIs
+    let fetchUrl = uri;
+    if (uri.startsWith('ipfs://')) {
+      fetchUrl = `https://ipfs.io/ipfs/${uri.slice(7)}`;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(fetchUrl, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' }
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      logger.debug({ mint, uri, status: response.status }, 'Failed to fetch metadata');
+      return null;
+    }
+
+    const metadata = await response.json() as TokenMetadata;
+
+    // Extract image URL, handling IPFS
+    let imageUrl = metadata.image || null;
+    if (imageUrl && imageUrl.startsWith('ipfs://')) {
+      imageUrl = `https://ipfs.io/ipfs/${imageUrl.slice(7)}`;
+    }
+
+    const result = {
+      name: metadata.name || '',
+      symbol: metadata.symbol || '',
+      imageUrl
+    };
+
+    // Cache the result
+    metadataCache.set(mint, result);
+
+    // Limit cache size
+    if (metadataCache.size > 1000) {
+      const firstKey = metadataCache.keys().next().value;
+      if (firstKey) metadataCache.delete(firstKey);
+    }
+
+    return result;
+  } catch (error) {
+    logger.debug({ mint, uri, error }, 'Error fetching token metadata');
+    return null;
+  }
 }
 
 export class HeliusWebSocket extends EventEmitter {
@@ -161,11 +227,16 @@ export class HeliusWebSocket extends EventEmitter {
             const tokenData = this.decodeCreateEvent(base64Data);
 
             if (tokenData && tokenData.mint.endsWith('pump')) {
+              // Fetch metadata asynchronously (don't block event emission)
+              this.fetchAndStoreMetadata(tokenData);
+
               const event: NewTokenEvent = {
                 mint: tokenData.mint,
                 signature,
                 timestamp: new Date(),
                 creator: tokenData.creator,
+                name: tokenData.name,
+                symbol: tokenData.symbol,
               };
 
               logger.info({
@@ -254,6 +325,34 @@ export class HeliusWebSocket extends EventEmitter {
     } catch (error) {
       logger.debug({ error, data: base64Data.substring(0, 50) }, 'Failed to decode CreateEvent');
       return null;
+    }
+  }
+
+  private async fetchAndStoreMetadata(tokenData: TokenData): Promise<void> {
+    try {
+      const metadata = await fetchTokenMetadata(tokenData.uri, tokenData.mint);
+      if (metadata && metadata.imageUrl) {
+        await repository.updateTokenMetadata(tokenData.mint, {
+          name: metadata.name || tokenData.name,
+          symbol: metadata.symbol || tokenData.symbol,
+          image_url: metadata.imageUrl
+        });
+
+        // Emit metadata update event for real-time UI updates
+        this.emit('tokenMetadataUpdated', {
+          mint: tokenData.mint,
+          name: metadata.name || tokenData.name,
+          symbol: metadata.symbol || tokenData.symbol,
+          imageUrl: metadata.imageUrl
+        });
+
+        logger.debug({
+          mint: tokenData.mint.substring(0, 10) + '...',
+          hasImage: !!metadata.imageUrl
+        }, 'Token metadata fetched');
+      }
+    } catch (error) {
+      logger.debug({ mint: tokenData.mint, error }, 'Failed to fetch/store token metadata');
     }
   }
 

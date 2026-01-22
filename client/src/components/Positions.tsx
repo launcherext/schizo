@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Position } from '../hooks/useSocket';
+import { TokenDisplay } from './TokenDisplay';
 
 interface PositionsProps {
   positions: Position[];
@@ -47,7 +48,15 @@ export const Positions: React.FC<PositionsProps> = ({ positions, summary }) => {
                 <div className={`position-indicator ${isProfit ? 'profit' : 'loss'}`} />
                 <div className="position-info">
                   <div className="position-header">
-                    <span className="position-symbol">${p.symbol || p.mint.substring(0, 6).toUpperCase()}</span>
+                    <TokenDisplay
+                      mint={p.mint}
+                      name={p.name}
+                      symbol={p.symbol}
+                      imageUrl={p.imageUrl}
+                      size="sm"
+                      showCopy={true}
+                      inline={true}
+                    />
                     <span className="position-pool">{p.poolType}</span>
                   </div>
                   <div className="position-details">

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import type { Stats, ScannerData, Trade, ToastData, AIDecisionData, NarrativeSignal, WatchlistToken, WatchlistStats } from '../types';
+import type { Stats, ScannerData, Trade, ToastData, AIDecisionData, NarrativeSignal, WatchlistToken, WatchlistStats, C100Data } from '../types';
 
 export interface Position {
   id: string;
   mint: string;
+  name?: string;
   symbol: string;
+  imageUrl?: string | null;
   amount: number;
   amountSol: number;
   entryPrice: number;
@@ -58,6 +60,7 @@ interface UseSocketReturn {
   narrativeSignal: NarrativeSignal | null;
   watchlistTokens: WatchlistToken[];
   watchlistStats: WatchlistStats;
+  c100Data: C100Data | null;
   removeToast: (index: number) => void;
 }
 
@@ -87,6 +90,7 @@ export const useSocket = (): UseSocketReturn => {
   const [narrativeSignal, setNarrativeSignal] = useState<NarrativeSignal | null>(null);
   const [watchlistTokens, setWatchlistTokens] = useState<WatchlistToken[]>([]);
   const [watchlistStats, setWatchlistStats] = useState<WatchlistStats>({ total: 0, ready: 0, devSold: 0 });
+  const [c100Data, setC100Data] = useState<C100Data | null>(null);
 
   // Use ref to access latest functions in event callbacks if needed, 
   // but state setters are stable.
@@ -107,12 +111,13 @@ export const useSocket = (): UseSocketReturn => {
     // Initial fetch
     const fetchData = async () => {
       try {
-        const [statsRes, tradesRes, positionsRes, walletRes, equityRes] = await Promise.all([
+        const [statsRes, tradesRes, positionsRes, walletRes, equityRes, c100Res] = await Promise.all([
           fetch('/api/stats'),
           fetch('/api/trades?limit=10'),
           fetch('/api/positions/realtime'),
           fetch('/api/wallet'),
-          fetch('/api/equity-history?hours=24')
+          fetch('/api/equity-history?hours=24'),
+          fetch('/api/c100/status')
         ]);
         if (statsRes.ok) setStats(await statsRes.json());
         if (tradesRes.ok) setTrades(await tradesRes.json());
@@ -133,6 +138,9 @@ export const useSocket = (): UseSocketReturn => {
         if (equityRes.ok) {
           const equityData = await equityRes.json();
           setEquityHistory(equityData.history || []);
+        }
+        if (c100Res.ok) {
+          setC100Data(await c100Res.json());
         }
       } catch (err) {
         console.error("Failed to fetch initial data", err);
@@ -302,6 +310,46 @@ export const useSocket = (): UseSocketReturn => {
       }
     });
 
+    // C100 events
+    newSocket.on('c100:update', (data: C100Data) => {
+      setC100Data(data);
+    });
+
+    newSocket.on('c100:priceUpdate', (tokenData: any) => {
+      setC100Data(prev => prev ? { ...prev, token: tokenData } : null);
+    });
+
+    newSocket.on('c100:claim', (data: { source: string; amountSol: number }) => {
+      setC100Data(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          claims: {
+            ...prev.claims,
+            totalClaimedSol: prev.claims.totalClaimedSol + data.amountSol,
+            claimCount: prev.claims.claimCount + 1,
+            lastClaimTime: new Date().toISOString(),
+          }
+        };
+      });
+    });
+
+    newSocket.on('c100:buyback', (data: { amountSol: number; amountTokens: number }) => {
+      setC100Data(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          buybacks: {
+            ...prev.buybacks,
+            totalBuybackSol: prev.buybacks.totalBuybackSol + data.amountSol,
+            totalTokensBought: prev.buybacks.totalTokensBought + data.amountTokens,
+            buybackCount: prev.buybacks.buybackCount + 1,
+            lastBuybackTime: new Date().toISOString(),
+          }
+        };
+      });
+    });
+
     setSocket(newSocket);
 
     return () => {
@@ -325,6 +373,7 @@ export const useSocket = (): UseSocketReturn => {
     narrativeSignal,
     watchlistTokens,
     watchlistStats,
+    c100Data,
     removeToast
   };
 };

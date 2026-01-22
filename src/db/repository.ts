@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { createChildLogger } from '../utils/logger';
-import { TokenRecord, TradeRecordDB, PositionRecord, PriceRecord, EquitySnapshotRecord, PartialCloseRecord, WalletSyncLogRecord } from './types';
+import { TokenRecord, TradeRecordDB, PositionRecord, PriceRecord, EquitySnapshotRecord, PartialCloseRecord, WalletSyncLogRecord, C100ClaimRecord, C100BuybackRecord } from './types';
 import { config } from '../config/settings';
 
 const logger = createChildLogger('repository');
@@ -39,15 +39,43 @@ export class Repository {
   // Token operations
   async upsertToken(token: Partial<TokenRecord>): Promise<void> {
     await this.pool.query(`
-      INSERT INTO tokens (mint, name, symbol, decimals, creator, mint_revoked, freeze_revoked)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO tokens (mint, name, symbol, decimals, creator, mint_revoked, freeze_revoked, image_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (mint) DO UPDATE SET
         name = COALESCE(EXCLUDED.name, tokens.name),
         symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
         mint_revoked = COALESCE(EXCLUDED.mint_revoked, tokens.mint_revoked),
         freeze_revoked = COALESCE(EXCLUDED.freeze_revoked, tokens.freeze_revoked),
+        image_url = COALESCE(EXCLUDED.image_url, tokens.image_url),
         last_updated = NOW()
-    `, [token.mint, token.name, token.symbol, token.decimals, token.creator, token.mint_revoked, token.freeze_revoked]);
+    `, [token.mint, token.name, token.symbol, token.decimals, token.creator, token.mint_revoked, token.freeze_revoked, token.image_url]);
+  }
+
+  async updateTokenMetadata(mint: string, metadata: { name?: string; symbol?: string; image_url?: string }): Promise<void> {
+    const updates: string[] = [];
+    const values: any[] = [mint];
+    let paramIndex = 2;
+
+    if (metadata.name) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(metadata.name);
+    }
+    if (metadata.symbol) {
+      updates.push(`symbol = $${paramIndex++}`);
+      values.push(metadata.symbol);
+    }
+    if (metadata.image_url) {
+      updates.push(`image_url = $${paramIndex++}`);
+      values.push(metadata.image_url);
+    }
+
+    if (updates.length > 0) {
+      updates.push('last_updated = NOW()');
+      await this.pool.query(
+        `UPDATE tokens SET ${updates.join(', ')} WHERE mint = $1`,
+        values
+      );
+    }
   }
 
   async getToken(mint: string): Promise<TokenRecord | null> {
@@ -369,6 +397,87 @@ export class Repository {
     await this.pool.query(`
       UPDATE positions SET amount = $2, last_update = NOW() WHERE id = $1
     `, [id, newAmount]);
+  }
+
+  // C100 Claim operations
+  async insertC100Claim(claim: {
+    source: string;
+    amount_sol: number;
+    signature?: string;
+    status?: string;
+  }): Promise<void> {
+    await this.pool.query(`
+      INSERT INTO c100_claims (source, amount_sol, signature, status)
+      VALUES ($1, $2, $3, $4)
+    `, [claim.source, claim.amount_sol, claim.signature || null, claim.status || 'success']);
+  }
+
+  async getRecentC100Claims(limit: number = 50): Promise<C100ClaimRecord[]> {
+    const result = await this.pool.query(`
+      SELECT * FROM c100_claims
+      ORDER BY timestamp DESC
+      LIMIT $1
+    `, [limit]);
+    return result.rows;
+  }
+
+  async getC100ClaimTotals(): Promise<{ total_sol: number; count: number }> {
+    const result = await this.pool.query(`
+      SELECT COALESCE(SUM(amount_sol), 0) as total_sol, COUNT(*) as count
+      FROM c100_claims
+      WHERE status = 'success'
+    `);
+    return {
+      total_sol: parseFloat(result.rows[0]?.total_sol || '0'),
+      count: parseInt(result.rows[0]?.count || '0'),
+    };
+  }
+
+  // C100 Buyback operations
+  async insertC100Buyback(buyback: {
+    amount_sol: number;
+    amount_tokens?: number;
+    price_sol?: number;
+    source: string;
+    signature?: string;
+    status?: string;
+  }): Promise<void> {
+    await this.pool.query(`
+      INSERT INTO c100_buybacks (amount_sol, amount_tokens, price_sol, source, signature, status)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [
+      buyback.amount_sol,
+      buyback.amount_tokens || null,
+      buyback.price_sol || null,
+      buyback.source,
+      buyback.signature || null,
+      buyback.status || 'success'
+    ]);
+  }
+
+  async getRecentC100Buybacks(limit: number = 50): Promise<C100BuybackRecord[]> {
+    const result = await this.pool.query(`
+      SELECT * FROM c100_buybacks
+      ORDER BY timestamp DESC
+      LIMIT $1
+    `, [limit]);
+    return result.rows;
+  }
+
+  async getC100BuybackTotals(): Promise<{ total_sol: number; total_tokens: number; count: number }> {
+    const result = await this.pool.query(`
+      SELECT
+        COALESCE(SUM(amount_sol), 0) as total_sol,
+        COALESCE(SUM(amount_tokens), 0) as total_tokens,
+        COUNT(*) as count
+      FROM c100_buybacks
+      WHERE status = 'success'
+    `);
+    return {
+      total_sol: parseFloat(result.rows[0]?.total_sol || '0'),
+      total_tokens: parseFloat(result.rows[0]?.total_tokens || '0'),
+      count: parseInt(result.rows[0]?.count || '0'),
+    };
   }
 }
 

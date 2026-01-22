@@ -140,6 +140,22 @@ export const config = {
     earlyWindowSeconds: 180,        // First 3 minutes are critical
     earlyMaxSellPercent: 0.02,      // Only 2% allowed in early window
   },
+
+  // C100 Token Configuration
+  c100: {
+    tokenMint: process.env.C100_TOKEN_MINT || '',
+    enabled: !!process.env.C100_TOKEN_MINT,
+    autoClaim: {
+      enabled: true,
+      intervalMs: 5 * 60 * 1000,    // 5 minutes
+      claimPumpCreator: true,
+    },
+    buyback: {
+      enabled: true,
+      profitSharePercent: 0.10,     // 10% of profits
+      minBuybackSol: 0.01,          // Minimum buyback amount
+    },
+  },
 };
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
