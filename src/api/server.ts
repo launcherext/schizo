@@ -73,4 +73,5 @@ export class ApiServer {
   }
 }
 
-export const apiServer = new ApiServer(3500);
+const PORT = parseInt(process.env.PORT || '3500', 10);
+export const apiServer = new ApiServer(PORT);
