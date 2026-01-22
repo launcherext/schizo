@@ -1419,33 +1419,40 @@ export class TradingEngine {
     logger.debug('Fetching positions from actual wallet balance...');
     
     // Get actual wallet holdings via Helius DAS API
-    let walletTokens: Array<{ mint: string; balance: number }>;
+    let walletTokens: Array<{ mint: string; balance: number }> = [];
     try {
       walletTokens = await this.helius.getAssetsByOwner(this.walletAddress);
+      logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'Helius DAS returned tokens');
     } catch (error) {
       logger.warn({ error }, 'Helius DAS failed, using RPC fallback');
-      // Fallback to RPC
-      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-        new PublicKey(this.walletAddress),
-        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-      );
-      walletTokens = tokenAccounts.value
-        .map(acc => {
-          const info = acc.account.data.parsed.info;
-          return {
-            mint: info.mint,
-            balance: parseFloat(info.tokenAmount.uiAmountString),
-          };
-        })
-        .filter(t => t.balance > 0);
+      try {
+        // Fallback to RPC
+        const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+          new PublicKey(this.walletAddress),
+          { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
+        );
+        walletTokens = tokenAccounts.value
+          .map(acc => {
+            const info = acc.account.data.parsed.info;
+            return {
+              mint: info.mint,
+              balance: parseFloat(info.tokenAmount.uiAmountString),
+            };
+          })
+          .filter(t => t.balance > 0);
+        logger.info({ tokenCount: walletTokens.length, mints: walletTokens.map(t => t.mint) }, 'RPC fallback returned tokens');
+      } catch (rpcError) {
+        logger.error({ error: rpcError }, 'RPC fallback also failed');
+        return [];
+      }
     }
 
     if (walletTokens.length === 0) {
-      logger.debug('No tokens in wallet');
+      logger.warn('No tokens found in wallet');
       return [];
     }
 
-    logger.debug({ tokenCount: walletTokens.length }, 'Found tokens in wallet');
+    logger.info({ tokenCount: walletTokens.length }, 'Processing wallet tokens');
 
     // Get trade history to look up entry prices
     const allTrades = this.db.trades.getRecent(1000);
@@ -1502,16 +1509,19 @@ export class TradingEngine {
       } else {
         // No entry data - token may have been received externally
         // Use current price as entry price (0% P&L)
-        logger.debug({ mint: walletToken.mint }, 'No entry data found - using current price');
+        logger.info({ mint: walletToken.mint, balance: walletToken.balance }, 'No entry data found - fetching current price');
         try {
           const tokenInfo = await this.pumpPortal.getTokenInfo(walletToken.mint);
           entryPrice = tokenInfo.price;
           entrySol = walletToken.balance * entryPrice;
           entryTimestamp = Date.now();
-        } catch {
-          // Can't get price, skip this token
-          logger.debug({ mint: walletToken.mint }, 'Cannot determine price - skipping');
-          continue;
+          logger.info({ mint: walletToken.mint, price: entryPrice, entrySol }, 'Using current price for external token');
+        } catch (error) {
+          // Can't get price - still show the token with 0 entry price
+          logger.warn({ mint: walletToken.mint, error }, 'Cannot fetch price - showing token with 0 entry');
+          entryPrice = 0;
+          entrySol = 0;
+          entryTimestamp = Date.now();
         }
       }
 
