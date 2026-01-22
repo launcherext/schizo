@@ -454,22 +454,28 @@ class HeliusClient {
    */
   async getAssetsByOwner(ownerAddress: string): Promise<Array<{ mint: string; balance: number }>> {
     return this.circuitBreaker.fire(async () => {
-      const response = await this.sdk.getAssetsByOwner({
+      const response = await this.sdk.rpc.getAssetsByOwner({
         ownerAddress,
         page: 1,
         limit: 1000,
+        displayOptions: {
+          showFungible: true,
+        },
       });
 
       // Filter for fungible tokens and map to simple format
-      const tokens = response.items
-        .filter((asset: any) => asset.interface === 'FungibleToken' || asset.interface === 'FungibleAsset')
+      const tokens = (response.items || [])
+        .filter((asset: any) => 
+          (asset.interface === 'FungibleToken' || asset.interface === 'FungibleAsset') &&
+          asset.token_info?.balance
+        )
         .map((asset: any) => ({
           mint: asset.id,
-          balance: parseFloat(asset.token_info?.balance || '0') / Math.pow(10, asset.token_info?.decimals || 6),
+          balance: parseFloat(asset.token_info.balance) / Math.pow(10, asset.token_info.decimals || 6),
         }))
         .filter((token: any) => token.balance > 0);
 
-      logger.debug({ ownerAddress, tokenCount: tokens.length }, 'Fetched wallet tokens via DAS API');
+      logger.info({ ownerAddress, tokenCount: tokens.length, tokens: tokens.slice(0, 3) }, 'Fetched wallet tokens via DAS API');
       return tokens;
     }) as Promise<Array<{ mint: string; balance: number }>>;
   }
