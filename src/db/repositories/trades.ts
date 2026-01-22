@@ -119,6 +119,16 @@ class TradeRepository {
   }
 
   /**
+   * Delete all trades for a specific token mint.
+   * Use this to clean up phantom positions that no longer exist in the wallet.
+   * @returns Number of trades deleted
+   */
+  deleteByTokenMint(tokenMint: string): number {
+    const result = this.db.prepare("DELETE FROM trades WHERE token_mint = ?").run(tokenMint);
+    return result.changes;
+  }
+
+  /**
    * Map a database row to a Trade object.
    */
   private mapRow(row: Record<string, unknown>): Trade {

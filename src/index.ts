@@ -59,6 +59,17 @@ async function main(): Promise<void> {
       log.info({ deletedCount }, 'Cleared stale sync trades from database');
     }
 
+    // Clean up known phantom positions (tokens no longer in wallet)
+    const phantomMints = [
+      'G9tnG6Z4KDrNepi2fYQUZYEhuBtfwg6TwbzekxWMpump', // doge - phantom position causing +132 SOL P&L bug
+    ];
+    for (const mint of phantomMints) {
+      const deleted = dbWithRepos.trades.deleteByTokenMint(mint);
+      if (deleted > 0) {
+        log.info({ mint, deleted }, 'Cleaned up phantom position');
+      }
+    }
+
     // Historical IMPOSTOR trade - CLOSED (user sold manually at +73%)
     // Buy entry
     const historicalBuy = {
