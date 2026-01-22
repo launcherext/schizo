@@ -328,7 +328,9 @@ export class PumpPortalClient {
     let lastError: Error | null = null;
 
     // Retry logic
-    for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
+    const effectiveMaxRetries = isUrgent ? this.config.maxRetries + 5 : this.config.maxRetries;
+
+    for (let attempt = 1; attempt <= effectiveMaxRetries; attempt++) {
       try {
         const signature = await this.submitTrade(action, params, isUrgent);
         
@@ -342,13 +344,16 @@ export class PumpPortalClient {
         return signature;
       } catch (error) {
         lastError = error as Error;
+        const errorMessage = lastError.message.toLowerCase();
+        const isRateLimit = errorMessage.includes('429') || errorMessage.includes('rate limit') || errorMessage.includes('too many requests');
         
         logger.warn({
           mint,
           amount,
           error: lastError.message,
           attempt,
-          maxRetries: this.config.maxRetries,
+          maxRetries: effectiveMaxRetries,
+          isRateLimit
         }, `${action} order attempt ${attempt} failed`);
 
         // Don't retry on validation errors
@@ -357,9 +362,12 @@ export class PumpPortalClient {
         }
 
         // Wait before retry (exponential backoff)
-        if (attempt < this.config.maxRetries) {
-          const delay = this.config.retryDelayMs * Math.pow(2, attempt - 1);
-          logger.debug({ attempt }, `Retrying in ${delay}ms`);
+        if (attempt < effectiveMaxRetries) {
+          // Base delay: config delay normally, or 2000ms if rate limited
+          const baseDelay = isRateLimit ? 2000 : this.config.retryDelayMs;
+          const delay = baseDelay * Math.pow(2, attempt - 1);
+          
+          logger.debug({ attempt, delay, isRateLimit }, `Retrying in ${delay}ms`);
           await this.sleep(delay);
         }
       }
@@ -370,9 +378,9 @@ export class PumpPortalClient {
       mint,
       amount,
       error: lastError?.message,
-    }, `${action} order failed after ${this.config.maxRetries} attempts`);
+    }, `${action} order failed after ${effectiveMaxRetries} attempts`);
 
-    throw new Error(`Trade failed after ${this.config.maxRetries} attempts: ${lastError?.message}`);
+    throw new Error(`Trade failed after ${effectiveMaxRetries} attempts: ${lastError?.message}`);
   }
 
   /**

@@ -926,16 +926,16 @@ export class TradingEngine {
           solReceived = parsedTx.solAmount || 0;
           pricePerToken = parsedTx.pricePerToken;
         } catch (pumpError: any) {
-          // Check if token graduated mid-trade (BondingCurveComplete error 0x1775/6005)
+          // Fallback to Jupiter for ANY error if available (e.g. 429s, timeout, or graduation)
           const errorMsg = pumpError?.message || String(pumpError);
-          if (errorMsg.includes('BondingCurveComplete') || errorMsg.includes('0x1775') || errorMsg.includes('6005')) {
-            logger.warn({ mint, error: errorMsg }, '🔄 Token graduated during hold - retrying via Jupiter');
-            
-            if (!this.jupiter) {
-              logger.error({ mint }, 'Jupiter client not available - cannot sell graduated token');
-              throw pumpError;
-            }
-            
+          logger.warn({ mint, error: errorMsg }, '⚠️ PumpPortal sell failed - attempting Jupiter fallback');
+          
+          if (!this.jupiter) {
+            logger.error({ mint }, 'Jupiter client not available - cannot fallback to Jupiter');
+            throw pumpError;
+          }
+          
+          try {
             // Retry via Jupiter DEX
             const result = await this.jupiter.sell(
               mint,
@@ -954,10 +954,11 @@ export class TradingEngine {
               signature,
               method: 'Jupiter (fallback)',
               priceImpact: result.priceImpactPct,
-            }, '✅ Graduated token sold via Jupiter fallback');
-          } else {
-            // Different error - re-throw
-            throw pumpError;
+              originalError: errorMsg
+            }, '✅ Token sold via Jupiter fallback');
+          } catch (jupiterError: any) {
+             logger.error({ mint, jupiterError: jupiterError?.message }, 'Jupiter fallback also failed');
+             throw pumpError; // Throw original error to indicate root cause
           }
         }
       }

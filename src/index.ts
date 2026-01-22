@@ -215,8 +215,8 @@ async function main(): Promise<void> {
         apiKey: pumpPortalApiKey, // Can be undefined
         baseUrl: process.env.PUMPPORTAL_BASE_URL || 'https://pumpportal.fun/api',
         rpcUrl: 'https://api.mainnet-beta.solana.com', // Add default RPC
-        maxRetries: 3,
-        retryDelayMs: 1000,
+        maxRetries: 5,
+        retryDelayMs: 2000,
       } as any, wallet!); // Cast to any to bypass strict config check if types outdated
       
       log.info({ 
