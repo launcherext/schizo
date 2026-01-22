@@ -77,7 +77,11 @@ export const createTables = async (pool: Pool): Promise<void> => {
       tp_sold_json TEXT,
       trailing_stop DECIMAL(20, 10),
       status VARCHAR(16) DEFAULT 'open',
-      pool_type VARCHAR(16) DEFAULT 'active'
+      pool_type VARCHAR(16) DEFAULT 'active',
+      initial_recovered BOOLEAN DEFAULT FALSE,
+      scaled_exits_taken INTEGER DEFAULT 0,
+      initial_investment DECIMAL(20, 10),
+      realized_pnl DECIMAL(20, 10) DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
@@ -211,6 +215,17 @@ export const createTables = async (pool: Pool): Promise<void> => {
     ALTER TABLE tokens ADD COLUMN IF NOT EXISTS image_url VARCHAR(512);
   `).catch(() => {
     // Column already exists or table doesn't exist yet
+  });
+
+  // Migration: Add new position tracking columns
+  await pool.query(`
+    ALTER TABLE positions 
+    ADD COLUMN IF NOT EXISTS initial_recovered BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS scaled_exits_taken INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS initial_investment DECIMAL(20, 10),
+    ADD COLUMN IF NOT EXISTS realized_pnl DECIMAL(20, 10) DEFAULT 0;
+  `).catch((err) => {
+    logger.warn({ err }, 'Failed to add new position columns (may already exist)');
   });
 
   logger.info('Database tables created successfully');

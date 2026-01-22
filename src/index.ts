@@ -5,7 +5,7 @@ import { createTables } from './db/schema';
 import { repository } from './db/repository';
 
 // Data Layer
-import { heliusWs, priceFeed, whaleTracker, NewTokenEvent, PriceData, WhaleActivity } from './data';
+import { heliusWs, priceFeed, whaleTracker, NewTokenEvent, PriceData, WhaleActivity, dexscreenerScanner, TrendingTokenData } from './data';
 import { pumpPortalWs, BondingCurveData } from './data/pumpportal-ws';
 
 // Signal Processing Layer
@@ -38,6 +38,7 @@ class TradingBot {
   private tokenQueue: NewTokenEvent[] = [];
   private processedMints: Set<string> = new Set();
   private bondingCurveCache: Map<string, BondingCurveData> = new Map();
+  private graduatedTokens: Set<string> = new Set(); // Track tokens that graduated to DEX
   private rejectionStats = {
     quickSafety: 0,
     liquidity: 0,
@@ -80,6 +81,7 @@ class TradingBot {
       // Data layer
       await priceFeed.start();
       await whaleTracker.start();
+      await dexscreenerScanner.start();
 
       // Setup event handlers
       this.setupEventHandlers();
@@ -167,6 +169,20 @@ class TradingBot {
       // Update cache with latest bonding curve state
       this.bondingCurveCache.set(data.mint, data);
 
+      // Detect graduation to DEX (liquiditySol > 80 = filled bonding curve)
+      if (data.isGraduated && !this.graduatedTokens.has(data.mint)) {
+        this.graduatedTokens.add(data.mint);
+        logger.info({ mint: data.mint.substring(0, 15), marketCapSol: data.marketCapSol.toFixed(2) }, 'Token graduated to DEX');
+
+        // Queue for analysis with higher priority (add to front)
+        this.tokenQueue.unshift({
+          mint: data.mint,
+          signature: '',
+          timestamp: new Date(),
+          creator: 'graduated',
+        });
+      }
+
       // Record trade for velocity tracking (legacy)
       velocityTracker.recordTrade({
         mint: data.mint,
@@ -204,8 +220,8 @@ class TradingBot {
         amountSol: activity.amountSol,
       }, 'Whale activity detected');
 
-      // Could trigger analysis of the token
-      if (activity.action === 'buy' && activity.amountSol > 50) {
+      // Copy whale buys if above threshold
+      if (activity.action === 'buy' && activity.amountSol >= config.whaleMinBuySol) {
         this.tokenQueue.push({
           mint: activity.mint,
           signature: '',
@@ -213,6 +229,27 @@ class TradingBot {
           creator: activity.wallet,
         });
       }
+    });
+
+    // DexScreener trending tokens
+    dexscreenerScanner.on('trendingToken', (data: TrendingTokenData) => {
+      // Skip if already processed or in a position
+      if (this.processedMints.has(data.mint)) return;
+      if (positionManager.getPositionByMint(data.mint)) return;
+
+      logger.info({
+        mint: data.mint.substring(0, 15),
+        symbol: data.symbol,
+        buyPressure: (data.buyPressure * 100).toFixed(0) + '%',
+        volume24h: data.volume24h.toFixed(0),
+      }, 'Trending token from DexScreener');
+
+      this.tokenQueue.push({
+        mint: data.mint,
+        signature: '',
+        timestamp: new Date(),
+        creator: 'dexscreener-trending',
+      });
     });
 
     // Position events
@@ -317,6 +354,10 @@ class TradingBot {
     // Cleanup old watchlist entries
     setInterval(() => {
       tokenWatchlist.cleanup(600000); // 10 minute max age
+      // Cleanup graduated tokens set to prevent memory bloat
+      if (this.graduatedTokens.size > 500) {
+        this.graduatedTokens.clear();
+      }
     }, 60000); // Cleanup every minute
   }
 
@@ -1012,6 +1053,7 @@ class TradingBot {
     await heliusWs.disconnect();
     priceFeed.stop();
     whaleTracker.stop();
+    dexscreenerScanner.stop();
     regimeDetector.stop();
     positionManager.stop();
     drawdownGuard.stop();

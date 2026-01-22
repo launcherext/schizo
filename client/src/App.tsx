@@ -73,7 +73,7 @@ function App() {
           }}
           title="Click to copy address"
         >
-          <span className="wallet-label">DONATE</span>
+          <span className="wallet-label">DEV WALLET</span>
           <span className="wallet-address">8FvP...HDxB</span>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>

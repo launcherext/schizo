@@ -36,30 +36,36 @@ export class PositionSizer {
       confidenceMultiplier = 0.5 + (clampedConf - 0.4) * (0.5 / 0.6);
     }
 
-    // Apply regime adjustment AND confidence multiplier
-    let rawSize = kellyFraction * regimeMultiplier * confidenceMultiplier * availableCapital;
+    // BASE_POSITION_SOL is the MINIMUM position size
+    // Kelly/confidence can scale UP from base, but never below it
+    const baseSize = config.tradeAmountSol; // 0.03 SOL from BASE_POSITION_SOL env
+
+    // Kelly multiplier: 1.0 to 3.0x based on win rate and confidence
+    // Higher kelly fraction + higher confidence = larger position
+    const kellyMultiplier = 1.0 + (kellyFraction * 4) + (confidenceMultiplier - 0.5);
+    const adjustedSize = baseSize * Math.min(3.0, Math.max(1.0, kellyMultiplier)) * regimeMultiplier;
 
     // Apply hard limits
     const maxSize = config.maxPositionSize * config.initialCapitalSol;
-    const minSize = 0.001; // Minimum 0.001 SOL
 
-    const finalSize = Math.max(minSize, Math.min(maxSize, rawSize));
+    const finalSize = Math.max(baseSize, Math.min(maxSize, adjustedSize));
 
-    const reason = this.buildReason(kellyFraction, regimeMultiplier, rawSize, finalSize, confidenceMultiplier);
+    const reason = this.buildReason(kellyFraction, regimeMultiplier, adjustedSize, finalSize, confidenceMultiplier);
 
     const result: PositionSizeResult = {
       sizeSol: finalSize,
       kellyFraction,
       regimeMultiplier,
-      riskAdjustedSize: rawSize,
+      riskAdjustedSize: adjustedSize,
       reason,
     };
 
     logger.debug({
-      availableCapital,
-      kellyFraction: kellyFraction.toFixed(4),
+      baseSize: baseSize.toFixed(4),
+      kellyMultiplier: kellyMultiplier.toFixed(2),
       regimeMultiplier,
       confidenceMultiplier: confidenceMultiplier.toFixed(2),
+      adjustedSize: adjustedSize.toFixed(4),
       finalSize: finalSize.toFixed(4),
     }, 'Position size calculated');
 

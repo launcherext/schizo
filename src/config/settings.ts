@@ -121,6 +121,9 @@ export const config = {
   priorityFeeSol: 0.0001,    // Priority fee in SOL
   jitoBribeSol: 0.00001,     // Jito bribe (if enabled)
 
+  // Whale copy trading
+  whaleMinBuySol: parseFloat(process.env.WHALE_MIN_BUY_SOL || '5'), // 5 SOL min whale buy to copy
+
   // Velocity-based entry for new tokens (no price history)
   // Tightened thresholds to avoid rugs and garbage tokens
   velocityEntry: {

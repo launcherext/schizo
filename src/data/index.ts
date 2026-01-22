@@ -3,3 +3,4 @@ export * from './helius-ws';
 export * from './price-feed';
 export * from './whale-tracker';
 export * from './pumpportal-ws';
+export * from './dexscreener-scanner';
