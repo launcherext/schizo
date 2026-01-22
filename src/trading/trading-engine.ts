@@ -1465,15 +1465,17 @@ export class TradingEngine {
             logger.warn({ age: now - this.walletCache.timestamp }, 'Using stale wallet cache');
             walletTokens = this.walletCache.tokens;
           } else {
-            return [];
+            // Final fallback: Use database to reconstruct positions
+            logger.warn('No wallet data available - using database fallback');
+            return this.getPositionsFromDatabase();
           }
         }
       }
     }
 
     if (walletTokens.length === 0) {
-      logger.warn('No tokens found in wallet');
-      return [];
+      logger.warn('No tokens found in wallet - trying database fallback');
+      return this.getPositionsFromDatabase();
     }
 
     logger.info({ tokenCount: walletTokens.length }, 'Processing wallet tokens');
@@ -1571,6 +1573,82 @@ export class TradingEngine {
     }
 
     logger.info({ positionCount: openPositions.length }, 'Open positions loaded from wallet');
+    return openPositions;
+  }
+
+  /**
+   * Fallback: Get positions from database when wallet APIs are down
+   * Reconstructs positions from trade history (buys - sells)
+   */
+  private getPositionsFromDatabase(): OpenPosition[] {
+    const DUST_THRESHOLD_SOL = 0.0005;
+    const allTrades = this.db.trades.getRecent(1000);
+    const positions = new Map<string, {
+      tokenMint: string;
+      tokenSymbol?: string;
+      tokenName?: string;
+      tokenImage?: string;
+      totalSolSpent: number;
+      totalTokensBought: number;
+      totalSolReceived: number;
+      totalTokensSold: number;
+      earliestBuyTimestamp: number;
+    }>();
+
+    // Aggregate trades by token
+    for (const trade of allTrades) {
+      if (trade.metadata?.isBuyback) continue;
+
+      const current = positions.get(trade.tokenMint) || {
+        tokenMint: trade.tokenMint,
+        tokenSymbol: trade.tokenSymbol,
+        tokenName: trade.metadata?.tokenName as string | undefined,
+        tokenImage: trade.metadata?.tokenImage as string | undefined,
+        totalSolSpent: 0,
+        totalTokensBought: 0,
+        totalSolReceived: 0,
+        totalTokensSold: 0,
+        earliestBuyTimestamp: Infinity,
+      };
+
+      if (trade.type === 'BUY') {
+        current.totalSolSpent += trade.amountSol;
+        current.totalTokensBought += trade.amountTokens;
+        if (trade.timestamp < current.earliestBuyTimestamp) {
+          current.earliestBuyTimestamp = trade.timestamp;
+        }
+      } else if (trade.type === 'SELL') {
+        current.totalSolReceived += trade.amountSol;
+        current.totalTokensSold += trade.amountTokens;
+      }
+
+      positions.set(trade.tokenMint, current);
+    }
+
+    // Filter to positions with net positive token holdings
+    const openPositions: OpenPosition[] = [];
+    for (const [, pos] of positions) {
+      const netTokens = pos.totalTokensBought - pos.totalTokensSold;
+      if (netTokens <= 0) continue;
+
+      const entryPrice = pos.totalSolSpent / pos.totalTokensBought;
+      const entrySol = (netTokens / pos.totalTokensBought) * pos.totalSolSpent;
+
+      if (entrySol < DUST_THRESHOLD_SOL) continue;
+
+      openPositions.push({
+        tokenMint: pos.tokenMint,
+        tokenSymbol: pos.tokenSymbol,
+        tokenName: pos.tokenName,
+        tokenImage: pos.tokenImage,
+        entryAmountSol: entrySol,
+        entryAmountTokens: netTokens,
+        entryPrice,
+        entryTimestamp: pos.earliestBuyTimestamp,
+      });
+    }
+
+    logger.info({ positionCount: openPositions.length }, 'Open positions loaded from database (API fallback)');
     return openPositions;
   }
 
