@@ -16,7 +16,7 @@ export const config = {
 
   // Trading Parameters
   initialCapitalSol: parseFloat(process.env.INITIAL_CAPITAL_SOL || '1.0'),
-  maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.10'),  // 10% of capital max (allows small balances to trade)
+  maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.25'),  // 25% of capital max (allows 0.07 SOL trades with smaller balances)
   dailyLossLimit: parseFloat(process.env.DAILY_LOSS_LIMIT || '0.15'),
   maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '2'),  // Reduced to 2 - focus on quality over quantity
 
@@ -39,10 +39,11 @@ export const config = {
   pumpFunProgram: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
 
   // Risk Parameters
+  // UPDATED: Reduced reserve to allow more capital for trading
   capitalAllocation: {
-    reserve: 0.40,    // 40% never trade
-    active: 0.40,     // 40% normal trades
-    highRisk: 0.20,   // 20% meme plays
+    reserve: 0.20,    // 20% never trade (was 40% - too conservative)
+    active: 0.50,     // 50% normal trades
+    highRisk: 0.30,   // 30% meme plays
   },
 
   stopLossPercent: 0.12,      // -12% stop loss for established tokens
@@ -133,7 +134,7 @@ export const config = {
   requireNonColdPhase: false, // DISABLED: Allow cold phase entries if other signals are strong
 
   // Trade execution settings
-  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.02'),  // INCREASED from 0.01 - tiny positions get destroyed by slippage
+  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.07'),  // Base position size (user requested 0.07)
   minPositionSol: 0.015,     // NEW: Minimum position size (below this, slippage destroys profits)
   defaultSlippageBps: 1500,  // 15% slippage for normal trades
   stopLossSlippageBps: 3000, // NEW: 30% slippage for stop loss (ensure execution on fast drops)
