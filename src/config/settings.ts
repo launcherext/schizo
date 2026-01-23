@@ -126,8 +126,8 @@ export const config = {
   minHolderCount: 50,
   maxTop10Concentration: 0.30,
   minRugScore: 45,
-  minPumpHeat: 20,           // INCREASED from 0: Require some pump activity (cold phase = 0 heat)
-  requireNonColdPhase: true, // NEW: Don't enter tokens in "cold" pump phase
+  minPumpHeat: 10,           // LOWERED: Allow tokens with some activity (was 20)
+  requireNonColdPhase: false, // DISABLED: Allow cold phase entries if other signals are strong
 
   // Trade execution settings
   tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.02'),  // INCREASED from 0.01 - tiny positions get destroyed by slippage
@@ -176,11 +176,11 @@ export const config = {
   // ESTABLISHED MODE: For DexScreener trending & whale copies (already have proven data)
   establishedMode: {
     enabled: true,
-    minBuyPressure: 0.60,     // 60%+ buy pressure (from external source)
-    minPriceChange5m: 2,      // At least 2% up in last 5 min (showing momentum)
-    maxPriceChange5m: 40,     // Not already mooned (< 40%)
-    minLiquidityUsd: 5000,    // Minimum liquidity
-    maxMarketCapUsd: 5_000_000, // Under $5M mcap (still has room)
+    minBuyPressure: 0.55,     // LOWERED: 55%+ buy pressure (was 60%)
+    minPriceChange5m: 0,      // LOWERED: Any positive or flat is OK (was 2% - too strict)
+    maxPriceChange5m: 50,     // RAISED: Allow up to 50% (was 40%)
+    minLiquidityUsd: 3000,    // LOWERED: $3k min liquidity (was $5k)
+    maxMarketCapUsd: 10_000_000, // RAISED: Under $10M mcap (was $5M)
   },
 
   // Momentum Override - bypass lower confidence if signals are strong
