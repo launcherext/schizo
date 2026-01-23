@@ -65,7 +65,7 @@ export const config = {
 
   // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
   // Analysis showed trades under 3 seconds are catastrophic losers (-77% to -87%)
-  minTokenAgeSeconds: 15,  // Let rugs reveal themselves first
+  minTokenAgeSeconds: 3,  // Reduced from 15 to allow faster sniping
 
   // NEW: Rapid drop detection - exit immediately if price crashes
   rapidDropExit: {
@@ -153,7 +153,7 @@ export const config = {
   // Token Watchlist - AI-driven entry (TWO TIERS: snipe fast OR wait for data)
   watchlist: {
     minDataPoints: 20,       // Reduced: 20 price points for safe mode
-    minAgeSeconds: 15,       // Aligned with minTokenAgeSeconds - re-evaluate after initial wait
+    minAgeSeconds: 3,        // Aligned with minTokenAgeSeconds
     minConfidence: 0.60,     // Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
     maxDrawdown: 0.15,       // Don't buy tokens already dumping
