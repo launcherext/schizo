@@ -66,7 +66,7 @@ export const AIStatus: React.FC<AIStatusProps> = ({ stats, decision }) => {
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-title">Claude's Thoughts</span>
+        <span className="card-title">Blox Bot's Brain</span>
       </div>
       <div className="ai-content">
         <div className="ai-indicator">

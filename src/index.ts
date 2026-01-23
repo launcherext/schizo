@@ -37,6 +37,7 @@ class TradingBot {
   private isRunning = false;
   private tokenQueue: NewTokenEvent[] = [];
   private processedMints: Set<string> = new Set();
+  private pendingBuys: Set<string> = new Set(); // Prevent duplicate buys (race condition)
   private bondingCurveCache: Map<string, BondingCurveData> = new Map();
   private graduatedTokens: Set<string> = new Set(); // Track tokens that graduated to DEX
   private trendingTokenCache: Map<string, TrendingTokenData> = new Map(); // Cache for DexScreener trending data
@@ -80,13 +81,14 @@ class TradingBot {
       await drawdownGuard.start();
       await drawdownGuard.resetAll();  // Clear old state for fresh testing - must be AFTER start
 
-      // Data layer
+      // CRITICAL: Setup event handlers BEFORE starting data layer
+      // Otherwise initial scan events are lost (whale activity, trending tokens)
+      this.setupEventHandlers();
+
+      // Data layer - starts AFTER event handlers are attached
       await priceFeed.start();
       await whaleTracker.start();
       await dexscreenerScanner.start();
-
-      // Setup event handlers
-      this.setupEventHandlers();
 
       // Start WebSocket connections
       await heliusWs.connect();
@@ -117,6 +119,20 @@ class TradingBot {
           closed: reconcileResult.phantomsClosed,
         }, 'Startup reconciliation found phantom positions');
       }
+
+      // Periodic reconciliation every 15 seconds to detect manual sells quickly
+      setInterval(async () => {
+        try {
+          const result = await positionReconciler.reconcile(true);
+          if (result.phantomsClosed > 0) {
+            logger.info({
+              closed: result.phantomsClosed,
+            }, 'Periodic reconciliation closed phantom positions');
+          }
+        } catch (error) {
+          logger.error({ error }, 'Periodic reconciliation failed');
+        }
+      }, 15000);
 
       // Start C100 services
       await c100Tracker.start(30000);           // Price updates every 30s
@@ -510,6 +526,52 @@ class TradingBot {
     const tokenInfo = await priceFeed.getTokenInfo(mint);
     const holderInfo = await priceFeed.getHolderInfo(mint);
 
+    // AGE-AWARE CONCENTRATION CHECK
+    // New tokens naturally have high concentration - relax for snipe mode
+    const tokenAgeSeconds = (Date.now() - token.timestamp.getTime()) / 1000;
+
+    if (holderInfo) {
+      // Determine concentration threshold based on token age
+      // < 30s: Skip check (too early, only creator)
+      // 30-120s: Allow up to 85% (some distribution expected)
+      // > 120s: Strict 50% threshold (should be distributed)
+      let concentrationThreshold: number;
+      let checkLabel: string;
+
+      if (tokenAgeSeconds < 30) {
+        concentrationThreshold = 1.0; // Skip check entirely
+        checkLabel = 'SKIPPED (too new)';
+      } else if (tokenAgeSeconds < 120) {
+        concentrationThreshold = 0.85; // 85% for young tokens
+        checkLabel = 'RELAXED (young token)';
+      } else {
+        concentrationThreshold = 0.50; // 50% for established tokens
+        checkLabel = 'STRICT (established)';
+      }
+
+      logger.info({
+        mint: mint.substring(0, 15),
+        top10Concentration: (holderInfo.top10Concentration * 100).toFixed(1) + '%',
+        totalHolders: holderInfo.totalHolders,
+        tokenAgeSeconds: tokenAgeSeconds.toFixed(0),
+        threshold: (concentrationThreshold * 100).toFixed(0) + '%',
+        checkType: checkLabel,
+      }, 'Holder concentration check');
+
+      if (holderInfo.top10Concentration > concentrationThreshold) {
+        this.rejectionStats.total++;
+        logger.warn({
+          mint,
+          top10Concentration: (holderInfo.top10Concentration * 100).toFixed(1) + '%',
+          threshold: (concentrationThreshold * 100).toFixed(0) + '%',
+          tokenAgeSeconds: tokenAgeSeconds.toFixed(0),
+        }, 'REJECTED: Top 10 holder concentration exceeds threshold');
+        return { keepForLater: false };
+      }
+    } else {
+      logger.warn({ mint: mint.substring(0, 15) }, 'No holder info available - proceeding with caution');
+    }
+
     // Quick safety check
     const quickSafety = rugDetector.getQuickSafetyFlags(tokenInfo, mint);
     logger.info({ mint, quickSafety }, 'Quick safety check result');
@@ -628,8 +690,19 @@ class TradingBot {
       };
     }
 
-    // Full rug analysis (LP info passed as null - loses 25 potential points)
-    const rugScore = await rugDetector.analyzeToken(mint, tokenInfo, holderInfo, null);
+    // Full rug analysis - now with LP info for complete 100-point scoring
+    const lpCheck = await rugDetector.checkLpLocked(mint);
+    // Convert LP check result to LiquidityPool format for analyzeToken
+    const lpInfo = lpCheck.liquiditySol > 0 ? {
+      mint,
+      poolAddress: '',  // Not needed for rug analysis
+      dex: 'unknown',
+      liquiditySol: lpCheck.liquiditySol,
+      liquidityToken: 0,
+      lpLocked: lpCheck.lpLocked,
+      lpLockedPercent: lpCheck.lpLockedPercent,
+    } : null;
+    const rugScore = await rugDetector.analyzeToken(mint, tokenInfo, holderInfo, lpInfo);
 
     // Get narrative signal (async but don't block critical path too long)
     // We fire and forget the broadcast, or await if we want it in decision (future)
@@ -688,22 +761,40 @@ class TradingBot {
         trendingData.marketCapUsd <= establishedConfig.maxMarketCapUsd;
 
       if (meetsEstablished) {
-        logger.info({
-          mint,
-          source: 'established_trending',
-          symbol: trendingData.symbol,
-          buyPressure: (trendingData.buyPressure * 100).toFixed(0) + '%',
-          priceChange5m: trendingData.priceChange5m.toFixed(1) + '%',
-          liquidityUsd: trendingData.liquidityUsd.toFixed(0),
-          marketCapUsd: trendingData.marketCapUsd.toFixed(0),
-        }, '📈 ESTABLISHED MODE: DexScreener trending token - bypassing normal entry');
+        // SAFETY CHECK: Even established tokens must pass rug score threshold
+        if (rugScore.total < config.minRugScore) {
+          logger.warn({
+            mint,
+            source: 'established_trending',
+            symbol: trendingData.symbol,
+            rugScore: rugScore.total,
+            minRequired: config.minRugScore,
+          }, 'ESTABLISHED MODE: Trending token FAILED rug score check');
 
-        entryResult = {
-          canEnter: true,
-          source: 'established_trending',
-          reason: `TRENDING: ${trendingData.symbol} +${trendingData.priceChange5m.toFixed(1)}%, ${(trendingData.buyPressure * 100).toFixed(0)}% buys`,
-          metrics: trendingData,
-        };
+          entryResult = {
+            canEnter: false,
+            source: 'established_trending',
+            reason: `Trending but failed rug check: ${rugScore.total}/${config.minRugScore}`,
+          };
+        } else {
+          logger.info({
+            mint,
+            source: 'established_trending',
+            symbol: trendingData.symbol,
+            buyPressure: (trendingData.buyPressure * 100).toFixed(0) + '%',
+            priceChange5m: trendingData.priceChange5m.toFixed(1) + '%',
+            liquidityUsd: trendingData.liquidityUsd.toFixed(0),
+            marketCapUsd: trendingData.marketCapUsd.toFixed(0),
+            rugScore: rugScore.total,
+          }, '📈 ESTABLISHED MODE: DexScreener trending token - passed all checks');
+
+          entryResult = {
+            canEnter: true,
+            source: 'established_trending',
+            reason: `TRENDING: ${trendingData.symbol} +${trendingData.priceChange5m.toFixed(1)}%, ${(trendingData.buyPressure * 100).toFixed(0)}% buys`,
+            metrics: trendingData,
+          };
+        }
       } else {
         entryResult = {
           canEnter: false,
@@ -718,19 +809,37 @@ class TradingBot {
       const isRecent = Date.now() - whaleData.timestamp < 5 * 60 * 1000; // Within 5 minutes
 
       if (isRecent) {
-        logger.info({
-          mint,
-          source: 'established_whale',
-          wallet: whaleData.wallet.substring(0, 12),
-          amountSol: whaleData.amountSol.toFixed(2),
-        }, '🐋 ESTABLISHED MODE: Whale copy - bypassing normal entry');
+        // SAFETY CHECK: Even whale copies must pass rug score threshold
+        if (rugScore.total < config.minRugScore) {
+          logger.warn({
+            mint,
+            source: 'established_whale',
+            wallet: whaleData.wallet.substring(0, 12),
+            rugScore: rugScore.total,
+            minRequired: config.minRugScore,
+          }, 'ESTABLISHED MODE: Whale copy FAILED rug score check');
 
-        entryResult = {
-          canEnter: true,
-          source: 'established_whale',
-          reason: `WHALE: ${whaleData.wallet.substring(0, 8)}... bought ${whaleData.amountSol.toFixed(2)} SOL`,
-          metrics: whaleData,
-        };
+          entryResult = {
+            canEnter: false,
+            source: 'established_whale',
+            reason: `Whale copy but failed rug check: ${rugScore.total}/${config.minRugScore}`,
+          };
+        } else {
+          logger.info({
+            mint,
+            source: 'established_whale',
+            wallet: whaleData.wallet.substring(0, 12),
+            amountSol: whaleData.amountSol.toFixed(2),
+            rugScore: rugScore.total,
+          }, '🐋 ESTABLISHED MODE: Whale copy - passed all checks');
+
+          entryResult = {
+            canEnter: true,
+            source: 'established_whale',
+            reason: `WHALE: ${whaleData.wallet.substring(0, 8)}... bought ${whaleData.amountSol.toFixed(2)} SOL`,
+            metrics: whaleData,
+          };
+        }
       } else {
         entryResult = {
           canEnter: false,
@@ -791,7 +900,21 @@ class TradingBot {
 
     // AI Decision
     const decision = this.makeDecision(features, rugScore, pumpMetrics, mint, entryBuyPressure);
-    
+
+    // CRITICAL FIX: For ESTABLISHED MODE tokens (trending/whale), force BUY action
+    // These tokens have already been vetted by trending/whale logic - don't let random DDQN block them
+    const isEstablishedMode = entryResult.source === 'established_trending' || entryResult.source === 'established_whale';
+    if (isEstablishedMode && decision.action !== Action.BUY) {
+      logger.info({
+        mint: mint.substring(0, 15),
+        source: entryResult.source,
+        originalAction: Action[decision.action],
+        buyPressure: entryBuyPressure.toFixed(2),
+      }, '🔄 ESTABLISHED MODE: Forcing BUY action (overriding random DDQN)');
+      decision.action = Action.BUY;
+      decision.confidence = entryBuyPressure; // Use buy pressure as confidence
+    }
+
     // Broadcast AI decision
     apiServer.getIO().emit('ai:decision', {
       ...decision,
@@ -876,17 +999,32 @@ class TradingBot {
       }
     }
 
-    // Execute trade
-    await this.executeBuy(
-      mint,
-      tokenInfo?.symbol || 'UNKNOWN',
-      positionSize,
-      priceData!.priceSol,
-      features,
-      pumpMetrics,
-      poolType,
-      token.creator
-    );
+    // CRITICAL: Final duplicate check before buy (prevent race condition)
+    if (this.pendingBuys.has(mint) || positionManager.getPositionByMint(mint)) {
+      logger.warn({ mint: mint.substring(0, 15) }, 'ABORTED: Duplicate buy prevented (race condition)');
+      priceFeed.removeFromWatchList(mint);
+      return { keepForLater: false };
+    }
+
+    // Mark as pending to prevent concurrent buys
+    this.pendingBuys.add(mint);
+
+    try {
+      // Execute trade
+      await this.executeBuy(
+        mint,
+        tokenInfo?.symbol || 'UNKNOWN',
+        positionSize,
+        priceData!.priceSol,
+        features,
+        pumpMetrics,
+        poolType,
+        token.creator
+      );
+    } finally {
+      // Clear pending status
+      this.pendingBuys.delete(mint);
+    }
 
     return { keepForLater: false };
   }
@@ -931,12 +1069,14 @@ class TradingBot {
     // NEW: Get dynamic confidence threshold and momentum override
     let requiredConfidence = config.watchlist?.minConfidence || 0.55;
     let hasMomentumOverride = false;
+    let isExplorationTrade = false;  // Track if this is an exploration trade
 
-    // In exploration mode, lower the threshold to allow trading while model learns
-    // This matches the velocity tracker's minBuyPressure of 0.50
+    // In exploration mode, RAISE the threshold to be more conservative
+    // Don't lower it - that's how we were buying rugs
     if (isExplorationMode) {
-      requiredConfidence = 0.50;
-      logger.debug({ requiredConfidence }, 'Exploration mode: lowered confidence threshold');
+      requiredConfidence = 0.65;  // Higher threshold in exploration (was 0.50 - too low)
+      isExplorationTrade = true;
+      logger.debug({ requiredConfidence }, 'Exploration mode: using higher confidence threshold');
     } else if (mint) {
       // Dynamic confidence threshold based on token age
       requiredConfidence = tokenWatchlist.getDynamicConfidenceThreshold(mint);
@@ -959,15 +1099,25 @@ class TradingBot {
     // Handle action override based on confidence
     let finalAction = action;
 
-    // In exploration mode with good confidence, FORCE BUY (don't rely on random action)
-    if (isExplorationMode && confidence >= requiredConfidence) {
-      finalAction = Action.BUY;
-      logger.info({
-        mint: mint?.substring(0, 15),
-        confidence: confidence.toFixed(2),
-        requiredConfidence: requiredConfidence.toFixed(2),
-        originalAction: Action[action],
-      }, 'EXPLORATION MODE: Forcing BUY (confidence above threshold)');
+    // In exploration mode: DON'T force BUY anymore - let the AI learn from random actions
+    // Only allow BUY if confidence is above the higher threshold
+    if (isExplorationMode) {
+      if (action === Action.BUY && confidence >= requiredConfidence) {
+        // Allow the BUY but note it's an exploration trade
+        logger.info({
+          mint: mint?.substring(0, 15),
+          confidence: confidence.toFixed(2),
+          requiredConfidence: requiredConfidence.toFixed(2),
+        }, 'EXPLORATION MODE: Allowing BUY (confidence meets higher threshold)');
+      } else if (action === Action.BUY) {
+        // Block BUY in exploration if confidence doesn't meet higher threshold
+        finalAction = Action.HOLD;
+        logger.info({
+          mint: mint?.substring(0, 15),
+          confidence: confidence.toFixed(2),
+          requiredConfidence: requiredConfidence.toFixed(2),
+        }, 'EXPLORATION MODE: Blocking BUY (confidence below exploration threshold)');
+      }
     } else if (action === Action.BUY && confidence < requiredConfidence) {
       // Normal mode: Block BUY if confidence is below threshold
       finalAction = Action.HOLD;
@@ -979,14 +1129,24 @@ class TradingBot {
       }, 'BUY blocked - confidence below dynamic threshold');
     }
 
-    // NEW: Pass confidence to position sizer for dynamic sizing
-    const positionSize = positionSizer.calculateSize(
+    // Calculate position size with exploration mode adjustment
+    let positionSize = positionSizer.calculateSize(
       availableCapital,
       undefined,
       undefined,
       regime,
-      confidence  // NEW: Use confidence as size multiplier
+      confidence  // Use confidence as size multiplier
     );
+
+    // In exploration mode, use 50% of normal position size
+    if (isExplorationTrade && finalAction === Action.BUY) {
+      positionSize.sizeSol *= 0.5;
+      logger.info({
+        mint: mint?.substring(0, 15),
+        originalSize: positionSize.sizeSol * 2,
+        adjustedSize: positionSize.sizeSol,
+      }, 'EXPLORATION MODE: Using 50% position size');
+    }
 
     return {
       action: finalAction,
@@ -1046,18 +1206,9 @@ class TradingBot {
         calculatedPrice: actualPrice
       }, 'Paper trade: using simulated token amount');
     } else {
-      // Real trading: use outputAmount from swap if available (parsed from postTokenBalances)
-      // Fall back to balance check with retries only if outputAmount is 0
-      if (result.outputAmount && result.outputAmount > 0) {
-        amountTokens = result.outputAmount;
-        actualPrice = sizeSol / amountTokens;
-        logger.info({
-          mint,
-          amountTokens,
-          actualPrice,
-          source: 'postTokenBalances',
-        }, 'Using token amount from transaction postTokenBalances');
-      } else {
+      // Real trading: ALWAYS verify on-chain balance before creating position
+      // Even if postTokenBalances returned tokens, the tx might have failed silently
+      {
         // Fallback: verify actual on-chain balance with retries
         // Token accounts may take time to be indexed, so retry multiple times
         let actualBalance = 0;

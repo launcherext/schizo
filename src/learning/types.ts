@@ -18,7 +18,7 @@ export interface TradeRecord {
   features: StateVector;
   regime: MarketRegime;
   pumpPhase: PumpPhase;
-  exitReason?: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected';
+  exitReason?: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected' | 'dead_token';
   slippage?: number;
   fees?: number;
 }

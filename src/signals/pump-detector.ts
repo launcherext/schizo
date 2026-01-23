@@ -3,6 +3,7 @@ import { priceFeed } from '../data/price-feed';
 import { PriceData } from '../data/types';
 import { PumpPhase, PumpMetrics } from './types';
 import { config } from '../config/settings';
+import { velocityTracker } from './velocity-tracker';
 
 const logger = createChildLogger('pump-detector');
 
@@ -31,16 +32,34 @@ export class PumpDetector {
     const pumpFromLow = lowestPrice > 0 ? (currentPrice - lowestPrice) / lowestPrice : 0;
 
     // Calculate volume ratio (1min / 5min)
-    const volume1m = this.getVolumeWindow(history, 60);
-    const volume5m = this.getVolumeWindow(history, 300);
-    const volumeRatio = volume5m > 0 ? volume1m / volume5m : 0;
+    // PREFER real trade count from velocity tracker when available
+    let volumeRatio: number;
+    const velocityMetrics = velocityTracker.getMetrics(mint);
+
+    if (velocityMetrics && velocityMetrics.txCount >= 5) {
+      // Use real trade intensity: trades per minute normalized
+      // 10+ trades/min = hot, 5+ = building, <5 = cold
+      const tradesPerMin = velocityMetrics.txPerMinute;
+      volumeRatio = tradesPerMin / 10;  // Normalize so 10 trades/min = 1.0
+      logger.debug({
+        mint: mint.substring(0, 12),
+        source: 'velocity_tracker',
+        tradesPerMin: tradesPerMin.toFixed(1),
+        volumeRatio: volumeRatio.toFixed(2),
+      }, 'Using real trade count for volume');
+    } else {
+      // FALLBACK: Use price-based volume proxy
+      const volume1m = this.getVolumeWindow(history, 60);
+      const volume5m = this.getVolumeWindow(history, 300);
+      volumeRatio = volume5m > 0 ? volume1m / volume5m : 0;
+    }
 
     // Calculate heat metric
     const heat = volumeRatio * 100;
 
     // Determine phase based on heat and price velocity
     const priceVelocity = this.calculatePriceVelocity(history);
-    const buyPressure = this.calculateBuyPressure(history);
+    const buyPressure = this.calculateBuyPressure(history, mint);  // Pass mint for real trade data
 
     // Check for momentum decay (heat fading from previous highs)
     const pumpHistory = this.pumpHistories.get(mint) || [];
@@ -133,7 +152,23 @@ export class PumpDetector {
     return velocity;
   }
 
-  private calculateBuyPressure(history: PriceData[]): number {
+  private calculateBuyPressure(history: PriceData[], mint?: string): number {
+    // PREFER real trade data from velocity tracker when available
+    if (mint) {
+      const velocityMetrics = velocityTracker.getMetrics(mint);
+      if (velocityMetrics && velocityMetrics.txCount >= 5) {
+        // Use actual buy/sell ratio from real trades
+        logger.debug({
+          mint: mint.substring(0, 12),
+          source: 'velocity_tracker',
+          buyPressure: velocityMetrics.buyPressure.toFixed(2),
+          txCount: velocityMetrics.txCount,
+        }, 'Using real trade data for buy pressure');
+        return velocityMetrics.buyPressure;
+      }
+    }
+
+    // FALLBACK: Infer from price movements (less accurate)
     if (history.length < 10) return 0.5;
 
     const recent = history.slice(-60); // Last minute

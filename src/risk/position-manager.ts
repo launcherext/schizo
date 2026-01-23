@@ -30,6 +30,13 @@ export class PositionManager extends EventEmitter {
       this.monitorPositions();
     }, config.priceCheckIntervalMs);
 
+    // Start cleanup routine (runs every 60 seconds)
+    setInterval(() => {
+      this.cleanupStuckPositions().catch(err => {
+        logger.error({ error: err.message }, 'Cleanup routine failed');
+      });
+    }, 60000);
+
     logger.info({ positionCount: this.positions.size }, 'Position manager started');
   }
 
@@ -180,7 +187,40 @@ export class PositionManager extends EventEmitter {
         }
 
         if (!priceData) {
-          logger.warn({ mint: position.mint }, 'No price data - skipping position');
+          // Track how long we've been without price data
+          const lastUpdateAge = Date.now() - position.lastUpdate.getTime();
+          const positionAge = Date.now() - position.entryTime.getTime();
+
+          // If no price data for 60+ seconds and position is at least 30 seconds old, close as dead
+          if (lastUpdateAge > 60000 && positionAge > 30000) {
+            logger.warn({
+              mint: position.mint.substring(0, 15),
+              lastUpdateAgeSeconds: (lastUpdateAge / 1000).toFixed(0),
+              positionAgeSeconds: (positionAge / 1000).toFixed(0),
+            }, 'DEAD TOKEN: No price data for 60s - force closing');
+
+            await this.closePosition(position.id, 'dead_token', true);
+            continue;
+          }
+
+          logger.warn({ mint: position.mint.substring(0, 15) }, 'No price data - skipping position');
+          continue;
+        }
+
+        // STALE PRICE CHECK: If price data timestamp is old, the token might be dead
+        // DexScreener can return cached data for dead tokens
+        const priceAge = Date.now() - priceData.timestamp.getTime();
+        const positionAge = Date.now() - position.entryTime.getTime();
+        const STALE_PRICE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+        if (priceAge > STALE_PRICE_THRESHOLD_MS && positionAge > 60000) {
+          logger.warn({
+            mint: position.mint.substring(0, 15),
+            priceAgeSeconds: (priceAge / 1000).toFixed(0),
+            positionAgeSeconds: (positionAge / 1000).toFixed(0),
+          }, 'STALE PRICE DATA: Price not updated for 5+ min - force closing as dead token');
+
+          await this.closePosition(position.id, 'dead_token', true);
           continue;
         }
 
@@ -217,17 +257,51 @@ export class PositionManager extends EventEmitter {
   }
 
   private updateTrailingStop(position: Position): void {
-    // Only enable trailing stop after first TP hit
-    if (position.tpSold.length > 0) {
-      const trailingStopPrice = position.highestPrice * (1 - config.trailingStopPercent);
-      position.trailingStop = Math.max(position.trailingStop || 0, trailingStopPrice);
+    // Enable trailing stop immediately when in profit, with dynamic tightening
+    // This protects profits early instead of waiting for +100%
+    const profitPercent = (position.highestPrice - position.entryPrice) / position.entryPrice;
+
+    // Dynamic trailing percentage based on profit level
+    // Higher profit = tighter trailing to protect gains
+    let trailingPercent: number;
+    if (profitPercent >= 1.00) {
+      trailingPercent = 0.12;  // +100%: tight 12% trailing
+    } else if (profitPercent >= 0.50) {
+      trailingPercent = 0.15;  // +50%: 15% trailing
+    } else if (profitPercent >= 0.30) {
+      trailingPercent = 0.20;  // +30%: 20% trailing
+    } else if (profitPercent >= 0.10) {
+      trailingPercent = 0.25;  // +10%: 25% trailing
+    } else {
+      // Below +10%: no trailing stop yet, rely on fixed stop loss
+      return;
     }
+
+    const trailingStopPrice = position.highestPrice * (1 - trailingPercent);
+    position.trailingStop = Math.max(position.trailingStop || 0, trailingStopPrice);
   }
 
   private async checkExitConditions(position: Position): Promise<void> {
     const currentPrice = position.currentPrice;
     const profitPercent = (currentPrice - position.entryPrice) / position.entryPrice;
     const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
+    const positionAgeMinutes = positionAgeSeconds / 60;
+
+    // MAX HOLD TIME CHECK - Force exit positions held too long
+    // Analysis showed positions held 4+ hours were almost all -90% losses
+    const maxHoldMinutes = (config as any).maxHoldTimeMinutes || 30;
+    if (positionAgeMinutes >= maxHoldMinutes) {
+      logger.warn({
+        positionId: position.id,
+        mint: position.mint.substring(0, 15),
+        holdMinutes: positionAgeMinutes.toFixed(1),
+        maxHoldMinutes,
+        profitPercent: (profitPercent * 100).toFixed(1) + '%',
+      }, `MAX HOLD TIME REACHED (${maxHoldMinutes}min) - force closing to prevent zombie position`);
+
+      await this.closePosition(position.id, 'trailing_stop', true); // Use high slippage for forced exit
+      return;
+    }
 
     // GUARD: Skip if profit percent is invalid (entry price = 0, or other corruption)
     if (!isFinite(profitPercent) || isNaN(profitPercent)) {
@@ -240,6 +314,27 @@ export class PositionManager extends EventEmitter {
 
       // Close the corrupted position
       await this.closePosition(position.id, 'manual');
+      return;
+    }
+
+    // PROTECT PROFITS: Exit if price drops 15% from peak while in profit
+    // This catches sharp reversals that the wider trailing stop would miss
+    const dropFromPeak = position.highestPrice > 0
+      ? (position.highestPrice - currentPrice) / position.highestPrice
+      : 0;
+
+    if (profitPercent > 0.20 && dropFromPeak > 0.15) {
+      // We're in profit but price dropped 15%+ from peak - protect gains
+      logger.warn({
+        positionId: position.id,
+        mint: position.mint.substring(0, 15),
+        profitPercent: (profitPercent * 100).toFixed(1) + '%',
+        dropFromPeak: (dropFromPeak * 100).toFixed(1) + '%',
+        highestPrice: position.highestPrice,
+        currentPrice,
+      }, 'PROTECT PROFITS: 15%+ drop from peak while in profit - exiting');
+
+      await this.closePosition(position.id, 'trailing_stop', true);
       return;
     }
 
@@ -384,29 +479,29 @@ export class PositionManager extends EventEmitter {
     const tpStrategy = config.takeProfitStrategy;
     const momentum = velocityTracker.getMomentumStrength(position.mint);
 
-    // Dynamic TP thresholds based on momentum - LET WINNERS RUN
-    // Meme coins can 3-10x, don't sell too early or get stopped out on normal volatility
-    // STRONG: Hold longest, widest trailing (35%) - ride the wave
-    // MEDIUM: Normal from config (30%)
-    // WEAK: Slightly earlier TP but still reasonable trailing (25%)
+    // Dynamic TP thresholds based on momentum - PROTECT PROFITS EARLY
+    // Take first profit at +40% (config), then adjust based on momentum
+    // STRONG: Let it run a bit longer, but still protect gains
+    // MEDIUM: Normal from config (+40% trigger, 20% trailing)
+    // WEAK: Take profit earlier, tighter trailing
     let dynamicTpTrigger: number;
     let dynamicTrailingPercent: number;
     let dynamicSellPercent: number;
 
     switch (momentum.strength) {
       case 'strong':
-        dynamicTpTrigger = 1.50;        // +150% for strong momentum - let it run
-        dynamicTrailingPercent = 0.35;  // 35% trailing - wide for volatile pumps
-        dynamicSellPercent = 0.25;      // Sell only 25% - keep more for the ride
+        dynamicTpTrigger = 0.60;        // +60% for strong momentum (slightly higher than base 40%)
+        dynamicTrailingPercent = 0.25;  // 25% trailing - still reasonable for strong pumps
+        dynamicSellPercent = 0.30;      // Sell 30% - keep more for the ride
         break;
       case 'weak':
-        dynamicTpTrigger = 0.75;        // +75% for weak momentum (was 40% - too early)
-        dynamicTrailingPercent = 0.25;  // 25% trailing (was 15% - way too tight)
-        dynamicSellPercent = 0.40;      // Sell 40%
+        dynamicTpTrigger = 0.30;        // +30% for weak momentum - take profit earlier
+        dynamicTrailingPercent = 0.15;  // 15% trailing - tighter for fading momentum
+        dynamicSellPercent = 0.40;      // Sell 40% - secure more gains
         break;
       default: // 'medium' or 'unknown'
-        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +100% from config
-        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 30% from config
+        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +40% from config
+        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 20% from config
         dynamicSellPercent = 0.33;      // Sell 33%
     }
 
@@ -476,12 +571,12 @@ export class PositionManager extends EventEmitter {
     const lastExhaustionSell = (position as any).lastExhaustionSell || 0;
     const canTriggerExhaustion = Date.now() - lastExhaustionSell > exhaustionCooldownMs;
 
-    // WIDENED: Only trigger exhaustion at higher profit and more severe decay
-    // Meme coins consolidate with 30-40% dips in momentum - that's normal
-    if (profitPercent > 0.75 && position.amount > 0 && canTriggerExhaustion) {
-      const nearHigh = currentPrice >= position.highestPrice * 0.85; // Within 15% of high (was 10%)
-      const heatFading = pumpMetrics.heatDecay && pumpMetrics.heatDecay > 0.50; // 50% decay (was 25%)
-      const buyPressureFading = pumpMetrics.buyPressureDecay && pumpMetrics.buyPressureDecay > 0.40; // 40% decay (was 20%)
+    // BALANCED: Trigger exhaustion at moderate profit with notable decay
+    // With earlier TPs now, be more cautious about fading momentum
+    if (profitPercent > 0.50 && position.amount > 0 && canTriggerExhaustion) {
+      const nearHigh = currentPrice >= position.highestPrice * 0.85; // Within 15% of high
+      const heatFading = pumpMetrics.heatDecay && pumpMetrics.heatDecay > 0.35; // 35% decay threshold
+      const buyPressureFading = pumpMetrics.buyPressureDecay && pumpMetrics.buyPressureDecay > 0.30; // 30% decay
       const momentumWeakening = momentum.strength === 'weak'; // Only weak, not unknown
 
       // If we're in good profit, near the high, but momentum is fading - take some profit
@@ -655,7 +750,7 @@ export class PositionManager extends EventEmitter {
 
   async closePosition(
     positionId: string,
-    reason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected',
+    reason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected' | 'dead_token',
     useHighSlippage: boolean = false
   ): Promise<void> {
     const position = this.positions.get(positionId);
@@ -902,6 +997,46 @@ export class PositionManager extends EventEmitter {
 
   canOpenPosition(riskCheck: RiskCheckResult): boolean {
     return riskCheck.approved;
+  }
+
+  /**
+   * Cleanup routine - call periodically to close stuck positions
+   * Positions older than 5 minutes with 0 on-chain balance are closed as losses
+   */
+  async cleanupStuckPositions(): Promise<number> {
+    const openPositions = this.getOpenPositions();
+    let cleanedCount = 0;
+    const MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+    for (const position of openPositions) {
+      const ageMs = Date.now() - position.entryTime.getTime();
+
+      if (ageMs < MAX_AGE_MS) continue; // Skip young positions
+
+      try {
+        // Check actual on-chain balance
+        const actualBalance = await txManager.getTokenBalance(position.mint);
+
+        if (actualBalance === 0) {
+          logger.warn({
+            positionId: position.id,
+            symbol: position.symbol,
+            ageMinutes: (ageMs / 60000).toFixed(1),
+          }, 'CLEANUP: Closing stuck position (0 balance after 5 min)');
+
+          await this.closeGhostPosition(position.id);
+          cleanedCount++;
+        }
+      } catch (error: any) {
+        logger.error({ positionId: position.id, error: error.message }, 'Error checking position balance');
+      }
+    }
+
+    if (cleanedCount > 0) {
+      logger.info({ cleanedCount }, 'Stuck positions cleanup complete');
+    }
+
+    return cleanedCount;
   }
 }
 

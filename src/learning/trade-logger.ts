@@ -72,7 +72,7 @@ export class TradeLogger extends EventEmitter {
   async logExit(params: {
     positionId: string;
     exitPrice: number;
-    exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected';
+    exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected' | 'dead_token';
     slippage?: number;
     fees?: number;
     actualSolReceived?: number;

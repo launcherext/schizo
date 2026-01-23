@@ -298,8 +298,7 @@ export class PriceFeed extends EventEmitter {
 
   async getHolderInfo(mint: string): Promise<HolderInfo | null> {
     try {
-      // This would typically use Helius or another provider
-      // For now, return mock structure
+      // Use Helius DAS getTokenAccounts API - more reliable than getTokenLargestAccounts
       const response = await fetch(
         `https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`,
         {
@@ -307,43 +306,67 @@ export class PriceFeed extends EventEmitter {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             jsonrpc: '2.0',
-            id: 1,
-            method: 'getTokenLargestAccounts',
-            params: [mint],
+            id: 'holder-check',
+            method: 'getTokenAccounts',
+            params: {
+              mint: mint,
+              limit: 100,  // Get top 100 holders - enough for concentration check
+              displayOptions: {},
+            },
           }),
         }
       );
 
       const data = await response.json() as any;
 
-      if (!data.result?.value) {
+      if (data.error) {
+        logger.warn({ mint: mint.substring(0, 15), error: data.error }, 'Helius DAS error getting holders');
         return null;
       }
 
-      const holders = data.result.value;
-      const totalSupply = holders.reduce(
-        (sum: number, h: { amount: string }) => sum + parseFloat(h.amount),
+      // DAS API returns data in result.token_accounts
+      const tokenAccounts = data.result?.token_accounts;
+      if (!tokenAccounts || tokenAccounts.length === 0) {
+        logger.debug({ mint: mint.substring(0, 15) }, 'No token accounts found via DAS (token may be new)');
+        return null;
+      }
+
+      // Sort by amount descending to get largest holders
+      const sortedAccounts = tokenAccounts.sort((a: any, b: any) => b.amount - a.amount);
+
+      // Calculate total supply from all fetched accounts
+      const totalSupply = sortedAccounts.reduce(
+        (sum: number, h: { amount: number }) => sum + h.amount,
         0
       );
 
-      const top10 = holders.slice(0, 10);
+      const top10 = sortedAccounts.slice(0, 10);
       const top10Supply = top10.reduce(
-        (sum: number, h: { amount: string }) => sum + parseFloat(h.amount),
+        (sum: number, h: { amount: number }) => sum + h.amount,
         0
       );
+
+      const concentration = totalSupply > 0 ? top10Supply / totalSupply : 1;
+
+      logger.info({
+        mint: mint.substring(0, 15),
+        totalHolders: sortedAccounts.length,
+        top10Concentration: (concentration * 100).toFixed(1) + '%',
+        top1Balance: top10[0]?.amount || 0,
+      }, 'Holder info fetched via Helius DAS');
 
       return {
         mint,
-        totalHolders: holders.length,
-        top10Concentration: totalSupply > 0 ? top10Supply / totalSupply : 1,
-        top10Holders: top10.map((h: { address: string; amount: string }) => ({
-          address: h.address,
-          balance: parseFloat(h.amount),
-          percentage: totalSupply > 0 ? parseFloat(h.amount) / totalSupply : 0,
+        totalHolders: sortedAccounts.length,
+        top10Concentration: concentration,
+        top10Holders: top10.map((h: { owner: string; amount: number }) => ({
+          address: h.owner,
+          balance: h.amount,
+          percentage: totalSupply > 0 ? h.amount / totalSupply : 0,
         })),
       };
     } catch (error) {
-      logger.error({ mint, error }, 'Failed to get holder info');
+      logger.error({ mint: mint.substring(0, 15), error }, 'Failed to get holder info');
       return null;
     }
   }

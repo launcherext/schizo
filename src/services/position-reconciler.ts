@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { createChildLogger } from '../utils/logger';
+import { config } from '../config/settings';
 import { txManager } from '../execution/tx-manager';
 import { positionManager } from '../risk/position-manager';
 import { priceFeed } from '../data/price-feed';
@@ -38,6 +39,17 @@ export class PositionReconciler extends EventEmitter {
   }
 
   async reconcile(autoClose: boolean = true): Promise<ReconciliationResult> {
+    // CRITICAL: Skip reconciliation in paper trading mode
+    // Paper trades have no real tokens, so all positions would appear as phantoms
+    if (config.paperTrading) {
+      return {
+        phantomsFound: [],
+        orphansFound: [],
+        phantomsClosed: 0,
+        reconciliationTime: new Date(),
+      };
+    }
+
     if (this.isRunning) {
       logger.warn('Reconciliation already in progress');
       return {

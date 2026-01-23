@@ -51,7 +51,7 @@ export class WhaleTracker extends EventEmitter {
   private trackedWallets: Map<string, string> = new Map(); // address -> label
   private lastSignatures: Map<string, string> = new Map(); // address -> last signature
   private pollInterval: NodeJS.Timeout | null = null;
-  private minTransactionSol = 10; // Minimum SOL value to track
+  private minTransactionSol = 1; // LOWERED: Minimum SOL value to track (was 10 - missed smaller trades)
 
   constructor() {
     super();

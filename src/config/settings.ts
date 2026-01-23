@@ -25,7 +25,7 @@ export const config = {
   jitoTipLamports: parseInt(process.env.JITO_TIP_LAMPORTS || '10000'),
 
   // Feature Flags
-  paperTrading: process.env.PAPER_TRADING === 'true',
+  paperTrading: false,  // DISABLED: Live trading mode
   enableJito: process.env.ENABLE_JITO === 'true',
 
   // API Endpoints (using public Jupiter API - no auth required)
@@ -64,35 +64,40 @@ export const config = {
   // CRITICAL FIX: Reduced from 10 to 2 - analysis showed 10 seconds allows too much damage
   stopLossGracePeriodSeconds: 2,
 
+  // MAX HOLD TIME: Force exit positions after this many minutes
+  // Analysis showed positions held 4+ hours were almost all -90% losses (dead tokens)
+  // Meme tokens either pump in the first 30 minutes or they're dead
+  maxHoldTimeMinutes: 30,
+
   // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
-  // Very short minimum to allow fast sniping - rugs filtered by other checks
-  minTokenAgeSeconds: 3,  // 3 seconds minimum for fast sniping
+  // 15 seconds minimum - rugs need time to reveal, 3 seconds was suicide
+  minTokenAgeSeconds: 15,  // 15 seconds minimum - allows rugs to reveal themselves
 
   // NEW: Rapid drop detection - exit immediately if price crashes
-  // UPDATED: More lenient for snipe tokens - they're volatile early
+  // TIGHTENED: These tokens are rugging, get out fast
   rapidDropExit: {
     enabled: true,
-    dropPercent: 0.30,       // 30% drop triggers immediate exit (was 20% - too tight for snipe)
-    windowSeconds: 20,       // Within first 20 seconds only (was 30 - too long)
+    dropPercent: 0.20,       // TIGHTENED: 20% drop triggers exit (was 30%)
+    windowSeconds: 90,       // Extended: Check for first 90 seconds for early rug detection
     useHighSlippage: true,   // Use stopLossSlippageBps for panic sell
   },
 
-  // Take Profit Strategy - LET WINNERS RUN
-  // These tokens can pump 3-10x, don't sell too early
+  // Take Profit Strategy - BALANCED: Take early profits, protect capital
+  // First TP at +40% to recover cost, then scale out
   takeProfitStrategy: {
-    // At +100% gain (2x), sell enough to recover initial investment
+    // At +40% gain, sell enough to recover initial investment
     initialRecovery: {
-      triggerPercent: 1.00,  // +100% gain - wait for 2x before taking profit
+      triggerPercent: 0.40,  // +40% gain - recover cost early, don't wait for 2x
       action: 'recover_initial' as const,
     },
-    // After initial recovery, sell 25% of remainder every +100%
+    // After initial recovery, sell 33% of remainder every +70%
     scaledExits: {
-      intervalPercent: 1.00,  // Every +100% gain (was 75% - too aggressive)
-      sellPercent: 0.25,      // Sell 25% of remaining
+      intervalPercent: 0.70,  // Every +70% gain after initial recovery
+      sellPercent: 0.33,      // Sell 33% of remaining (was 25%)
     },
-    // Trailing stop - WIDER to survive consolidation
-    // Meme coins can dip 25-35% during healthy pumps
-    trailingStopPercent: 0.30,  // 30% trailing stop (was 18% - way too tight)
+    // Trailing stop - tighter to protect profits
+    // 20% trailing catches reversals before too much profit is lost
+    trailingStopPercent: 0.20,  // 20% trailing stop (was 30% - too wide)
   },
 
   // LEGACY: Keep for backwards compatibility but unused
@@ -100,7 +105,7 @@ export const config = {
     { multiplier: 2.0, sellPercent: 0.25 },
     { multiplier: 3.0, sellPercent: 0.25 },
   ],
-  trailingStopPercent: 0.30,  // 30% trailing stop - wide enough for meme coin volatility
+  trailingStopPercent: 0.20,  // 20% trailing stop - tighter to protect profits
 
   // AI Parameters
   ddqnConfig: {
@@ -123,21 +128,21 @@ export const config = {
   modelRetrainIntervalMs: 7 * 24 * 60 * 60 * 1000, // 1 week
 
   // Thresholds
-  // NOTE: minRugScore lowered from 70 to 45 because LP info is not available
-  // (passed as null to rug detector), so max possible score is ~75 instead of 100
+  // NOTE: minRugScore raised to 55 - with LP check now working, max score is 100
+  // 55/100 = 55% minimum safety score required
   // NOTE: minLiquiditySol lowered from 5 to 1 for testing
   minLiquiditySol: 1,
   minHolderCount: 50,
   maxTop10Concentration: 0.30,
-  minRugScore: 45,
-  minPumpHeat: 10,           // LOWERED: Allow tokens with some activity (was 20)
-  requireNonColdPhase: false, // DISABLED: Allow cold phase entries if other signals are strong
+  minRugScore: 55,           // RAISED: 55% min safety score (was 45% - allowed too many rugs)
+  minPumpHeat: 25,           // RAISED: 25+ heat required (cold phase < 25)
+  requireNonColdPhase: true, // ENABLED: Stop buying tokens with zero momentum
 
   // Trade execution settings
-  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.07'),  // Base position size (user requested 0.07)
-  minPositionSol: 0.015,     // NEW: Minimum position size (below this, slippage destroys profits)
+  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.01'),  // TEST MODE: 0.01 SOL for testing
+  minPositionSol: 0.005,     // TEST MODE: Lower minimum for testing
   defaultSlippageBps: 1500,  // 15% slippage for normal trades
-  stopLossSlippageBps: 3000, // NEW: 30% slippage for stop loss (ensure execution on fast drops)
+  stopLossSlippageBps: 2000, // 20% slippage for stop loss (was 30% - too much lost to slippage)
   priorityFeeSol: 0.0001,    // Priority fee in SOL
   jitoBribeSol: 0.00001,     // Jito bribe (if enabled)
 
@@ -156,8 +161,8 @@ export const config = {
 
   // Token Watchlist - AI-driven entry (TWO TIERS: snipe fast OR wait for data)
   watchlist: {
-    minDataPoints: 20,       // Reduced: 20 price points for safe mode
-    minAgeSeconds: 3,        // Aligned with minTokenAgeSeconds
+    minDataPoints: 10,       // Reduced: 10 price points for safe mode (was 20 - too slow)
+    minAgeSeconds: 15,       // Aligned with minTokenAgeSeconds - rugs need time to reveal
     minConfidence: 0.60,     // Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
     maxDrawdown: 0.15,       // Don't buy tokens already dumping
@@ -166,15 +171,16 @@ export const config = {
     requireUptrend: false,   // Disabled: allow dip buys (snipe mode has its own check)
   },
 
-  // SNIPE MODE: Quality entries only - wait for confirmation
+  // SNIPE MODE: Fast entries for promising tokens
+  // TIGHTENED: Previous settings allowed too many rugs with no real activity
   snipeMode: {
     enabled: true,
-    maxAgeSeconds: 45,        // Only snipe tokens 15-45 seconds old (entry window)
-    minTxCount: 15,           // 15+ transactions (need solid activity)
-    minUniqueBuyers: 10,      // 10+ unique wallets (real demand)
-    minBuyPressure: 0.70,     // 70%+ buys (strong but achievable)
-    maxMarketCapSol: 40,      // Under 40 SOL mcap (still early)
-    minBuyPressureStreak: 3,  // 3+ consecutive buy-heavy windows
+    maxAgeSeconds: 60,        // Snipe tokens 15-60 seconds old (aligned with minTokenAgeSeconds)
+    minTxCount: 10,           // TIGHTENED: 10+ transactions (was 5 - too few)
+    minUniqueBuyers: 12,      // RAISED: 12+ unique wallets (5 is trivially faked)
+    minBuyPressure: 0.68,     // RAISED: 68%+ buys (60% still has resistance)
+    maxMarketCapSol: 80,      // Under 80 SOL mcap
+    minBuyPressureStreak: 1,  // 1+ buy-heavy window
   },
 
   // ESTABLISHED MODE: For DexScreener trending & whale copies (already have proven data)

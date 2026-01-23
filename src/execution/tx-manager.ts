@@ -304,6 +304,26 @@ export class TransactionManager extends EventEmitter {
       }
     }
 
+    // FALLBACK: If PumpFun failed, try Jupiter as last resort
+    if (this.isOnBondingCurve(mint)) {
+      logger.warn({ mint, amountTokens }, 'PumpFun sell failed - trying Jupiter fallback');
+      try {
+        const jupiterResult = await jupiterSwap.sell(mint, amountTokens, decimals, slippageBps);
+        if (jupiterResult.success) {
+          pendingTx.status = 'confirmed';
+          pendingTx.signature = jupiterResult.signature;
+          pendingTx.confirmedAt = new Date();
+          this.emit('txConfirmed', { ...pendingTx, result: jupiterResult });
+          logger.info({ txId, mint, signature: jupiterResult.signature }, 'Jupiter fallback sell succeeded');
+          return jupiterResult;
+        }
+        lastError = jupiterResult.error || lastError;
+      } catch (error: any) {
+        logger.warn({ mint, error: error.message }, 'Jupiter fallback also failed');
+        lastError = error.message;
+      }
+    }
+
     pendingTx.status = 'failed';
     pendingTx.error = lastError;
     this.emit('txFailed', pendingTx);

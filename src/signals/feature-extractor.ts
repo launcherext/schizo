@@ -3,6 +3,7 @@ import { priceFeed } from '../data/price-feed';
 import { PriceData, HolderInfo, TokenInfo, LiquidityPool } from '../data/types';
 import { StateVector, FeatureHistory } from './types';
 import { tokenWatchlist } from './token-watchlist';
+import { velocityTracker } from './velocity-tracker';
 
 const logger = createChildLogger('feature-extractor');
 
@@ -26,11 +27,11 @@ export class FeatureExtractor {
     const priceChange1m = this.calculatePriceChange(priceHistory, 60);
     const priceChange5m = this.calculatePriceChange(priceHistory, 300);
 
-    // Calculate volume z-score
-    const volumeZScore = this.calculateVolumeZScore(priceHistory);
+    // Calculate volume z-score (uses real trade count when available)
+    const volumeZScore = this.calculateVolumeZScore(priceHistory, mint);
 
-    // Calculate buy/sell ratio from recent transactions
-    const buySellRatio = this.calculateBuySellRatio(priceHistory);
+    // Calculate buy/sell ratio from real transactions when available
+    const buySellRatio = this.calculateBuySellRatio(priceHistory, mint);
 
     // Holder metrics
     const holderCount = holderInfo
@@ -50,8 +51,8 @@ export class FeatureExtractor {
       ? this.normalizeAge((Date.now() - tokenInfo.createdAt.getTime()) / 60000)
       : 0.5;
 
-    // Trade intensity
-    const tradeIntensity = this.calculateTradeIntensity(priceHistory);
+    // Trade intensity (uses real trade count when available)
+    const tradeIntensity = this.calculateTradeIntensity(priceHistory, mint);
 
     // Market cap normalized
     const marketCapSol = this.normalizeMarketCap(priceData.marketCapSol);
@@ -117,10 +118,22 @@ export class FeatureExtractor {
     return ((currentPrice - pastPrice) / pastPrice) * 100;
   }
 
-  private calculateVolumeZScore(history: PriceData[]): number {
+  private calculateVolumeZScore(history: PriceData[], mint?: string): number {
+    // PREFER real trade count from velocity tracker
+    if (mint) {
+      const velocityMetrics = velocityTracker.getMetrics(mint);
+      if (velocityMetrics && velocityMetrics.txCount >= 3) {
+        // Normalize trade count: 10 trades = 0 (neutral), 20+ = +2, 5 = -1
+        // This gives a z-score-like value based on activity level
+        const expectedTradesPerMin = 10;
+        const zScore = (velocityMetrics.txPerMinute - expectedTradesPerMin) / 5;
+        return zScore;
+      }
+    }
+
+    // FALLBACK: Use liquidity changes as volume proxy
     if (history.length < 10) return 0;
 
-    // Use liquidity changes as volume proxy
     const volumes = history.map((h) => h.volume24h || 0);
     const recentVolume = volumes[volumes.length - 1];
 
@@ -133,10 +146,19 @@ export class FeatureExtractor {
     return (recentVolume - mean) / stdDev;
   }
 
-  private calculateBuySellRatio(history: PriceData[]): number {
+  private calculateBuySellRatio(history: PriceData[], mint?: string): number {
+    // PREFER real buy/sell ratio from velocity tracker
+    if (mint) {
+      const velocityMetrics = velocityTracker.getMetrics(mint);
+      if (velocityMetrics && velocityMetrics.txCount >= 5) {
+        // Use actual buy pressure from real trades
+        return velocityMetrics.buyPressure;
+      }
+    }
+
+    // FALLBACK: Infer buy/sell from price movements
     if (history.length < 2) return 0.5;
 
-    // Infer buy/sell from price movements
     let buys = 0;
     let sells = 0;
 
@@ -152,10 +174,20 @@ export class FeatureExtractor {
     return buys / total;
   }
 
-  private calculateTradeIntensity(history: PriceData[]): number {
+  private calculateTradeIntensity(history: PriceData[], mint?: string): number {
+    // PREFER real trade count from velocity tracker
+    if (mint) {
+      const velocityMetrics = velocityTracker.getMetrics(mint);
+      if (velocityMetrics && velocityMetrics.txCount >= 3) {
+        // Normalize trade intensity: 0 trades/min = 0, 10+ trades/min = 1
+        const intensity = Math.min(velocityMetrics.txPerMinute / 10, 1);
+        return intensity;
+      }
+    }
+
+    // FALLBACK: Count significant price changes as proxy for trade activity
     if (history.length < 10) return 0.5;
 
-    // Count significant price changes as proxy for trade activity
     let significantChanges = 0;
     const threshold = 0.001; // 0.1% change threshold
 

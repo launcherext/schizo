@@ -66,7 +66,13 @@ export class EntryEvaluator {
             velocityOK: true,
           }, '🚫 SNIPE BLOCKED: Cold phase despite good velocity - waiting for momentum');
 
-          // Fall through to safe mode or wait for better signals
+          // FIXED: Return false instead of falling through to safe mode
+          return {
+            canEnter: false,
+            source: 'none',
+            reason: `Cold phase blocked (heat=${pumpMetrics.heat.toFixed(0)}) - requireNonColdPhase enabled`,
+            metrics: pumpMetrics,
+          };
         } else {
           logger.info({
             mint: mint.substring(0, 12),
@@ -87,8 +93,8 @@ export class EntryEvaluator {
       }
 
       // Token is young but doesn't qualify for snipe - let it age a bit more
-      // Reduced from 60s to 10s to allow faster trading
-      if (tokenAgeSeconds < 10) {
+      // Reduced to 5s to allow faster trading while still filtering initial noise
+      if (tokenAgeSeconds < 5) {
         return {
           canEnter: false,
           source: 'none',
@@ -111,6 +117,23 @@ export class EntryEvaluator {
 
     // Token has sufficient price history → use pump detector
     const pumpMetrics = pumpDetector.analyzePump(mint);
+
+    // FIXED: Block cold phase in safe mode too when requireNonColdPhase is enabled
+    if ((config as any).requireNonColdPhase && pumpMetrics.phase === 'cold') {
+      logger.info({
+        mint: mint.substring(0, 12),
+        phase: pumpMetrics.phase,
+        heat: pumpMetrics.heat.toFixed(1),
+      }, '🚫 SAFE MODE BLOCKED: Cold phase - requireNonColdPhase enabled');
+
+      return {
+        canEnter: false,
+        source: 'pump_detector',
+        reason: `Cold phase blocked (heat=${pumpMetrics.heat.toFixed(0)}) - no momentum`,
+        metrics: pumpMetrics,
+      };
+    }
+
     const isGoodEntry = pumpDetector.isGoodEntry(pumpMetrics);
 
     logger.info({
@@ -183,6 +206,50 @@ export class EntryEvaluator {
         canEnter: false,
         reason: `Buy pressure ${(buyPressure * 100).toFixed(0)}% < ${(cfg.minBuyPressure * 100).toFixed(0)}%`
       };
+    }
+
+    // CRITICAL: Check if we're buying at the top or into a dump
+    // Analysis shows many rugs pump quickly then dump - don't chase the pump
+    const priceHistory = priceFeed.getPriceHistory(mint, 60);
+    if (priceHistory.length >= 3) {
+      const prices = priceHistory.map(p => p.priceSol);
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      const currentPrice = prices[prices.length - 1];
+
+      // ANTI-TOP: If price pumped >30% and we're near ATH, don't chase
+      const pumpFromLow = minPrice > 0 ? (currentPrice - minPrice) / minPrice : 0;
+      const nearHigh = maxPrice > 0 ? currentPrice >= maxPrice * 0.85 : false;
+
+      if (pumpFromLow > 0.30 && nearHigh) {
+        return {
+          canEnter: false,
+          reason: `PUMP TOP: Price up ${(pumpFromLow * 100).toFixed(0)}% near ATH - don't chase`
+        };
+      }
+
+      // ANTI-DUMP: If price dropped >15% from recent high, something is wrong
+      const dropFromHigh = maxPrice > 0 ? (maxPrice - currentPrice) / maxPrice : 0;
+      if (dropFromHigh > 0.15) {
+        return {
+          canEnter: false,
+          reason: `DUMPING: Price down ${(dropFromHigh * 100).toFixed(0)}% from high - avoid`
+        };
+      }
+
+      // ANTI-RUG: If price is crashing (last 3 prices all declining), don't buy
+      if (prices.length >= 3) {
+        const last3 = prices.slice(-3);
+        if (last3[2] < last3[1] && last3[1] < last3[0]) {
+          const recentDrop = last3[0] > 0 ? (last3[0] - last3[2]) / last3[0] : 0;
+          if (recentDrop > 0.10) {
+            return {
+              canEnter: false,
+              reason: `CRASHING: 3 consecutive red candles, down ${(recentDrop * 100).toFixed(0)}%`
+            };
+          }
+        }
+      }
     }
 
     // All snipe conditions met!

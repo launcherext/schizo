@@ -23,7 +23,7 @@ export const ChallengeCard: React.FC<ChallengeCardProps> = ({ stats }) => {
   return (
     <div className="card">
       <div className="challenge-card">
-        <div className="challenge-label">THE 1 → 100 CHALLENGE</div>
+        <div className="challenge-label">BLOX BOT CHALLENGE: 1 → 100</div>
         <div className="challenge-value animate-number">
           {displayMultiplier.toFixed(2)}<span>x</span>
         </div>
