@@ -75,7 +75,7 @@ export interface VelocityResult {
 
 export interface EntryResult {
   canEnter: boolean;
-  source: 'pump_detector' | 'velocity' | 'none';
+  source: 'pump_detector' | 'velocity' | 'snipe_mode' | 'none';
   reason: string;
   metrics?: PumpMetrics | VelocityMetrics;
 }

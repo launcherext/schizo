@@ -18,7 +18,7 @@ export const config = {
   initialCapitalSol: parseFloat(process.env.INITIAL_CAPITAL_SOL || '1.0'),
   maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.10'),  // 10% of capital max (allows small balances to trade)
   dailyLossLimit: parseFloat(process.env.DAILY_LOSS_LIMIT || '0.15'),
-  maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '3'),  // Default to 3
+  maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '2'),  // Reduced to 2 - focus on quality over quantity
 
   // Jito MEV Protection
   jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL || 'https://mainnet.block-engine.jito.wtf',
@@ -145,16 +145,27 @@ export const config = {
     maxMarketCapSol: 100,    // Allow slightly larger caps for tokens with real traction
   },
 
-  // Token Watchlist - AI-driven entry (TIGHTENED: wait for real data before entry)
+  // Token Watchlist - AI-driven entry (TWO TIERS: snipe fast OR wait for data)
   watchlist: {
-    minDataPoints: 30,       // INCREASED from 10: Need enough price history for meaningful analysis
-    minAgeSeconds: 300,      // INCREASED from 180: Wait 5 minutes to see real price action
-    minConfidence: 0.60,     // INCREASED from 0.58: Slightly higher bar
+    minDataPoints: 20,       // Reduced: 20 price points for safe mode
+    minAgeSeconds: 120,      // Reduced: 2 minutes for safe mode (snipe mode can be faster)
+    minConfidence: 0.60,     // Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
-    maxDrawdown: 0.15,       // TIGHTENED from 0.20: Don't buy tokens already dumping
-    minMarketCapSol: 30,     // INCREASED from 25: Slightly higher floor
-    minUniqueTraders: 8,     // INCREASED from 5: More real traders = less likely rug
-    requireUptrend: true,    // ENABLED: Only buy tokens with positive momentum
+    maxDrawdown: 0.15,       // Don't buy tokens already dumping
+    minMarketCapSol: 25,     // Floor for market cap
+    minUniqueTraders: 6,     // More real traders = less likely rug
+    requireUptrend: false,   // Disabled: allow dip buys (snipe mode has its own check)
+  },
+
+  // SNIPE MODE: Allow early entry with EXCEPTIONAL velocity (strict thresholds)
+  snipeMode: {
+    enabled: true,
+    maxAgeSeconds: 90,        // Only snipe tokens < 90 seconds old
+    minTxCount: 12,           // Need 12+ transactions (high activity)
+    minUniqueBuyers: 8,       // Need 8+ unique wallets (not wash trading)
+    minBuyPressure: 0.75,     // Need 75%+ buys (strong demand)
+    maxMarketCapSol: 60,      // Only snipe small caps (< 60 SOL mcap)
+    minBuyPressureStreak: 3,  // Need 3+ consecutive buy-heavy windows
   },
 
   // Momentum Override - bypass lower confidence if signals are strong

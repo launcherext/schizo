@@ -6,7 +6,8 @@
       "Bash(node -e:*)",
       "Bash(npm install:*)",
       "WebSearch",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(psql:*)"
     ]
   }
 }
