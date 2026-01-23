@@ -161,35 +161,23 @@ export class PumpDetector {
   ): PumpPhase {
     // Phase determination based on heat metric and supporting indicators
 
-    // Dumping: negative velocity with selling pressure
-    if (priceVelocity < -1 && buyPressure < 0.3) {
+    // Dumping: negative velocity with strong selling pressure
+    if (priceVelocity < -2 && buyPressure < 0.3) {
       return 'dumping';
     }
 
-    // CRITICAL: Detect "exhausted" - pump has already run too far
-    // If price is up 100%+ from low and heat is decaying, it's peaking
-    if (pumpFromLow > 1.0 && heatDecay > 0.2) {
+    // Peak: very high heat but clearly slowing
+    if (heat > 120 && priceVelocity < 0) {
       return 'peak';
     }
 
-    // Peak: very high heat but slowing, OR already pumped a lot
-    if (heat > 100 && priceVelocity < 0.5) {
-      return 'peak';
-    }
-
-    // CRITICAL: If price already up 150%+ from low, call it peak regardless of heat
-    // You missed the pump, don't chase
-    if (pumpFromLow > 1.5) {
-      return 'peak';
-    }
-
-    // Hot: high heat with positive momentum, but NOT if already pumped too much
-    if (heat >= 48 && heat <= 100 && buyPressure > 0.5 && pumpFromLow < 1.0) {
+    // Hot: high heat with momentum
+    if (heat >= 48 && buyPressure > 0.45) {
       return 'hot';
     }
 
-    // Building: moderate heat with buying, early in the pump
-    if (heat >= 33 && heat < 48 && buyPressure > 0.45 && pumpFromLow < 0.5) {
+    // Building: moderate heat with buying
+    if (heat >= 25 && buyPressure > 0.45) {
       return 'building';
     }
 
@@ -237,39 +225,9 @@ export class PumpDetector {
   }
 
   isGoodEntry(metrics: PumpMetrics): boolean {
-    // CRITICAL: Reject cold phase tokens - they have no momentum data
-    // Analysis showed 100% of trades entering in "cold" phase lost money
-    if ((config as any).requireNonColdPhase && metrics.phase === 'cold') {
-      logger.debug({ phase: metrics.phase, heat: metrics.heat }, 'Rejecting cold phase token');
-      return false;
-    }
-
-    // CRITICAL: Reject peak/dumping - you're too late
-    if (metrics.phase === 'peak' || metrics.phase === 'dumping') {
-      logger.info({
-        phase: metrics.phase,
-        pumpFromLow: metrics.pumpFromLow ? (metrics.pumpFromLow * 100).toFixed(0) + '%' : 'N/A',
-        heatDecay: metrics.heatDecay ? (metrics.heatDecay * 100).toFixed(0) + '%' : 'N/A',
-      }, 'Rejecting - pump already peaked or dumping');
-      return false;
-    }
-
-    // CRITICAL: Reject if already pumped too much (even if phase says "hot")
-    // Buying after 80%+ pump = chasing, usually results in loss
-    if (metrics.pumpFromLow && metrics.pumpFromLow > 0.8) {
-      logger.info({
-        pumpFromLow: (metrics.pumpFromLow * 100).toFixed(0) + '%',
-        phase: metrics.phase,
-      }, 'Rejecting - price already up 80%+ from low, too late to enter');
-      return false;
-    }
-
-    // CRITICAL: Reject if momentum is decaying significantly
-    if (metrics.heatDecay && metrics.heatDecay > 0.3) {
-      logger.info({
-        heatDecay: (metrics.heatDecay * 100).toFixed(0) + '%',
-        phase: metrics.phase,
-      }, 'Rejecting - momentum fading (heat down 30%+ from peak)');
+    // Reject clearly dumping tokens
+    if (metrics.phase === 'dumping') {
+      logger.info({ phase: metrics.phase }, 'Rejecting - clearly dumping');
       return false;
     }
 
@@ -284,7 +242,12 @@ export class PumpDetector {
       return true;
     }
 
-    if (metrics.phase === 'hot' && metrics.heat < 60 && metrics.confidence > 0.5) {
+    if (metrics.phase === 'hot' && metrics.heat < 80 && metrics.confidence > 0.4) {
+      return true;
+    }
+
+    // Allow entry if buy pressure is strong regardless of phase
+    if (metrics.buyPressure > 0.65 && metrics.heat > 20) {
       return true;
     }
 
