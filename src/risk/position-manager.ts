@@ -240,6 +240,40 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
+    // CRITICAL FIX: Flash crash detection - 3+ consecutive price drops = immediate exit
+    // Analysis showed percentage-based stop losses miss flash crashes
+    const recentPrices = priceFeed.getPriceHistory(position.mint, 10);
+    if (recentPrices.length >= 4) {
+      let consecutiveDrops = 0;
+      // Check from newest to oldest
+      for (let i = recentPrices.length - 1; i > 0; i--) {
+        if (recentPrices[i].priceSol < recentPrices[i - 1].priceSol) {
+          consecutiveDrops++;
+        } else {
+          break; // Stop at first non-drop
+        }
+      }
+
+      if (consecutiveDrops >= 3) {
+        // Calculate the total drop across consecutive ticks
+        const startPrice = recentPrices[recentPrices.length - 1 - consecutiveDrops].priceSol;
+        const endPrice = recentPrices[recentPrices.length - 1].priceSol;
+        const dropPercent = (startPrice - endPrice) / startPrice;
+
+        logger.error({
+          positionId: position.id,
+          mint: position.mint.substring(0, 15),
+          consecutiveDrops,
+          dropPercent: (dropPercent * 100).toFixed(1) + '%',
+          startPrice,
+          endPrice,
+        }, 'FLASH CRASH DETECTED: 3+ consecutive drops - emergency exit');
+
+        await this.closePosition(position.id, 'stop_loss', true); // High slippage for emergency
+        return;
+      }
+    }
+
     // GUARD: Skip if position has no tokens left
     if (position.amount <= 0) {
       logger.warn({

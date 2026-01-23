@@ -60,7 +60,12 @@ export const config = {
   },
 
   // Grace period: don't trigger stop loss for first X seconds
-  stopLossGracePeriodSeconds: 10,  // REDUCED from 15 - faster reaction to drops
+  // CRITICAL FIX: Reduced from 10 to 2 - analysis showed 10 seconds allows too much damage
+  stopLossGracePeriodSeconds: 2,
+
+  // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
+  // Analysis showed trades under 3 seconds are catastrophic losers (-77% to -87%)
+  minTokenAgeSeconds: 15,  // Let rugs reveal themselves first
 
   // NEW: Rapid drop detection - exit immediately if price crashes
   rapidDropExit: {
@@ -166,6 +171,16 @@ export const config = {
     minBuyPressure: 0.75,     // Need 75%+ buys (strong demand)
     maxMarketCapSol: 60,      // Only snipe small caps (< 60 SOL mcap)
     minBuyPressureStreak: 3,  // Need 3+ consecutive buy-heavy windows
+  },
+
+  // ESTABLISHED MODE: For DexScreener trending & whale copies (already have proven data)
+  establishedMode: {
+    enabled: true,
+    minBuyPressure: 0.60,     // 60%+ buy pressure (from external source)
+    minPriceChange5m: 2,      // At least 2% up in last 5 min (showing momentum)
+    maxPriceChange5m: 40,     // Not already mooned (< 40%)
+    minLiquidityUsd: 5000,    // Minimum liquidity
+    maxMarketCapUsd: 5_000_000, // Under $5M mcap (still has room)
   },
 
   // Momentum Override - bypass lower confidence if signals are strong

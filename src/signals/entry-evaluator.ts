@@ -35,25 +35,55 @@ export class EntryEvaluator {
       marketCapSol: marketCapSol?.toFixed(2),
     }, 'Evaluating entry (two-tier)');
 
+    // CRITICAL FIX: Minimum token age for ALL entries
+    // Analysis showed trades under 3 seconds are catastrophic losers (-77% to -87%)
+    // Let rugs reveal themselves before entering
+    const minTokenAge = (config as any).minTokenAgeSeconds || 15;
+    if (tokenAgeSeconds < minTokenAge) {
+      return {
+        canEnter: false,
+        source: 'none',
+        reason: `Token too young (${tokenAgeSeconds.toFixed(0)}s < ${minTokenAge}s minimum) - letting rugs reveal themselves`,
+        metrics: undefined,
+      };
+    }
+
     // ========== TIER 1: SNIPE MODE ==========
     // Young tokens with exceptional velocity can enter fast
     if (snipeConfig.enabled && tokenAgeSeconds <= snipeConfig.maxAgeSeconds) {
       const snipeResult = this.evaluateSnipeMode(mint, velocityMetrics, marketCapSol, tokenData);
 
       if (snipeResult.canEnter) {
-        logger.info({
-          mint: mint.substring(0, 12),
-          source: 'snipe_mode',
-          tokenAgeSeconds: tokenAgeSeconds.toFixed(0),
-          ...snipeResult.details,
-        }, '🎯 SNIPE MODE: Exceptional velocity detected - fast entry');
+        // CRITICAL FIX: Check pump phase even in snipe mode
+        // Analysis showed 100% of trades entered in "cold" phase because snipe mode bypassed this check
+        const pumpMetrics = pumpDetector.analyzePump(mint);
 
-        return {
-          canEnter: true,
-          source: 'snipe_mode',
-          reason: snipeResult.reason,
-          metrics: velocityMetrics || undefined,
-        };
+        if ((config as any).requireNonColdPhase && pumpMetrics.phase === 'cold') {
+          logger.info({
+            mint: mint.substring(0, 12),
+            phase: pumpMetrics.phase,
+            heat: pumpMetrics.heat.toFixed(1),
+            velocityOK: true,
+          }, '🚫 SNIPE BLOCKED: Cold phase despite good velocity - waiting for momentum');
+
+          // Fall through to safe mode or wait for better signals
+        } else {
+          logger.info({
+            mint: mint.substring(0, 12),
+            source: 'snipe_mode',
+            tokenAgeSeconds: tokenAgeSeconds.toFixed(0),
+            phase: pumpMetrics.phase,
+            heat: pumpMetrics.heat.toFixed(1),
+            ...snipeResult.details,
+          }, '🎯 SNIPE MODE: Exceptional velocity + non-cold phase - fast entry');
+
+          return {
+            canEnter: true,
+            source: 'snipe_mode',
+            reason: snipeResult.reason,
+            metrics: velocityMetrics || undefined,
+          };
+        }
       }
 
       // Token is young but doesn't qualify for snipe - let it age

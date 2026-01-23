@@ -39,6 +39,8 @@ class TradingBot {
   private processedMints: Set<string> = new Set();
   private bondingCurveCache: Map<string, BondingCurveData> = new Map();
   private graduatedTokens: Set<string> = new Set(); // Track tokens that graduated to DEX
+  private trendingTokenCache: Map<string, TrendingTokenData> = new Map(); // Cache for DexScreener trending data
+  private whaleTokenCache: Map<string, { wallet: string; amountSol: number; timestamp: number }> = new Map(); // Cache for whale copy data
   private rejectionStats = {
     quickSafety: 0,
     liquidity: 0,
@@ -222,6 +224,13 @@ class TradingBot {
 
       // Copy whale buys if above threshold
       if (activity.action === 'buy' && activity.amountSol >= config.whaleMinBuySol) {
+        // Store whale data for entry evaluator
+        this.whaleTokenCache.set(activity.mint, {
+          wallet: activity.wallet,
+          amountSol: activity.amountSol,
+          timestamp: Date.now(),
+        });
+
         this.tokenQueue.push({
           mint: activity.mint,
           signature: '',
@@ -241,8 +250,12 @@ class TradingBot {
         mint: data.mint.substring(0, 15),
         symbol: data.symbol,
         buyPressure: (data.buyPressure * 100).toFixed(0) + '%',
+        priceChange5m: data.priceChange5m.toFixed(1) + '%',
         volume24h: data.volume24h.toFixed(0),
       }, 'Trending token from DexScreener');
+
+      // Store trending data for entry evaluator
+      this.trendingTokenCache.set(data.mint, data);
 
       this.tokenQueue.push({
         mint: data.mint,
@@ -641,8 +654,79 @@ class TradingBot {
     priceFeed.addToWatchList(mint); // Start tracking
     await new Promise((r) => setTimeout(r, 2000)); // Reduced delay for faster entry
 
-    // Use unified entry evaluator
-    const entryResult = entryEvaluator.evaluate(mint, bondingCurveData?.marketCapSol);
+    // Check if this is an ESTABLISHED token (DexScreener trending or whale copy)
+    // These bypass normal entry evaluation since they already have proven data
+    const trendingData = this.trendingTokenCache.get(mint);
+    const whaleData = this.whaleTokenCache.get(mint);
+    const establishedConfig = (config as any).establishedMode || {};
+    let entryResult: { canEnter: boolean; source: string; reason: string; metrics?: any };
+
+    if (establishedConfig.enabled && trendingData) {
+      // ESTABLISHED MODE: DexScreener trending token
+      const meetsEstablished =
+        trendingData.buyPressure >= establishedConfig.minBuyPressure &&
+        trendingData.priceChange5m >= establishedConfig.minPriceChange5m &&
+        trendingData.priceChange5m <= establishedConfig.maxPriceChange5m &&
+        trendingData.liquidityUsd >= establishedConfig.minLiquidityUsd &&
+        trendingData.marketCapUsd <= establishedConfig.maxMarketCapUsd;
+
+      if (meetsEstablished) {
+        logger.info({
+          mint,
+          source: 'established_trending',
+          symbol: trendingData.symbol,
+          buyPressure: (trendingData.buyPressure * 100).toFixed(0) + '%',
+          priceChange5m: trendingData.priceChange5m.toFixed(1) + '%',
+          liquidityUsd: trendingData.liquidityUsd.toFixed(0),
+          marketCapUsd: trendingData.marketCapUsd.toFixed(0),
+        }, '📈 ESTABLISHED MODE: DexScreener trending token - bypassing normal entry');
+
+        entryResult = {
+          canEnter: true,
+          source: 'established_trending',
+          reason: `TRENDING: ${trendingData.symbol} +${trendingData.priceChange5m.toFixed(1)}%, ${(trendingData.buyPressure * 100).toFixed(0)}% buys`,
+          metrics: trendingData,
+        };
+      } else {
+        entryResult = {
+          canEnter: false,
+          source: 'established_trending',
+          reason: `Trending but failed: bp=${(trendingData.buyPressure * 100).toFixed(0)}%, chg=${trendingData.priceChange5m.toFixed(1)}%`,
+        };
+      }
+      // Clean up cache
+      this.trendingTokenCache.delete(mint);
+    } else if (establishedConfig.enabled && whaleData) {
+      // ESTABLISHED MODE: Whale copy - trust the whale's judgment
+      const isRecent = Date.now() - whaleData.timestamp < 5 * 60 * 1000; // Within 5 minutes
+
+      if (isRecent) {
+        logger.info({
+          mint,
+          source: 'established_whale',
+          wallet: whaleData.wallet.substring(0, 12),
+          amountSol: whaleData.amountSol.toFixed(2),
+        }, '🐋 ESTABLISHED MODE: Whale copy - bypassing normal entry');
+
+        entryResult = {
+          canEnter: true,
+          source: 'established_whale',
+          reason: `WHALE: ${whaleData.wallet.substring(0, 8)}... bought ${whaleData.amountSol.toFixed(2)} SOL`,
+          metrics: whaleData,
+        };
+      } else {
+        entryResult = {
+          canEnter: false,
+          source: 'established_whale',
+          reason: 'Whale data too old',
+        };
+      }
+      // Clean up cache
+      this.whaleTokenCache.delete(mint);
+    } else {
+      // NORMAL MODE: Use unified entry evaluator
+      entryResult = entryEvaluator.evaluate(mint, bondingCurveData?.marketCapSol);
+    }
 
     // Also get pump metrics for logging/display regardless of entry source
     const pumpMetrics = pumpDetector.analyzePump(mint);
@@ -740,6 +824,26 @@ class TradingBot {
       }, 'REJECTED: Position size below minimum (would be destroyed by slippage)');
       priceFeed.removeFromWatchList(mint);
       return;
+    }
+
+    // CRITICAL FIX: Pre-trade price drift verification
+    // Analysis showed the bot was buying into immediate crashes
+    // Verify price hasn't dropped significantly since analysis
+    const latestPrice = priceFeed.getPrice(mint)?.priceSol;
+    if (latestPrice && priceData?.priceSol) {
+      const priceDrift = (latestPrice - priceData.priceSol) / priceData.priceSol;
+      if (priceDrift < -0.15) { // Price dropped >15% since analysis
+        this.rejectionStats.passed--; // Undo the passed increment
+        logger.warn({
+          mint,
+          analysisPrice: priceData.priceSol,
+          currentPrice: latestPrice,
+          drift: (priceDrift * 100).toFixed(1) + '%',
+        }, 'ABORTED: Price crashed >15% before execution - avoiding immediate loss');
+        priceFeed.removeFromWatchList(mint);
+        velocityTracker.clearToken(mint);
+        return;
+      }
     }
 
     // Execute trade
