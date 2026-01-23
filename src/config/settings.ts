@@ -65,8 +65,8 @@ export const config = {
   stopLossGracePeriodSeconds: 2,
 
   // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
-  // Wait for initial pump/dump to settle - buying at peak = instant loss
-  minTokenAgeSeconds: 15,  // Wait 15 seconds for initial volatility to settle
+  // Very short minimum to allow fast sniping - rugs filtered by other checks
+  minTokenAgeSeconds: 3,  // 3 seconds minimum for fast sniping
 
   // NEW: Rapid drop detection - exit immediately if price crashes
   // UPDATED: More lenient for snipe tokens - they're volatile early

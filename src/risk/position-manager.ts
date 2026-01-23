@@ -476,11 +476,13 @@ export class PositionManager extends EventEmitter {
     const lastExhaustionSell = (position as any).lastExhaustionSell || 0;
     const canTriggerExhaustion = Date.now() - lastExhaustionSell > exhaustionCooldownMs;
 
-    if (profitPercent > 0.50 && position.amount > 0 && canTriggerExhaustion) {
-      const nearHigh = currentPrice >= position.highestPrice * 0.90; // Within 10% of high
-      const heatFading = pumpMetrics.heatDecay && pumpMetrics.heatDecay > 0.25;
-      const buyPressureFading = pumpMetrics.buyPressureDecay && pumpMetrics.buyPressureDecay > 0.20;
-      const momentumWeakening = momentum.strength === 'weak' || momentum.strength === 'unknown';
+    // WIDENED: Only trigger exhaustion at higher profit and more severe decay
+    // Meme coins consolidate with 30-40% dips in momentum - that's normal
+    if (profitPercent > 0.75 && position.amount > 0 && canTriggerExhaustion) {
+      const nearHigh = currentPrice >= position.highestPrice * 0.85; // Within 15% of high (was 10%)
+      const heatFading = pumpMetrics.heatDecay && pumpMetrics.heatDecay > 0.50; // 50% decay (was 25%)
+      const buyPressureFading = pumpMetrics.buyPressureDecay && pumpMetrics.buyPressureDecay > 0.40; // 40% decay (was 20%)
+      const momentumWeakening = momentum.strength === 'weak'; // Only weak, not unknown
 
       // If we're in good profit, near the high, but momentum is fading - take some profit
       if (nearHigh && (heatFading || buyPressureFading || momentumWeakening)) {
