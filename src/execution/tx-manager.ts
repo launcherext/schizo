@@ -65,12 +65,14 @@ export class TransactionManager extends EventEmitter {
       slippageBps?: number;
       useJito?: boolean;
       maxRetries?: number;
+      poolType?: 'active' | 'high_risk';
     } = {}
   ): Promise<SwapResult> {
     const {
       slippageBps = 100,
       useJito = config.enableJito && amountSol > 0.1,
       maxRetries = 3,
+      poolType,
     } = options;
 
     const txId = `buy_${mint}_${Date.now()}`;
@@ -84,6 +86,7 @@ export class TransactionManager extends EventEmitter {
       status: 'pending',
       retries: 0,
       createdAt: new Date(),
+      poolType,
     };
 
     this.pendingTxs.set(txId, pendingTx);
@@ -128,6 +131,14 @@ export class TransactionManager extends EventEmitter {
         lastError = result.error;
         pendingTx.retries++;
 
+        // Check for error 6005 (BondingCurveComplete) - token graduated to Raydium
+        if (lastError?.includes('6005') || lastError?.includes('BondingCurveComplete')) {
+          logger.info({ mint }, 'Token has graduated from bonding curve - switching to Jupiter');
+          this.markAsGraduated(mint);
+          // Don't wait, immediately retry via Jupiter
+          continue;
+        }
+
         logger.warn({
           txId,
           attempt: attempt + 1,
@@ -139,6 +150,13 @@ export class TransactionManager extends EventEmitter {
       } catch (error: any) {
         lastError = error.message;
         pendingTx.retries++;
+
+        // Check for error 6005 in exception as well
+        if (lastError?.includes('6005') || lastError?.includes('BondingCurveComplete')) {
+          logger.info({ mint }, 'Token has graduated from bonding curve - switching to Jupiter');
+          this.markAsGraduated(mint);
+          continue;
+        }
       }
     }
 

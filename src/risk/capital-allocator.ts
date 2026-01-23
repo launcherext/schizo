@@ -9,6 +9,7 @@ const logger = createChildLogger('capital-allocator');
 export class CapitalAllocator {
   private allocation: CapitalAllocation;
   private limits: RiskLimits;
+  private pendingByPool: Map<string, number> = new Map();
 
   constructor() {
     const totalCapital = config.initialCapitalSol;
@@ -30,6 +31,42 @@ export class CapitalAllocator {
       maxDrawdownLimit: 0.30, // 30% max drawdown
       minPositionSizeSol: 0.001,
     };
+  }
+
+  async start(): Promise<void> {
+    this.setupEventHandlers();
+    await this.syncWithWallet();
+    logger.info('Capital allocator started');
+  }
+
+  private setupEventHandlers(): void {
+    txManager.on('txPending', (tx) => {
+      if (tx.type === 'buy' && tx.poolType) {
+        const current = this.pendingByPool.get(tx.poolType) || 0;
+        this.pendingByPool.set(tx.poolType, current + tx.inputAmount);
+        logger.info({ 
+          pool: tx.poolType, 
+          amount: tx.inputAmount,
+          newPending: current + tx.inputAmount 
+        }, 'Capital reserved for pending tx');
+      }
+    });
+
+    const releasePending = (tx: any) => {
+      if (tx.type === 'buy' && tx.poolType) {
+        const current = this.pendingByPool.get(tx.poolType) || 0;
+        const newPending = Math.max(0, current - tx.inputAmount);
+        this.pendingByPool.set(tx.poolType, newPending);
+        logger.info({ 
+          pool: tx.poolType, 
+          amount: tx.inputAmount,
+          remainingPending: newPending
+        }, 'Pending capital released');
+      }
+    };
+
+    txManager.on('txConfirmed', releasePending);
+    txManager.on('txFailed', releasePending);
   }
 
   async syncWithWallet(): Promise<void> {
@@ -101,10 +138,14 @@ export class CapitalAllocator {
       poolType === 'active'
         ? this.allocation.availableActive
         : this.allocation.availableHighRisk;
+    
+    // Deduct pending transactions
+    const pending = this.pendingByPool.get(poolType) || 0;
+    const effectiveAvailable = Math.max(0, available - pending);
 
-    if (requestedSizeSol > available) {
-      adjustedSize = available;
-      warnings.push(`Size reduced to available: ${available.toFixed(4)} SOL`);
+    if (requestedSizeSol > effectiveAvailable) {
+      adjustedSize = effectiveAvailable;
+      warnings.push(`Size reduced from ${available.toFixed(4)} to ${effectiveAvailable.toFixed(4)} (pending: ${pending.toFixed(4)})`);
     }
 
     // Check max position size

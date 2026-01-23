@@ -68,6 +68,7 @@ export interface PendingTransaction {
   createdAt: Date;
   confirmedAt?: Date;
   error?: string;
+  poolType?: 'active' | 'high_risk';
 }
 
 export interface ExecutionMetrics {

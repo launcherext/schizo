@@ -75,7 +75,7 @@ class TradingBot {
       await regimeDetector.start();
 
       // Risk layer
-      await capitalAllocator.syncWithWallet();
+      await capitalAllocator.start();
       await positionManager.start();
       await drawdownGuard.start();
       await drawdownGuard.resetAll();  // Clear old state for fresh testing - must be AFTER start
@@ -988,6 +988,7 @@ class TradingBot {
     const result = await txManager.executeBuy(mint, sizeSol, {
       slippageBps: config.defaultSlippageBps,  // 15% slippage
       maxRetries: 3,
+      poolType,
     });
 
     if (!result.success) {
