@@ -125,34 +125,34 @@ export const config = {
   whaleMinBuySol: parseFloat(process.env.WHALE_MIN_BUY_SOL || '5'), // 5 SOL min whale buy to copy
 
   // Velocity-based entry for new tokens (no price history)
-  // Tightened thresholds to avoid rugs and garbage tokens
+  // Balanced thresholds - not too strict (no trades) or too loose (rugs)
   velocityEntry: {
     enabled: false,          // DISABLED: AI decides entry, not velocity
-    minTxCount: 15,          // Increased: need real activity, not just a few buys
-    minUniqueBuyers: 7,      // Increased: need 7+ unique wallets to filter wash trading
-    minBuyPressure: 0.60,    // 60% buys - higher threshold for quality
+    minTxCount: 8,           // LOWERED: 8 txs in 60s window is achievable
+    minUniqueBuyers: 4,      // LOWERED: 4 unique wallets filters wash trading
+    minBuyPressure: 0.55,    // LOWERED: 55% buys still bullish, but more achievable
     maxMarketCapSol: 100,    // Allow slightly larger caps for tokens with real traction
   },
 
-  // Token Watchlist - AI-driven entry (TIGHTENED to reduce losses)
+  // Token Watchlist - AI-driven entry (BALANCED: trade more but stay safe)
   watchlist: {
-    minDataPoints: 15,       // Need 15+ price updates before AI can analyze
-    minAgeSeconds: 300,      // 5 MINUTES: token must survive initial pump/dump cycle
-    minConfidence: 0.65,     // RAISED: Require stronger AI confidence
-    maxConfidence: 0.80,     // RAISED: Higher bar for older tokens
-    maxDrawdown: 0.15,       // TIGHTENED: Hard reject if crashed >15% from peak (avoid dead tokens)
-    minMarketCapSol: 50,     // NEW: Minimum 50 SOL market cap (skip ultra micro tokens)
-    minUniqueTraders: 10,    // NEW: Minimum 10 unique traders (real activity filter)
-    requireUptrend: true,    // NEW: Price must be above entry compared to 1 minute ago
+    minDataPoints: 10,       // LOWERED: 10 price updates enough to analyze
+    minAgeSeconds: 180,      // LOWERED: 3 minutes to see initial pattern
+    minConfidence: 0.58,     // LOWERED: Allow more trades with moderate confidence
+    maxConfidence: 0.80,     // Higher bar for older tokens
+    maxDrawdown: 0.20,       // RELAXED: Allow 20% drawdown (some rebound potential)
+    minMarketCapSol: 25,     // LOWERED: 25 SOL min market cap
+    minUniqueTraders: 5,     // LOWERED: 5 unique traders is achievable
+    requireUptrend: false,   // DISABLED: Allow dip buys
   },
 
-  // Momentum Override - bypass lower confidence if signals are VERY strong
+  // Momentum Override - bypass lower confidence if signals are strong
   momentumOverride: {
     enabled: true,
-    minBuyPressure: 0.80,           // RAISED: 80%+ buys required
-    minVolumeAcceleration: 1.5,     // RAISED: Volume 50%+ higher than previous window
-    minUniqueTraderGrowth: 5,       // RAISED: At least 5 new unique traders
-    confidenceFloor: 0.55,          // RAISED: Even with momentum, need 55% confidence
+    minBuyPressure: 0.70,           // LOWERED: 70%+ buys (more achievable)
+    minVolumeAcceleration: 1.3,     // LOWERED: 30%+ volume acceleration
+    minUniqueTraderGrowth: 3,       // LOWERED: 3 new unique traders
+    confidenceFloor: 0.50,          // LOWERED: Allow momentum to override at 50%
   },
 
   // Dev Sold Tracking - percentage-based instead of binary
