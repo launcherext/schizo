@@ -37,6 +37,10 @@ export interface PumpMetrics {
   priceVelocity: number;      // Rate of price change
   buyPressure: number;        // Buy vs sell imbalance
   confidence: number;         // 0-1 confidence in assessment
+  // NEW: Pump position and decay metrics
+  pumpFromLow?: number;       // How much price has pumped from lowest seen (0 = at low, 1 = doubled)
+  heatDecay?: number;         // How much heat has dropped from peak (0 = at peak, 1 = fully decayed)
+  buyPressureDecay?: number;  // How much buy pressure has dropped from peak
 }
 
 export interface TokenSignal {

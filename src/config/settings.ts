@@ -48,16 +48,15 @@ export const config = {
 
   stopLossPercent: 0.12,      // -12% stop loss for established tokens
 
-  // Age-based stop loss for new tokens (wider stop during initial volatility)
-  // UPDATED: Even wider stops for snipe mode tokens - they're very volatile
+  // Age-based stop loss for new tokens - tightened back up
   ageBasedStopLoss: {
     enabled: true,
-    // For tokens < 60 seconds old: use widest stop
+    // For tokens < 60 seconds old: wider stop but not too wide
     newTokenThresholdSeconds: 60,
-    newTokenStopLossPercent: 0.35,  // -35% for brand new tokens (was 25% - too tight)
+    newTokenStopLossPercent: 0.20,  // -20% for brand new tokens (tightened from 35%)
     // For tokens 60-180 seconds: gradual tightening
     youngTokenThresholdSeconds: 180,
-    youngTokenStopLossPercent: 0.25, // -25% for young tokens (was 18%)
+    youngTokenStopLossPercent: 0.15, // -15% for young tokens (tightened from 25%)
     // After 180 seconds: use standard stop loss (0.12)
   },
 
@@ -66,8 +65,8 @@ export const config = {
   stopLossGracePeriodSeconds: 2,
 
   // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
-  // Analysis showed trades under 3 seconds are catastrophic losers (-77% to -87%)
-  minTokenAgeSeconds: 3,  // Reduced from 15 to allow faster sniping
+  // Wait for initial pump/dump to settle - buying at peak = instant loss
+  minTokenAgeSeconds: 15,  // Wait 15 seconds for initial volatility to settle
 
   // NEW: Rapid drop detection - exit immediately if price crashes
   // UPDATED: More lenient for snipe tokens - they're volatile early
@@ -78,21 +77,22 @@ export const config = {
     useHighSlippage: true,   // Use stopLossSlippageBps for panic sell
   },
 
-  // NEW Take Profit Strategy: recover initial at +100%, then scale out
-  // UPDATED: More lenient for volatile snipe tokens - let winners run longer
+  // Take Profit Strategy - LET WINNERS RUN
+  // These tokens can pump 3-10x, don't sell too early
   takeProfitStrategy: {
     // At +100% gain (2x), sell enough to recover initial investment
     initialRecovery: {
-      triggerPercent: 1.00,  // +100% gain (was 50% - too early for snipe tokens)
+      triggerPercent: 1.00,  // +100% gain - wait for 2x before taking profit
       action: 'recover_initial' as const,
     },
-    // After initial recovery, sell 20% of remainder every +100%
+    // After initial recovery, sell 25% of remainder every +100%
     scaledExits: {
-      intervalPercent: 1.00,  // Every +100% gain (was 50% - too aggressive)
-      sellPercent: 0.20,      // Sell 20% of remaining
+      intervalPercent: 1.00,  // Every +100% gain (was 75% - too aggressive)
+      sellPercent: 0.25,      // Sell 25% of remaining
     },
-    // Trailing stop on final portion - wider for volatile tokens
-    trailingStopPercent: 0.25,  // 25% trailing stop (was 15% - too tight)
+    // Trailing stop - WIDER to survive consolidation
+    // Meme coins can dip 25-35% during healthy pumps
+    trailingStopPercent: 0.30,  // 30% trailing stop (was 18% - way too tight)
   },
 
   // LEGACY: Keep for backwards compatibility but unused
@@ -100,7 +100,7 @@ export const config = {
     { multiplier: 2.0, sellPercent: 0.25 },
     { multiplier: 3.0, sellPercent: 0.25 },
   ],
-  trailingStopPercent: 0.25,  // 25% trailing stop (widened for volatile snipe tokens)
+  trailingStopPercent: 0.30,  // 30% trailing stop - wide enough for meme coin volatility
 
   // AI Parameters
   ddqnConfig: {
@@ -166,15 +166,15 @@ export const config = {
     requireUptrend: false,   // Disabled: allow dip buys (snipe mode has its own check)
   },
 
-  // SNIPE MODE: Allow early entry with good velocity (loosened for more trades)
+  // SNIPE MODE: Quality entries only - wait for confirmation
   snipeMode: {
     enabled: true,
-    maxAgeSeconds: 90,        // Only snipe tokens < 90 seconds old
-    minTxCount: 8,            // LOWERED: 8+ transactions (was 12)
-    minUniqueBuyers: 5,       // LOWERED: 5+ unique wallets (was 8)
-    minBuyPressure: 0.65,     // LOWERED: 65%+ buys (was 75%)
-    maxMarketCapSol: 80,      // RAISED: Allow up to 80 SOL mcap (was 60)
-    minBuyPressureStreak: 2,  // LOWERED: 2+ consecutive buy-heavy windows (was 3)
+    maxAgeSeconds: 45,        // Only snipe tokens 15-45 seconds old (entry window)
+    minTxCount: 15,           // 15+ transactions (need solid activity)
+    minUniqueBuyers: 10,      // 10+ unique wallets (real demand)
+    minBuyPressure: 0.70,     // 70%+ buys (strong but achievable)
+    maxMarketCapSol: 40,      // Under 40 SOL mcap (still early)
+    minBuyPressureStreak: 3,  // 3+ consecutive buy-heavy windows
   },
 
   // ESTABLISHED MODE: For DexScreener trending & whale copies (already have proven data)

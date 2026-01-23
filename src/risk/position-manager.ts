@@ -6,6 +6,7 @@ import { txManager } from '../execution/tx-manager';
 import { repository } from '../db/repository';
 import { Position, RiskCheckResult } from './types';
 import { velocityTracker } from '../signals/velocity-tracker';
+import { pumpDetector } from '../signals/pump-detector';
 
 // Estimated fee per transaction in SOL (Jupiter swap fee + priority fee)
 const ESTIMATED_TX_FEE_SOL = 0.001;
@@ -242,12 +243,10 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // Flash crash detection - BUT disabled for first 90 seconds of snipe positions
-    // Analysis showed this was triggering on normal early volatility and causing early exits
+    // Flash crash detection - disabled for first 90 seconds (snipe tokens too volatile)
     const recentPrices = priceFeed.getPriceHistory(position.mint, 10);
 
-    // ONLY check flash crash for positions older than 90 seconds
-    // Young snipe tokens are too volatile - normal swings look like crashes
+    // Only check flash crash for positions older than 90 seconds
     if (positionAgeSeconds > 90 && recentPrices.length >= 4) {
       let consecutiveDrops = 0;
       // Check from newest to oldest
@@ -315,6 +314,24 @@ export class PositionManager extends EventEmitter {
       }
     }
 
+    // 0.5 PUMP EXIT CHECK - Exit early if momentum is fading
+    // CONSERVATIVE: Only triggers if clearly dumping or if in profit + severe decay
+    // This prevents panic selling during consolidation before continuation pumps
+    const pumpMetrics = pumpDetector.analyzePump(position.mint);
+    if (pumpDetector.shouldExit(pumpMetrics, profitPercent)) {
+      logger.warn({
+        positionId: position.id,
+        mint: position.mint.substring(0, 15),
+        phase: pumpMetrics.phase,
+        heatDecay: pumpMetrics.heatDecay ? (pumpMetrics.heatDecay * 100).toFixed(0) + '%' : 'N/A',
+        buyPressure: (pumpMetrics.buyPressure * 100).toFixed(0) + '%',
+        profitPercent: (profitPercent * 100).toFixed(2) + '%',
+      }, 'PUMP EXIT: Clear dump signal - exiting');
+
+      await this.closePosition(position.id, 'ai_signal', true);
+      return;
+    }
+
     // 1. STOP LOSS CHECK (age-based for new tokens)
     // Grace period: don't trigger stop loss for first X seconds
     if (positionAgeSeconds < config.stopLossGracePeriodSeconds) {
@@ -367,29 +384,30 @@ export class PositionManager extends EventEmitter {
     const tpStrategy = config.takeProfitStrategy;
     const momentum = velocityTracker.getMomentumStrength(position.mint);
 
-    // Dynamic TP thresholds based on momentum:
-    // STRONG: Hold longer (+150%), wider trailing (30%)
-    // MEDIUM: Normal (+100%), normal trailing (25%)
-    // WEAK: Early TP (+50%), sell 50%, tighter trailing (20%)
+    // Dynamic TP thresholds based on momentum - LET WINNERS RUN
+    // Meme coins can 3-10x, don't sell too early or get stopped out on normal volatility
+    // STRONG: Hold longest, widest trailing (35%) - ride the wave
+    // MEDIUM: Normal from config (30%)
+    // WEAK: Slightly earlier TP but still reasonable trailing (25%)
     let dynamicTpTrigger: number;
     let dynamicTrailingPercent: number;
     let dynamicSellPercent: number;
 
     switch (momentum.strength) {
       case 'strong':
-        dynamicTpTrigger = 1.50;        // +150% for strong momentum
-        dynamicTrailingPercent = 0.30;  // 30% trailing (wider)
-        dynamicSellPercent = 0.33;      // Sell 33% (keep more riding)
+        dynamicTpTrigger = 1.50;        // +150% for strong momentum - let it run
+        dynamicTrailingPercent = 0.35;  // 35% trailing - wide for volatile pumps
+        dynamicSellPercent = 0.25;      // Sell only 25% - keep more for the ride
         break;
       case 'weak':
-        dynamicTpTrigger = 0.50;        // +50% for weak momentum (take profit early!)
-        dynamicTrailingPercent = 0.20;  // 20% trailing (tighter)
-        dynamicSellPercent = 0.50;      // Sell 50% (lock in more profit)
+        dynamicTpTrigger = 0.75;        // +75% for weak momentum (was 40% - too early)
+        dynamicTrailingPercent = 0.25;  // 25% trailing (was 15% - way too tight)
+        dynamicSellPercent = 0.40;      // Sell 40%
         break;
       default: // 'medium' or 'unknown'
-        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +100% default
-        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 25% default
-        dynamicSellPercent = 0.40;      // Sell 40%
+        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +100% from config
+        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 30% from config
+        dynamicSellPercent = 0.33;      // Sell 33%
     }
 
     // INITIAL RECOVERY with dynamic threshold
@@ -450,7 +468,46 @@ export class PositionManager extends EventEmitter {
       }
     }
 
-    // 5. Update trailing stop on new highs (after initial recovery) - also momentum-aware
+    // 5. PUMP EXHAUSTION DETECTION - Take profit when pump is slowing
+    // Even if price is still high, if momentum is fading, start locking in gains
+    // This catches the top before the dump
+    // Only trigger once per 30 seconds to avoid over-selling
+    const exhaustionCooldownMs = 30000;
+    const lastExhaustionSell = (position as any).lastExhaustionSell || 0;
+    const canTriggerExhaustion = Date.now() - lastExhaustionSell > exhaustionCooldownMs;
+
+    if (profitPercent > 0.50 && position.amount > 0 && canTriggerExhaustion) {
+      const nearHigh = currentPrice >= position.highestPrice * 0.90; // Within 10% of high
+      const heatFading = pumpMetrics.heatDecay && pumpMetrics.heatDecay > 0.25;
+      const buyPressureFading = pumpMetrics.buyPressureDecay && pumpMetrics.buyPressureDecay > 0.20;
+      const momentumWeakening = momentum.strength === 'weak' || momentum.strength === 'unknown';
+
+      // If we're in good profit, near the high, but momentum is fading - take some profit
+      if (nearHigh && (heatFading || buyPressureFading || momentumWeakening)) {
+        const exhaustionSellPercent = 0.30; // Sell 30% on exhaustion signal
+        const sellAmount = position.amount * exhaustionSellPercent;
+
+        logger.info({
+          positionId: position.id,
+          profitPercent: (profitPercent * 100).toFixed(2) + '%',
+          nearHigh,
+          heatDecay: pumpMetrics.heatDecay ? (pumpMetrics.heatDecay * 100).toFixed(0) + '%' : 'N/A',
+          buyPressureDecay: pumpMetrics.buyPressureDecay ? (pumpMetrics.buyPressureDecay * 100).toFixed(0) + '%' : 'N/A',
+          momentum: momentum.strength,
+        }, '⚠️ PUMP EXHAUSTION: Momentum fading near highs - taking partial profit before reversal');
+
+        const success = await this.partialCloseNewStrategy(position, sellAmount, 'scaled_exit');
+        if (success) {
+          // Tighten trailing stop on exhaustion signal
+          position.trailingStop = currentPrice * (1 - 0.20); // Tighter 20% trailing after exhaustion
+          (position as any).lastExhaustionSell = Date.now(); // Cooldown tracking
+          await this.persistPosition(position);
+        }
+        return;
+      }
+    }
+
+    // 6. Update trailing stop on new highs (after initial recovery) - also momentum-aware
     if (position.initialRecovered && currentPrice >= position.highestPrice) {
       const newTrailingStop = currentPrice * (1 - dynamicTrailingPercent);
       if (!position.trailingStop || newTrailingStop > position.trailingStop) {

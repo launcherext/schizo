@@ -9,6 +9,7 @@ const logger = createChildLogger('pump-detector');
 export class PumpDetector {
   private pumpHistories: Map<string, PumpMetrics[]> = new Map();
   private maxHistory = 60; // 1 minute of history
+  private tokenLows: Map<string, number> = new Map(); // Track lowest price seen
 
   constructor() {}
 
@@ -18,6 +19,16 @@ export class PumpDetector {
     if (history.length < 10) {
       return this.getDefaultMetrics();
     }
+
+    // Track lowest price seen for this token
+    const currentPrice = history[history.length - 1].priceSol;
+    const lowestInHistory = Math.min(...history.map(h => h.priceSol));
+    const existingLow = this.tokenLows.get(mint);
+    const lowestPrice = existingLow ? Math.min(existingLow, lowestInHistory) : lowestInHistory;
+    this.tokenLows.set(mint, lowestPrice);
+
+    // Calculate how much it's already pumped from the low
+    const pumpFromLow = lowestPrice > 0 ? (currentPrice - lowestPrice) / lowestPrice : 0;
 
     // Calculate volume ratio (1min / 5min)
     const volume1m = this.getVolumeWindow(history, 60);
@@ -31,7 +42,22 @@ export class PumpDetector {
     const priceVelocity = this.calculatePriceVelocity(history);
     const buyPressure = this.calculateBuyPressure(history);
 
-    const phase = this.determinePhase(heat, priceVelocity, buyPressure);
+    // Check for momentum decay (heat fading from previous highs)
+    const pumpHistory = this.pumpHistories.get(mint) || [];
+    const recentHeatPeak = pumpHistory.length >= 3
+      ? Math.max(...pumpHistory.slice(-10).map(h => h.heat))
+      : heat;
+    const heatDecay = recentHeatPeak > 0 ? (recentHeatPeak - heat) / recentHeatPeak : 0;
+
+    // Check for buy pressure decay
+    const recentBuyPressurePeak = pumpHistory.length >= 3
+      ? Math.max(...pumpHistory.slice(-10).map(h => h.buyPressure))
+      : buyPressure;
+    const buyPressureDecay = recentBuyPressurePeak > 0.5
+      ? (recentBuyPressurePeak - buyPressure) / recentBuyPressurePeak
+      : 0;
+
+    const phase = this.determinePhase(heat, priceVelocity, buyPressure, pumpFromLow, heatDecay);
     const confidence = this.calculateConfidence(history, phase);
 
     const metrics: PumpMetrics = {
@@ -41,12 +67,23 @@ export class PumpDetector {
       priceVelocity,
       buyPressure,
       confidence,
+      // NEW: Track pump position and decay
+      pumpFromLow,
+      heatDecay,
+      buyPressureDecay,
     };
 
     // Update history
     this.updateHistory(mint, metrics);
 
-    logger.debug({ mint, phase, heat: heat.toFixed(1), confidence: confidence.toFixed(2) }, 'Pump analysis');
+    logger.debug({
+      mint,
+      phase,
+      heat: heat.toFixed(1),
+      pumpFromLow: (pumpFromLow * 100).toFixed(0) + '%',
+      heatDecay: (heatDecay * 100).toFixed(0) + '%',
+      buyPressureDecay: (buyPressureDecay * 100).toFixed(0) + '%',
+    }, 'Pump analysis');
 
     return metrics;
   }
@@ -115,7 +152,13 @@ export class PumpDetector {
     return upMoves / total;
   }
 
-  private determinePhase(heat: number, priceVelocity: number, buyPressure: number): PumpPhase {
+  private determinePhase(
+    heat: number,
+    priceVelocity: number,
+    buyPressure: number,
+    pumpFromLow: number = 0,
+    heatDecay: number = 0
+  ): PumpPhase {
     // Phase determination based on heat metric and supporting indicators
 
     // Dumping: negative velocity with selling pressure
@@ -123,18 +166,30 @@ export class PumpDetector {
       return 'dumping';
     }
 
-    // Peak: very high heat but slowing
+    // CRITICAL: Detect "exhausted" - pump has already run too far
+    // If price is up 100%+ from low and heat is decaying, it's peaking
+    if (pumpFromLow > 1.0 && heatDecay > 0.2) {
+      return 'peak';
+    }
+
+    // Peak: very high heat but slowing, OR already pumped a lot
     if (heat > 100 && priceVelocity < 0.5) {
       return 'peak';
     }
 
-    // Hot: high heat with positive momentum
-    if (heat >= 48 && heat <= 100 && buyPressure > 0.5) {
+    // CRITICAL: If price already up 150%+ from low, call it peak regardless of heat
+    // You missed the pump, don't chase
+    if (pumpFromLow > 1.5) {
+      return 'peak';
+    }
+
+    // Hot: high heat with positive momentum, but NOT if already pumped too much
+    if (heat >= 48 && heat <= 100 && buyPressure > 0.5 && pumpFromLow < 1.0) {
       return 'hot';
     }
 
-    // Building: moderate heat with buying
-    if (heat >= 33 && heat < 48 && buyPressure > 0.45) {
+    // Building: moderate heat with buying, early in the pump
+    if (heat >= 33 && heat < 48 && buyPressure > 0.45 && pumpFromLow < 0.5) {
       return 'building';
     }
 
@@ -189,6 +244,35 @@ export class PumpDetector {
       return false;
     }
 
+    // CRITICAL: Reject peak/dumping - you're too late
+    if (metrics.phase === 'peak' || metrics.phase === 'dumping') {
+      logger.info({
+        phase: metrics.phase,
+        pumpFromLow: metrics.pumpFromLow ? (metrics.pumpFromLow * 100).toFixed(0) + '%' : 'N/A',
+        heatDecay: metrics.heatDecay ? (metrics.heatDecay * 100).toFixed(0) + '%' : 'N/A',
+      }, 'Rejecting - pump already peaked or dumping');
+      return false;
+    }
+
+    // CRITICAL: Reject if already pumped too much (even if phase says "hot")
+    // Buying after 80%+ pump = chasing, usually results in loss
+    if (metrics.pumpFromLow && metrics.pumpFromLow > 0.8) {
+      logger.info({
+        pumpFromLow: (metrics.pumpFromLow * 100).toFixed(0) + '%',
+        phase: metrics.phase,
+      }, 'Rejecting - price already up 80%+ from low, too late to enter');
+      return false;
+    }
+
+    // CRITICAL: Reject if momentum is decaying significantly
+    if (metrics.heatDecay && metrics.heatDecay > 0.3) {
+      logger.info({
+        heatDecay: (metrics.heatDecay * 100).toFixed(0) + '%',
+        phase: metrics.phase,
+      }, 'Rejecting - momentum fading (heat down 30%+ from peak)');
+      return false;
+    }
+
     // Reject if heat is below minimum threshold
     if (metrics.heat < (config as any).minPumpHeat) {
       logger.debug({ heat: metrics.heat, minRequired: (config as any).minPumpHeat }, 'Rejecting low heat token');
@@ -207,13 +291,45 @@ export class PumpDetector {
     return false;
   }
 
-  shouldExit(metrics: PumpMetrics): boolean {
-    // Exit signals
-    if (metrics.phase === 'peak' || metrics.phase === 'dumping') {
+  shouldExit(metrics: PumpMetrics, profitPercent?: number): boolean {
+    // CRITICAL: Only use pump exit signals if we're in decent profit
+    // Don't panic sell at a loss just because momentum dipped - that locks in losses
+    // and misses recovery pumps
+    const inProfit = profitPercent !== undefined && profitPercent > 0.10; // Only exit on signals if +10%+
+
+    // Exit signals - only trigger if clearly dumping
+    if (metrics.phase === 'dumping') {
+      logger.info({ phase: metrics.phase }, 'EXIT SIGNAL: Clearly dumping');
       return true;
     }
 
-    if (metrics.priceVelocity < -2 && metrics.confidence > 0.5) {
+    // Rapid sustained price drop - only if REALLY fast
+    if (metrics.priceVelocity < -5 && metrics.confidence > 0.6) {
+      logger.info({ priceVelocity: metrics.priceVelocity }, 'EXIT SIGNAL: Rapid price crash');
+      return true;
+    }
+
+    // CONSERVATIVE: Only exit on momentum decay if:
+    // 1. We're in decent profit (don't lock in losses)
+    // 2. The decay is severe (60%+, not just 40%)
+    // 3. Price is also dropping (not just low volume consolidation)
+    if (inProfit && metrics.heatDecay && metrics.heatDecay > 0.6 && metrics.priceVelocity < -1) {
+      logger.info({
+        heatDecay: (metrics.heatDecay * 100).toFixed(0) + '%',
+        priceVelocity: metrics.priceVelocity.toFixed(2),
+        profitPercent: profitPercent ? (profitPercent * 100).toFixed(0) + '%' : 'N/A',
+      }, 'EXIT SIGNAL: Momentum fading with price dropping (while in profit)');
+      return true;
+    }
+
+    // CONSERVATIVE: Buy pressure collapse - only if severe AND price dropping
+    if (inProfit && metrics.buyPressureDecay && metrics.buyPressureDecay > 0.5
+        && metrics.buyPressure < 0.35 && metrics.priceVelocity < -1) {
+      logger.info({
+        buyPressure: (metrics.buyPressure * 100).toFixed(0) + '%',
+        buyPressureDecay: (metrics.buyPressureDecay * 100).toFixed(0) + '%',
+        profitPercent: profitPercent ? (profitPercent * 100).toFixed(0) + '%' : 'N/A',
+      }, 'EXIT SIGNAL: Buy pressure collapsed with price dropping');
       return true;
     }
 
@@ -241,6 +357,7 @@ export class PumpDetector {
 
   clearHistory(mint: string): void {
     this.pumpHistories.delete(mint);
+    this.tokenLows.delete(mint);
   }
 }
 

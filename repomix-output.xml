@@ -8697,209 +8697,6 @@ export class RugMonitor extends EventEmitter {
 export const rugMonitor = new RugMonitor();
 </file>
 
-<file path="src/signals/velocity-tracker.ts">
-import { createChildLogger } from '../utils/logger';
-import { config } from '../config/settings';
-import { VelocityMetrics, VelocityResult } from './types';
-
-const logger = createChildLogger('velocity-tracker');
-
-interface TradeEvent {
-  mint: string;
-  txType: 'buy' | 'sell';
-  traderPublicKey: string;
-  marketCapSol: number;
-  timestamp: number;
-}
-
-export class VelocityTracker {
-  // Rolling window of trades per token
-  private tokenTrades: Map<string, TradeEvent[]> = new Map();
-  private windowMs = 60000; // 60-second rolling window
-
-  constructor() {}
-
-  /**
-   * Record a trade event from PumpPortal WebSocket
-   */
-  recordTrade(data: {
-    mint: string;
-    txType: 'buy' | 'sell';
-    traderPublicKey: string;
-    marketCapSol: number;
-  }): void {
-    const trade: TradeEvent = {
-      ...data,
-      timestamp: Date.now(),
-    };
-
-    let trades = this.tokenTrades.get(data.mint);
-    if (!trades) {
-      trades = [];
-      this.tokenTrades.set(data.mint, trades);
-    }
-
-    trades.push(trade);
-
-    // Prune old trades outside the window
-    this.pruneOldTrades(data.mint);
-
-    logger.debug({
-      mint: data.mint.substring(0, 12),
-      txType: data.txType,
-      totalTrades: trades.length,
-    }, 'Trade recorded');
-  }
-
-  /**
-   * Remove trades outside the rolling window
-   */
-  private pruneOldTrades(mint: string): void {
-    const trades = this.tokenTrades.get(mint);
-    if (!trades) return;
-
-    const cutoff = Date.now() - this.windowMs;
-    const filtered = trades.filter(t => t.timestamp >= cutoff);
-    this.tokenTrades.set(mint, filtered);
-  }
-
-  /**
-   * Get velocity metrics for a token
-   */
-  getMetrics(mint: string): VelocityMetrics | null {
-    this.pruneOldTrades(mint);
-    const trades = this.tokenTrades.get(mint);
-
-    if (!trades || trades.length === 0) {
-      return null;
-    }
-
-    const uniqueBuyers = new Set<string>();
-    const uniqueSellers = new Set<string>();
-    let buyCount = 0;
-    let sellCount = 0;
-
-    for (const trade of trades) {
-      if (trade.txType === 'buy') {
-        buyCount++;
-        uniqueBuyers.add(trade.traderPublicKey);
-      } else {
-        sellCount++;
-        uniqueSellers.add(trade.traderPublicKey);
-      }
-    }
-
-    const txCount = trades.length;
-    const windowSeconds = this.windowMs / 1000;
-    const txPerMinute = (txCount / windowSeconds) * 60;
-    const buyPressure = txCount > 0 ? buyCount / txCount : 0;
-
-    return {
-      mint,
-      txCount,
-      buyCount,
-      sellCount,
-      uniqueBuyers,
-      uniqueSellers,
-      txPerMinute,
-      buyPressure,
-      windowStartTime: Date.now() - this.windowMs,
-    };
-  }
-
-  /**
-   * Check if a token has good velocity for entry
-   */
-  hasGoodVelocity(mint: string, marketCapSol?: number): VelocityResult {
-    const metrics = this.getMetrics(mint);
-    const thresholds = config.velocityEntry;
-
-    if (!metrics) {
-      return {
-        hasGoodVelocity: false,
-        metrics: null,
-        reason: 'No trade data available',
-      };
-    }
-
-    // Check market cap limit (only for early tokens)
-    if (marketCapSol !== undefined && marketCapSol > thresholds.maxMarketCapSol) {
-      return {
-        hasGoodVelocity: false,
-        metrics,
-        reason: `Market cap ${marketCapSol.toFixed(2)} SOL exceeds ${thresholds.maxMarketCapSol} SOL limit`,
-      };
-    }
-
-    // Check minimum transaction count
-    if (metrics.txCount < thresholds.minTxCount) {
-      return {
-        hasGoodVelocity: false,
-        metrics,
-        reason: `Only ${metrics.txCount} txs, need ${thresholds.minTxCount}`,
-      };
-    }
-
-    // Check unique buyers
-    if (metrics.uniqueBuyers.size < thresholds.minUniqueBuyers) {
-      return {
-        hasGoodVelocity: false,
-        metrics,
-        reason: `Only ${metrics.uniqueBuyers.size} unique buyers, need ${thresholds.minUniqueBuyers}`,
-      };
-    }
-
-    // Check buy pressure
-    if (metrics.buyPressure < thresholds.minBuyPressure) {
-      return {
-        hasGoodVelocity: false,
-        metrics,
-        reason: `Buy pressure ${(metrics.buyPressure * 100).toFixed(0)}% below ${(thresholds.minBuyPressure * 100).toFixed(0)}%`,
-      };
-    }
-
-    // All checks passed
-    logger.info({
-      mint: mint.substring(0, 12),
-      txCount: metrics.txCount,
-      uniqueBuyers: metrics.uniqueBuyers.size,
-      buyPressure: (metrics.buyPressure * 100).toFixed(0) + '%',
-      txPerMinute: metrics.txPerMinute.toFixed(1),
-    }, 'Good velocity detected');
-
-    return {
-      hasGoodVelocity: true,
-      metrics,
-      reason: `Velocity OK: ${metrics.txCount} txs, ${metrics.uniqueBuyers.size} buyers, ${(metrics.buyPressure * 100).toFixed(0)}% buys`,
-    };
-  }
-
-  /**
-   * Check if we have any trade data for a token
-   */
-  hasTradeData(mint: string): boolean {
-    const trades = this.tokenTrades.get(mint);
-    return trades !== undefined && trades.length > 0;
-  }
-
-  /**
-   * Clear data for a token (after position closed or rejected)
-   */
-  clearToken(mint: string): void {
-    this.tokenTrades.delete(mint);
-  }
-
-  /**
-   * Get status for logging
-   */
-  getStatus(): string {
-    return `Tracking ${this.tokenTrades.size} tokens`;
-  }
-}
-
-export const velocityTracker = new VelocityTracker();
-</file>
-
 <file path="src/test-velocity.ts">
 /**
  * Quick test script for velocity tracker
@@ -15031,718 +14828,6 @@ export interface DataEvent {
 }
 </file>
 
-<file path="src/execution/pumpfun-swap.ts">
-import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
-import bs58 from 'bs58';
-import { createChildLogger } from '../utils/logger';
-import { config, LAMPORTS_PER_SOL } from '../config/settings';
-import { SwapResult } from './types';
-
-const logger = createChildLogger('pumpfun-swap');
-
-const PUMPPORTAL_API_URL = 'https://pumpportal.fun/api';
-
-interface PumpPortalTradeRequest {
-  publicKey: string;
-  action: 'buy' | 'sell';
-  mint: string;
-  amount: number;
-  denominatedInSol: 'true' | 'false';
-  slippage: number;
-  priorityFee: number;
-  pool: 'pump' | 'raydium' | 'auto';
-}
-
-interface PumpPortalTradeResponse {
-  transaction?: string;
-  error?: string;
-}
-
-export class PumpFunSwap {
-  private connection: Connection;
-  private wallet: Keypair | null = null;
-
-  constructor() {
-    this.connection = new Connection(config.solanaRpcUrl, 'confirmed');
-  }
-
-  initialize(): void {
-    if (config.privateKey) {
-      try {
-        const secretKey = bs58.decode(config.privateKey);
-        this.wallet = Keypair.fromSecretKey(secretKey);
-        logger.info({ publicKey: this.wallet.publicKey.toBase58() }, 'PumpFun wallet initialized');
-      } catch (error) {
-        logger.error({ error }, 'Failed to initialize PumpFun wallet');
-      }
-    }
-  }
-
-  async buy(
-    tokenMint: string,
-    amountSol: number,
-    slippagePct: number = config.defaultSlippageBps / 100,  // Convert bps to %
-    priorityFee: number = config.priorityFeeSol
-  ): Promise<SwapResult> {
-    if (!this.wallet) {
-      return this.errorResult(amountSol * LAMPORTS_PER_SOL, 'Wallet not initialized');
-    }
-
-    // Paper trading simulation
-    if (config.paperTrading) {
-      return this.simulateBuy(tokenMint, amountSol, slippagePct);
-    }
-
-    try {
-      logger.info({ mint: tokenMint, amountSol, slippage: slippagePct }, 'Executing PumpFun buy');
-
-      const response = await fetch(`${PUMPPORTAL_API_URL}/trade-local`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          publicKey: this.wallet.publicKey.toBase58(),
-          action: 'buy',
-          mint: tokenMint,
-          amount: amountSol,
-          denominatedInSol: 'true',
-          slippage: slippagePct,
-          priorityFee: priorityFee,
-          pool: 'pump', // Use bonding curve
-        } as PumpPortalTradeRequest),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error({ status: response.status, error: errorText }, 'PumpPortal trade request failed');
-        return this.errorResult(amountSol * LAMPORTS_PER_SOL, `Trade request failed: ${response.status}`);
-      }
-
-      // PumpPortal returns raw transaction bytes directly, not JSON
-      const arrayBuffer = await response.arrayBuffer();
-      const txData = new Uint8Array(arrayBuffer);
-
-      // Check if response is actually JSON error
-      if (txData.length < 100) {
-        const text = new TextDecoder().decode(txData);
-        try {
-          const jsonError = JSON.parse(text);
-          if (jsonError.error) {
-            return this.errorResult(amountSol * LAMPORTS_PER_SOL, jsonError.error);
-          }
-        } catch {
-          // Not JSON, continue with deserialization
-        }
-      }
-
-      logger.debug({ bytes: txData.length }, 'Received raw transaction bytes');
-
-      // Deserialize and sign
-      const transaction = VersionedTransaction.deserialize(txData);
-      transaction.sign([this.wallet]);
-
-      // Send transaction
-      const signature = await this.connection.sendRawTransaction(
-        transaction.serialize(),
-        { skipPreflight: true, maxRetries: 3 }
-      );
-
-      logger.info({ signature }, 'PumpFun buy transaction sent');
-
-      // Confirm
-      const latestBlockhash = await this.connection.getLatestBlockhash();
-      const confirmation = await this.connection.confirmTransaction(
-        { signature, ...latestBlockhash },
-        'confirmed'
-      );
-
-      if (confirmation.value.err) {
-        return this.errorResult(
-          amountSol * LAMPORTS_PER_SOL,
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
-          signature
-        );
-      }
-
-      // Parse transaction to get actual token amount received from postTokenBalances
-      let outputAmount = 0;
-      try {
-        const txDetails = await this.connection.getParsedTransaction(signature, {
-          maxSupportedTransactionVersion: 0,
-        });
-
-        if (txDetails?.meta?.postTokenBalances) {
-          const walletAddress = this.wallet.publicKey.toBase58();
-          // Find the token balance entry for our wallet and the purchased token
-          const tokenBalance = txDetails.meta.postTokenBalances.find(
-            (balance) =>
-              balance.owner === walletAddress &&
-              balance.mint === tokenMint
-          );
-
-          if (tokenBalance?.uiTokenAmount?.uiAmount) {
-            outputAmount = tokenBalance.uiTokenAmount.uiAmount;
-            logger.info({
-              signature,
-              outputAmount,
-              decimals: tokenBalance.uiTokenAmount.decimals,
-            }, 'Parsed token amount from transaction postTokenBalances');
-          }
-        }
-      } catch (parseError) {
-        logger.warn({ signature, error: parseError }, 'Failed to parse transaction for token amount');
-      }
-
-      logger.info({ signature, amountSol, outputAmount }, 'PumpFun buy successful');
-
-      return {
-        success: true,
-        signature,
-        inputAmount: amountSol * LAMPORTS_PER_SOL,
-        outputAmount,
-        priceImpact: 0,
-        fees: {
-          platformFee: amountSol * LAMPORTS_PER_SOL * 0.01, // 1% pump.fun fee
-          networkFee: 5000,
-          priorityFee: priorityFee * LAMPORTS_PER_SOL,
-          totalFee: amountSol * LAMPORTS_PER_SOL * 0.01 + 5000 + priorityFee * LAMPORTS_PER_SOL,
-        },
-        timestamp: new Date(),
-      };
-    } catch (error: any) {
-      logger.error({ error: error.message }, 'PumpFun buy failed');
-      return this.errorResult(amountSol * LAMPORTS_PER_SOL, error.message);
-    }
-  }
-
-  async sell(
-    tokenMint: string,
-    amountTokens: number,
-    slippagePct: number = config.defaultSlippageBps / 100,  // Convert bps to %
-    priorityFee: number = config.priorityFeeSol
-  ): Promise<SwapResult> {
-    if (!this.wallet) {
-      return this.errorResult(0, 'Wallet not initialized');
-    }
-
-    // Paper trading simulation
-    if (config.paperTrading) {
-      return this.simulateSell(tokenMint, amountTokens, slippagePct);
-    }
-
-    try {
-      logger.info({ mint: tokenMint, amountTokens, slippage: slippagePct }, 'Executing PumpFun sell');
-
-      const response = await fetch(`${PUMPPORTAL_API_URL}/trade-local`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          publicKey: this.wallet.publicKey.toBase58(),
-          action: 'sell',
-          mint: tokenMint,
-          amount: amountTokens,
-          denominatedInSol: 'false',
-          slippage: slippagePct,
-          priorityFee: priorityFee,
-          pool: 'auto', // Auto-detect if on bonding curve or Raydium
-        } as PumpPortalTradeRequest),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error({ status: response.status, error: errorText }, 'PumpPortal sell request failed');
-        return this.errorResult(0, `Sell request failed: ${response.status}`);
-      }
-
-      // PumpPortal returns raw transaction bytes directly, not JSON
-      const arrayBuffer = await response.arrayBuffer();
-      const txData = new Uint8Array(arrayBuffer);
-
-      // Check if response is actually JSON error
-      if (txData.length < 100) {
-        const text = new TextDecoder().decode(txData);
-        try {
-          const jsonError = JSON.parse(text);
-          if (jsonError.error) {
-            return this.errorResult(0, jsonError.error);
-          }
-        } catch {
-          // Not JSON, continue with deserialization
-        }
-      }
-
-      logger.debug({ bytes: txData.length }, 'Received raw transaction bytes');
-
-      // Deserialize and sign
-      const transaction = VersionedTransaction.deserialize(txData);
-      transaction.sign([this.wallet]);
-
-      // Send transaction
-      const signature = await this.connection.sendRawTransaction(
-        transaction.serialize(),
-        { skipPreflight: true, maxRetries: 3 }
-      );
-
-      logger.info({ signature }, 'PumpFun sell transaction sent');
-
-      // Confirm
-      const latestBlockhash = await this.connection.getLatestBlockhash();
-      const confirmation = await this.connection.confirmTransaction(
-        { signature, ...latestBlockhash },
-        'confirmed'
-      );
-
-      if (confirmation.value.err) {
-        return this.errorResult(
-          0,
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
-          signature
-        );
-      }
-
-      logger.info({ signature, amountTokens }, 'PumpFun sell successful');
-
-      return {
-        success: true,
-        signature,
-        inputAmount: amountTokens,
-        outputAmount: 0, // SOL received, will be calculated
-        priceImpact: 0,
-        fees: {
-          platformFee: 0, // Calculated based on output
-          networkFee: 5000,
-          priorityFee: priorityFee * LAMPORTS_PER_SOL,
-          totalFee: 5000 + priorityFee * LAMPORTS_PER_SOL,
-        },
-        timestamp: new Date(),
-      };
-    } catch (error: any) {
-      logger.error({ error: error.message }, 'PumpFun sell failed');
-      return this.errorResult(0, error.message);
-    }
-  }
-
-  private async simulateBuy(
-    tokenMint: string,
-    amountSol: number,
-    slippagePct: number
-  ): Promise<SwapResult> {
-    // Simulate buying on bonding curve
-    // In reality, tokens received depends on bonding curve state
-    const estimatedTokens = amountSol * 1_000_000; // Rough estimate for new tokens
-
-    logger.info({
-      mode: 'PAPER',
-      action: 'buy',
-      mint: tokenMint,
-      amountSol,
-      estimatedTokens,
-    }, 'Paper PumpFun buy');
-
-    return {
-      success: true,
-      signature: `PAPER_PUMP_BUY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      inputAmount: amountSol * LAMPORTS_PER_SOL,
-      outputAmount: estimatedTokens,
-      priceImpact: 0.5, // Estimate
-      fees: {
-        platformFee: amountSol * LAMPORTS_PER_SOL * 0.01,
-        networkFee: 5000,
-        priorityFee: 0,
-        totalFee: amountSol * LAMPORTS_PER_SOL * 0.01 + 5000,
-      },
-      timestamp: new Date(),
-    };
-  }
-
-  private async simulateSell(
-    tokenMint: string,
-    amountTokens: number,
-    slippagePct: number
-  ): Promise<SwapResult> {
-    // Simulate selling on bonding curve
-    const estimatedSol = amountTokens / 1_000_000; // Rough estimate
-
-    logger.info({
-      mode: 'PAPER',
-      action: 'sell',
-      mint: tokenMint,
-      amountTokens,
-      estimatedSol,
-    }, 'Paper PumpFun sell');
-
-    return {
-      success: true,
-      signature: `PAPER_PUMP_SELL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      inputAmount: amountTokens,
-      outputAmount: estimatedSol * LAMPORTS_PER_SOL,
-      priceImpact: 0.5,
-      fees: {
-        platformFee: estimatedSol * LAMPORTS_PER_SOL * 0.01,
-        networkFee: 5000,
-        priorityFee: 0,
-        totalFee: estimatedSol * LAMPORTS_PER_SOL * 0.01 + 5000,
-      },
-      timestamp: new Date(),
-    };
-  }
-
-  private errorResult(inputAmount: number, error: string, signature?: string): SwapResult {
-    return {
-      success: false,
-      signature,
-      inputAmount,
-      outputAmount: 0,
-      priceImpact: 0,
-      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
-      error,
-      timestamp: new Date(),
-    };
-  }
-
-  getWalletAddress(): string | null {
-    return this.wallet?.publicKey.toBase58() || null;
-  }
-}
-
-export const pumpFunSwap = new PumpFunSwap();
-</file>
-
-<file path="src/execution/types.ts">
-import { PublicKey } from '@solana/web3.js';
-
-export interface SwapQuote {
-  inputMint: string;
-  outputMint: string;
-  inputAmount: number;
-  outputAmount: number;
-  priceImpact: number;
-  slippageBps: number;
-  route: SwapRoute[];
-  fees: SwapFees;
-}
-
-export interface SwapRoute {
-  dex: string;
-  poolAddress: string;
-  inputMint: string;
-  outputMint: string;
-  inputAmount: number;
-  outputAmount: number;
-}
-
-export interface SwapFees {
-  platformFee: number;
-  networkFee: number;
-  priorityFee: number;
-  totalFee: number;
-}
-
-export interface SwapResult {
-  success: boolean;
-  signature?: string;
-  inputAmount: number;
-  outputAmount: number;
-  priceImpact: number;
-  fees: SwapFees;
-  error?: string;
-  timestamp: Date;
-  actualBalance?: number;  // Actual on-chain balance (for detecting manual sells)
-}
-
-export interface JitoBundleResult {
-  success: boolean;
-  bundleId?: string;
-  signatures: string[];
-  tipAmount: number;
-  landedSlot?: number;
-  error?: string;
-}
-
-export interface TransactionConfig {
-  priorityFee: number;
-  maxRetries: number;
-  confirmationTimeout: number;
-  useJito: boolean;
-  jitoTip: number;
-}
-
-export interface PendingTransaction {
-  id: string;
-  signature?: string;
-  type: 'buy' | 'sell';
-  mint: string;
-  inputAmount: number;
-  expectedOutput: number;
-  status: 'pending' | 'confirmed' | 'failed';
-  retries: number;
-  createdAt: Date;
-  confirmedAt?: Date;
-  error?: string;
-  poolType?: 'active' | 'high_risk';
-}
-
-export interface ExecutionMetrics {
-  totalTransactions: number;
-  successRate: number;
-  avgSlippage: number;
-  avgConfirmationTime: number;
-  totalFeesPaid: number;
-  jitoSuccessRate: number;
-}
-</file>
-
-<file path="src/risk/capital-allocator.ts">
-import { createChildLogger } from '../utils/logger';
-import { config } from '../config/settings';
-import { txManager } from '../execution/tx-manager';
-import { positionManager } from './position-manager';
-import { CapitalAllocation, RiskCheckResult, RiskLimits } from './types';
-
-const logger = createChildLogger('capital-allocator');
-
-export class CapitalAllocator {
-  private allocation: CapitalAllocation;
-  private limits: RiskLimits;
-  private pendingByPool: Map<string, number> = new Map();
-
-  constructor() {
-    const totalCapital = config.initialCapitalSol;
-
-    this.allocation = {
-      totalSol: totalCapital,
-      reserveSol: totalCapital * config.capitalAllocation.reserve,
-      activeSol: totalCapital * config.capitalAllocation.active,
-      highRiskSol: totalCapital * config.capitalAllocation.highRisk,
-      inPositions: 0,
-      availableActive: totalCapital * config.capitalAllocation.active,
-      availableHighRisk: totalCapital * config.capitalAllocation.highRisk,
-    };
-
-    this.limits = {
-      maxPositionSizeSol: config.maxPositionSize * totalCapital,
-      maxConcurrentPositions: config.maxConcurrentPositions,
-      dailyLossLimit: config.dailyLossLimit,
-      maxDrawdownLimit: 0.30, // 30% max drawdown
-      minPositionSizeSol: 0.001,
-    };
-    };
-  }
-
-  async start(): Promise<void> {
-    this.setupEventHandlers();
-    await this.syncWithWallet();
-    logger.info('Capital allocator started');
-  }
-
-  private setupEventHandlers(): void {
-    txManager.on('txPending', (tx) => {
-      if (tx.type === 'buy' && tx.poolType) {
-        const current = this.pendingByPool.get(tx.poolType) || 0;
-        this.pendingByPool.set(tx.poolType, current + tx.inputAmount);
-        logger.info({ 
-          pool: tx.poolType, 
-          amount: tx.inputAmount,
-          newPending: current + tx.inputAmount 
-        }, 'Capital reserved for pending tx');
-      }
-    });
-
-    const releasePending = (tx: any) => {
-      if (tx.type === 'buy' && tx.poolType) {
-        const current = this.pendingByPool.get(tx.poolType) || 0;
-        const newPending = Math.max(0, current - tx.inputAmount);
-        this.pendingByPool.set(tx.poolType, newPending);
-        logger.info({ 
-          pool: tx.poolType, 
-          amount: tx.inputAmount,
-          remainingPending: newPending
-        }, 'Pending capital released');
-      }
-    };
-
-    txManager.on('txConfirmed', releasePending);
-    txManager.on('txFailed', releasePending);
-  }
-
-  async syncWithWallet(): Promise<void> {
-    try {
-      const actualBalance = await txManager.getWalletBalance();
-      const inPositions = positionManager.getTotalExposure();
-
-      this.allocation.totalSol = actualBalance + inPositions;
-      this.allocation.inPositions = inPositions;
-
-      // Recalculate allocations
-      this.allocation.reserveSol = this.allocation.totalSol * config.capitalAllocation.reserve;
-      this.allocation.activeSol = this.allocation.totalSol * config.capitalAllocation.active;
-      this.allocation.highRiskSol = this.allocation.totalSol * config.capitalAllocation.highRisk;
-
-      // Calculate available capital by pool
-      const activeInPositions = this.getPoolExposure('active');
-      const highRiskInPositions = this.getPoolExposure('high_risk');
-
-      this.allocation.availableActive = Math.max(0, this.allocation.activeSol - activeInPositions);
-      this.allocation.availableHighRisk = Math.max(0, this.allocation.highRiskSol - highRiskInPositions);
-
-      // Update limits based on new total
-      this.limits.maxPositionSizeSol = config.maxPositionSize * this.allocation.totalSol;
-
-      logger.debug({
-        total: this.allocation.totalSol.toFixed(4),
-        available: actualBalance.toFixed(4),
-        inPositions: inPositions.toFixed(4),
-        availableActive: this.allocation.availableActive.toFixed(4),
-        availableHighRisk: this.allocation.availableHighRisk.toFixed(4),
-      }, 'Capital synced');
-    } catch (error) {
-      logger.error({ error }, 'Failed to sync capital');
-    }
-  }
-
-  private getPoolExposure(poolType: 'active' | 'high_risk'): number {
-    return positionManager
-      .getOpenPositions()
-      .filter((p) => p.poolType === poolType)
-      .reduce((sum, p) => sum + p.amountSol, 0);
-  }
-
-  checkRisk(
-    requestedSizeSol: number,
-    poolType: 'active' | 'high_risk'
-  ): RiskCheckResult {
-    const warnings: string[] = [];
-    let adjustedSize = requestedSizeSol;
-    let approved = true;
-
-    // Check position count limit
-    const currentPositions = positionManager.getPositionCount();
-    if (currentPositions >= this.limits.maxConcurrentPositions) {
-      logger.info({
-        currentPositions,
-        maxPositions: this.limits.maxConcurrentPositions,
-      }, 'BLOCKED: Max concurrent positions reached');
-      return {
-        approved: false,
-        reason: `Max positions (${this.limits.maxConcurrentPositions}) reached`,
-        warnings: [],
-      };
-    }
-
-    // Check pool availability
-    const available =
-      poolType === 'active'
-        ? this.allocation.availableActive
-        : this.allocation.availableHighRisk;
-    
-    // Deduct pending transactions
-    const pending = this.pendingByPool.get(poolType) || 0;
-    const effectiveAvailable = Math.max(0, available - pending);
-
-    if (requestedSizeSol > effectiveAvailable) {
-      adjustedSize = effectiveAvailable;
-      warnings.push(`Size reduced from ${available.toFixed(4)} to ${effectiveAvailable.toFixed(4)} (pending: ${pending.toFixed(4)})`);
-    }
-
-    // Check max position size
-    if (adjustedSize > this.limits.maxPositionSizeSol) {
-      adjustedSize = this.limits.maxPositionSizeSol;
-      warnings.push(`Size capped at max: ${this.limits.maxPositionSizeSol.toFixed(4)} SOL`);
-    }
-
-    // Check min position size
-    if (adjustedSize < this.limits.minPositionSizeSol) {
-      return {
-        approved: false,
-        reason: `Size ${adjustedSize.toFixed(4)} below minimum ${this.limits.minPositionSizeSol} SOL`,
-        warnings,
-      };
-    }
-
-    // Check total exposure
-    const totalExposure = positionManager.getTotalExposure() + adjustedSize;
-    const maxExposure = this.allocation.totalSol - this.allocation.reserveSol;
-
-    if (totalExposure > maxExposure) {
-      const allowedSize = maxExposure - positionManager.getTotalExposure();
-      if (allowedSize < this.limits.minPositionSizeSol) {
-        return {
-          approved: false,
-          reason: 'Would exceed total exposure limit',
-          warnings,
-        };
-      }
-      adjustedSize = allowedSize;
-      warnings.push(`Size reduced due to exposure limit: ${adjustedSize.toFixed(4)} SOL`);
-    }
-
-    return {
-      approved: true,
-      adjustedSize,
-      reason: 'Risk check passed',
-      warnings,
-    };
-  }
-
-  getAllocation(): CapitalAllocation {
-    return { ...this.allocation };
-  }
-
-  getLimits(): RiskLimits {
-    return { ...this.limits };
-  }
-
-  getAvailableCapital(poolType: 'active' | 'high_risk'): number {
-    return poolType === 'active'
-      ? this.allocation.availableActive
-      : this.allocation.availableHighRisk;
-  }
-
-  getExposurePercent(): number {
-    if (this.allocation.totalSol === 0) return 0;
-    return (this.allocation.inPositions / this.allocation.totalSol) * 100;
-  }
-
-  reserveCapital(amount: number, poolType: 'active' | 'high_risk'): void {
-    if (poolType === 'active') {
-      this.allocation.availableActive = Math.max(0, this.allocation.availableActive - amount);
-    } else {
-      this.allocation.availableHighRisk = Math.max(0, this.allocation.availableHighRisk - amount);
-    }
-    this.allocation.inPositions += amount;
-  }
-
-  releaseCapital(amount: number, poolType: 'active' | 'high_risk'): void {
-    if (poolType === 'active') {
-      this.allocation.availableActive += amount;
-    } else {
-      this.allocation.availableHighRisk += amount;
-    }
-    this.allocation.inPositions = Math.max(0, this.allocation.inPositions - amount);
-  }
-
-  suggestPoolType(rugScore: number): 'active' | 'high_risk' {
-    // Higher rug score = safer token = active pool
-    // Lower rug score = riskier = high risk pool
-    return rugScore >= 70 ? 'active' : 'high_risk';
-  }
-
-  getStatus(): string {
-    const exposure = this.getExposurePercent();
-    const positions = positionManager.getPositionCount();
-
-    return [
-      `Total: ${this.allocation.totalSol.toFixed(4)} SOL`,
-      `In Positions: ${this.allocation.inPositions.toFixed(4)} SOL (${exposure.toFixed(1)}%)`,
-      `Available Active: ${this.allocation.availableActive.toFixed(4)} SOL`,
-      `Available High Risk: ${this.allocation.availableHighRisk.toFixed(4)} SOL`,
-      `Positions: ${positions}/${this.limits.maxConcurrentPositions}`,
-    ].join(' | ');
-  }
-}
-
-export const capitalAllocator = new CapitalAllocator();
-</file>
-
 <file path="src/risk/drawdown-guard.ts">
 import { EventEmitter } from 'events';
 import { createChildLogger } from '../utils/logger';
@@ -17149,6 +16234,272 @@ export interface EntryResult {
   reason: string;
   metrics?: PumpMetrics | VelocityMetrics;
 }
+</file>
+
+<file path="src/signals/velocity-tracker.ts">
+import { createChildLogger } from '../utils/logger';
+import { config } from '../config/settings';
+import { VelocityMetrics, VelocityResult } from './types';
+
+const logger = createChildLogger('velocity-tracker');
+
+interface TradeEvent {
+  mint: string;
+  txType: 'buy' | 'sell';
+  traderPublicKey: string;
+  marketCapSol: number;
+  timestamp: number;
+}
+
+export class VelocityTracker {
+  // Rolling window of trades per token
+  private tokenTrades: Map<string, TradeEvent[]> = new Map();
+  private windowMs = 60000; // 60-second rolling window
+
+  constructor() {}
+
+  /**
+   * Record a trade event from PumpPortal WebSocket
+   */
+  recordTrade(data: {
+    mint: string;
+    txType: 'buy' | 'sell';
+    traderPublicKey: string;
+    marketCapSol: number;
+  }): void {
+    const trade: TradeEvent = {
+      ...data,
+      timestamp: Date.now(),
+    };
+
+    let trades = this.tokenTrades.get(data.mint);
+    if (!trades) {
+      trades = [];
+      this.tokenTrades.set(data.mint, trades);
+    }
+
+    trades.push(trade);
+
+    // Prune old trades outside the window
+    this.pruneOldTrades(data.mint);
+
+    logger.debug({
+      mint: data.mint.substring(0, 12),
+      txType: data.txType,
+      totalTrades: trades.length,
+    }, 'Trade recorded');
+  }
+
+  /**
+   * Remove trades outside the rolling window
+   */
+  private pruneOldTrades(mint: string): void {
+    const trades = this.tokenTrades.get(mint);
+    if (!trades) return;
+
+    const cutoff = Date.now() - this.windowMs;
+    const filtered = trades.filter(t => t.timestamp >= cutoff);
+    this.tokenTrades.set(mint, filtered);
+  }
+
+  /**
+   * Get velocity metrics for a token
+   */
+  getMetrics(mint: string): VelocityMetrics | null {
+    this.pruneOldTrades(mint);
+    const trades = this.tokenTrades.get(mint);
+
+    if (!trades || trades.length === 0) {
+      return null;
+    }
+
+    const uniqueBuyers = new Set<string>();
+    const uniqueSellers = new Set<string>();
+    let buyCount = 0;
+    let sellCount = 0;
+
+    for (const trade of trades) {
+      if (trade.txType === 'buy') {
+        buyCount++;
+        uniqueBuyers.add(trade.traderPublicKey);
+      } else {
+        sellCount++;
+        uniqueSellers.add(trade.traderPublicKey);
+      }
+    }
+
+    const txCount = trades.length;
+    const windowSeconds = this.windowMs / 1000;
+    const txPerMinute = (txCount / windowSeconds) * 60;
+    const buyPressure = txCount > 0 ? buyCount / txCount : 0;
+
+    return {
+      mint,
+      txCount,
+      buyCount,
+      sellCount,
+      uniqueBuyers,
+      uniqueSellers,
+      txPerMinute,
+      buyPressure,
+      windowStartTime: Date.now() - this.windowMs,
+    };
+  }
+
+  /**
+   * Check if a token has good velocity for entry
+   */
+  hasGoodVelocity(mint: string, marketCapSol?: number): VelocityResult {
+    const metrics = this.getMetrics(mint);
+    const thresholds = config.velocityEntry;
+
+    if (!metrics) {
+      return {
+        hasGoodVelocity: false,
+        metrics: null,
+        reason: 'No trade data available',
+      };
+    }
+
+    // Check market cap limit (only for early tokens)
+    if (marketCapSol !== undefined && marketCapSol > thresholds.maxMarketCapSol) {
+      return {
+        hasGoodVelocity: false,
+        metrics,
+        reason: `Market cap ${marketCapSol.toFixed(2)} SOL exceeds ${thresholds.maxMarketCapSol} SOL limit`,
+      };
+    }
+
+    // Check minimum transaction count
+    if (metrics.txCount < thresholds.minTxCount) {
+      return {
+        hasGoodVelocity: false,
+        metrics,
+        reason: `Only ${metrics.txCount} txs, need ${thresholds.minTxCount}`,
+      };
+    }
+
+    // Check unique buyers
+    if (metrics.uniqueBuyers.size < thresholds.minUniqueBuyers) {
+      return {
+        hasGoodVelocity: false,
+        metrics,
+        reason: `Only ${metrics.uniqueBuyers.size} unique buyers, need ${thresholds.minUniqueBuyers}`,
+      };
+    }
+
+    // Check buy pressure
+    if (metrics.buyPressure < thresholds.minBuyPressure) {
+      return {
+        hasGoodVelocity: false,
+        metrics,
+        reason: `Buy pressure ${(metrics.buyPressure * 100).toFixed(0)}% below ${(thresholds.minBuyPressure * 100).toFixed(0)}%`,
+      };
+    }
+
+    // All checks passed
+    logger.info({
+      mint: mint.substring(0, 12),
+      txCount: metrics.txCount,
+      uniqueBuyers: metrics.uniqueBuyers.size,
+      buyPressure: (metrics.buyPressure * 100).toFixed(0) + '%',
+      txPerMinute: metrics.txPerMinute.toFixed(1),
+    }, 'Good velocity detected');
+
+    return {
+      hasGoodVelocity: true,
+      metrics,
+      reason: `Velocity OK: ${metrics.txCount} txs, ${metrics.uniqueBuyers.size} buyers, ${(metrics.buyPressure * 100).toFixed(0)}% buys`,
+    };
+  }
+
+  /**
+   * Check if we have any trade data for a token
+   */
+  hasTradeData(mint: string): boolean {
+    const trades = this.tokenTrades.get(mint);
+    return trades !== undefined && trades.length > 0;
+  }
+
+  /**
+   * Clear data for a token (after position closed or rejected)
+   */
+  clearToken(mint: string): void {
+    this.tokenTrades.delete(mint);
+  }
+
+  /**
+   * Get status for logging
+   */
+  getStatus(): string {
+    return `Tracking ${this.tokenTrades.size} tokens`;
+  }
+
+  /**
+   * Get momentum strength for dynamic take profit decisions
+   * Returns: 'strong' | 'medium' | 'weak' | 'unknown'
+   *
+   * STRONG: Hold longer, TP at +150-200%
+   * MEDIUM: Normal TP at +100%
+   * WEAK: Take profit early at +50%
+   */
+  getMomentumStrength(mint: string): {
+    strength: 'strong' | 'medium' | 'weak' | 'unknown';
+    buyPressure: number;
+    txPerMinute: number;
+    uniqueBuyers: number;
+    reason: string;
+  } {
+    const metrics = this.getMetrics(mint);
+
+    if (!metrics || metrics.txCount < 3) {
+      return {
+        strength: 'unknown',
+        buyPressure: 0,
+        txPerMinute: 0,
+        uniqueBuyers: 0,
+        reason: 'Insufficient data',
+      };
+    }
+
+    const buyPressure = metrics.buyPressure;
+    const txPerMinute = metrics.txPerMinute;
+    const uniqueBuyers = metrics.uniqueBuyers.size;
+
+    // STRONG momentum: >70% buys, >10 tx/min, growing buyer base
+    if (buyPressure >= 0.70 && txPerMinute >= 10 && uniqueBuyers >= 5) {
+      return {
+        strength: 'strong',
+        buyPressure,
+        txPerMinute,
+        uniqueBuyers,
+        reason: `Strong: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min, ${uniqueBuyers} buyers`,
+      };
+    }
+
+    // WEAK momentum: <50% buys OR very low activity
+    if (buyPressure < 0.50 || txPerMinute < 3) {
+      return {
+        strength: 'weak',
+        buyPressure,
+        txPerMinute,
+        uniqueBuyers,
+        reason: `Weak: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min`,
+      };
+    }
+
+    // MEDIUM: everything in between
+    return {
+      strength: 'medium',
+      buyPressure,
+      txPerMinute,
+      uniqueBuyers,
+      reason: `Medium: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min`,
+    };
+  }
+}
+
+export const velocityTracker = new VelocityTracker();
 </file>
 
 <file path="tsconfig.json">
@@ -20001,377 +19352,719 @@ export interface C100BuybackRecord {
 }
 </file>
 
-<file path="src/execution/tx-manager.ts">
-import { EventEmitter } from 'events';
+<file path="src/execution/pumpfun-swap.ts">
+import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { createChildLogger } from '../utils/logger';
-import { config } from '../config/settings';
-import { jupiterSwap } from './jupiter-swap';
-import { pumpFunSwap } from './pumpfun-swap';
-import { jitoBundle } from './jito-bundle';
-import { SwapResult, PendingTransaction, ExecutionMetrics } from './types';
+import { config, LAMPORTS_PER_SOL } from '../config/settings';
+import { SwapResult } from './types';
 
-const logger = createChildLogger('tx-manager');
+const logger = createChildLogger('pumpfun-swap');
 
-// Track which tokens are on bonding curve vs graduated
-const bondingCurveTokens: Set<string> = new Set();
+const PUMPPORTAL_API_URL = 'https://pumpportal.fun/api';
 
-export class TransactionManager extends EventEmitter {
-  private pendingTxs: Map<string, PendingTransaction> = new Map();
-  private metrics: ExecutionMetrics = {
-    totalTransactions: 0,
-    successRate: 0,
-    avgSlippage: 0,
-    avgConfirmationTime: 0,
-    totalFeesPaid: 0,
-    jitoSuccessRate: 0,
-  };
-  private successCount = 0;
-  private jitoSuccessCount = 0;
-  private jitoAttemptCount = 0;
-  private slippageSum = 0;
-  private confirmationTimeSum = 0;
+interface PumpPortalTradeRequest {
+  publicKey: string;
+  action: 'buy' | 'sell';
+  mint: string;
+  amount: number;
+  denominatedInSol: 'true' | 'false';
+  slippage: number;
+  priorityFee: number;
+  pool: 'pump' | 'raydium' | 'auto';
+}
+
+interface PumpPortalTradeResponse {
+  transaction?: string;
+  error?: string;
+}
+
+export class PumpFunSwap {
+  private connection: Connection;
+  private wallet: Keypair | null = null;
 
   constructor() {
-    super();
+    this.connection = new Connection(config.solanaRpcUrl, 'confirmed');
   }
 
-  async initialize(): Promise<void> {
-    jupiterSwap.initialize();
-    pumpFunSwap.initialize();
-    await jitoBundle.initialize();
-    logger.info('Transaction manager initialized');
+  initialize(): void {
+    if (config.privateKey) {
+      try {
+        const secretKey = bs58.decode(config.privateKey);
+        this.wallet = Keypair.fromSecretKey(secretKey);
+        logger.info({ publicKey: this.wallet.publicKey.toBase58() }, 'PumpFun wallet initialized');
+      } catch (error) {
+        logger.error({ error }, 'Failed to initialize PumpFun wallet');
+      }
+    }
   }
 
-  // Mark a token as being on bonding curve (not graduated yet)
-  markAsBondingCurve(mint: string): void {
-    bondingCurveTokens.add(mint);
-  }
-
-  // Mark a token as graduated (now on Raydium)
-  markAsGraduated(mint: string): void {
-    bondingCurveTokens.delete(mint);
-  }
-
-  // Check if token is on bonding curve
-  isOnBondingCurve(mint: string): boolean {
-    // If we've explicitly tracked it, use that
-    if (bondingCurveTokens.has(mint)) return true;
-
-    // Default: assume pump.fun tokens ending in "pump" are on bonding curve
-    // unless we know they've graduated
-    return mint.endsWith('pump');
-  }
-
-  async executeBuy(
-    mint: string,
+  async buy(
+    tokenMint: string,
     amountSol: number,
-    options: {
-      slippageBps?: number;
-      useJito?: boolean;
-      maxRetries?: number;
-      poolType?: 'active' | 'high_risk';
-    } = {}
+    slippagePct: number = config.defaultSlippageBps / 100,  // Convert bps to %
+    priorityFee: number = config.priorityFeeSol
   ): Promise<SwapResult> {
-    const {
-      slippageBps = 100,
-      useJito = config.enableJito && amountSol > 0.1,
-      maxRetries = 3,
-      poolType,
-    } = options;
-
-    const txId = `buy_${mint}_${Date.now()}`;
-
-    const pendingTx: PendingTransaction = {
-      id: txId,
-      type: 'buy',
-      mint,
-      inputAmount: amountSol,
-      expectedOutput: 0, // Will be set after quote
-      status: 'pending',
-      retries: 0,
-      createdAt: new Date(),
-      poolType,
-    };
-
-    this.pendingTxs.set(txId, pendingTx);
-    this.emit('txPending', pendingTx);
-
-    let result: SwapResult;
-    let lastError: string | undefined;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const startTime = Date.now();
-
-        // Route to appropriate exchange
-        const useBondingCurve = this.isOnBondingCurve(mint);
-        if (useBondingCurve) {
-          logger.info({ mint, amountSol }, 'Routing buy to PumpFun (bonding curve)');
-          result = await pumpFunSwap.buy(mint, amountSol, slippageBps / 100); // Convert bps to %
-        } else {
-          logger.info({ mint, amountSol }, 'Routing buy to Jupiter (graduated)');
-          result = await jupiterSwap.buy(mint, amountSol, slippageBps);
-        }
-
-        if (result.success) {
-          pendingTx.status = 'confirmed';
-          pendingTx.signature = result.signature;
-          pendingTx.confirmedAt = new Date();
-
-          this.updateMetrics(result, Date.now() - startTime, false);
-          this.emit('txConfirmed', { ...pendingTx, result });
-
-          logger.info({
-            txId,
-            mint,
-            amountSol,
-            outputAmount: result.outputAmount,
-            signature: result.signature,
-          }, 'Buy executed');
-
-          return result;
-        }
-
-        lastError = result.error;
-        pendingTx.retries++;
-
-        logger.warn({
-          txId,
-          attempt: attempt + 1,
-          error: lastError,
-        }, 'Buy attempt failed, retrying');
-
-        // Wait before retry
-        await this.sleep(1000 * Math.pow(2, attempt));
-      } catch (error: any) {
-        lastError = error.message;
-        pendingTx.retries++;
-      }
+    if (!this.wallet) {
+      return this.errorResult(amountSol * LAMPORTS_PER_SOL, 'Wallet not initialized');
     }
 
-    pendingTx.status = 'failed';
-    pendingTx.error = lastError;
-    this.emit('txFailed', pendingTx);
+    // Paper trading simulation
+    if (config.paperTrading) {
+      return this.simulateBuy(tokenMint, amountSol, slippagePct);
+    }
 
-    return {
-      success: false,
-      inputAmount: amountSol,
-      outputAmount: 0,
-      priceImpact: 0,
-      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
-      error: lastError,
-      timestamp: new Date(),
-    };
+    try {
+      logger.info({ mint: tokenMint, amountSol, slippage: slippagePct }, 'Executing PumpFun buy');
+
+      const response = await fetch(`${PUMPPORTAL_API_URL}/trade-local`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          publicKey: this.wallet.publicKey.toBase58(),
+          action: 'buy',
+          mint: tokenMint,
+          amount: amountSol,
+          denominatedInSol: 'true',
+          slippage: slippagePct,
+          priorityFee: priorityFee,
+          pool: 'pump', // Use bonding curve
+        } as PumpPortalTradeRequest),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error({ status: response.status, error: errorText }, 'PumpPortal trade request failed');
+        return this.errorResult(amountSol * LAMPORTS_PER_SOL, `Trade request failed: ${response.status}`);
+      }
+
+      // PumpPortal returns raw transaction bytes directly, not JSON
+      const arrayBuffer = await response.arrayBuffer();
+      const txData = new Uint8Array(arrayBuffer);
+
+      // Check if response is actually JSON error
+      if (txData.length < 100) {
+        const text = new TextDecoder().decode(txData);
+        try {
+          const jsonError = JSON.parse(text);
+          if (jsonError.error) {
+            return this.errorResult(amountSol * LAMPORTS_PER_SOL, jsonError.error);
+          }
+        } catch {
+          // Not JSON, continue with deserialization
+        }
+      }
+
+      logger.debug({ bytes: txData.length }, 'Received raw transaction bytes');
+
+      // Deserialize and sign
+      const transaction = VersionedTransaction.deserialize(txData);
+      transaction.sign([this.wallet]);
+
+      // Send transaction
+      const signature = await this.connection.sendRawTransaction(
+        transaction.serialize(),
+        { skipPreflight: true, maxRetries: 3 }
+      );
+
+      logger.info({ signature }, 'PumpFun buy transaction sent');
+
+      // Confirm
+      const latestBlockhash = await this.connection.getLatestBlockhash();
+      const confirmation = await this.connection.confirmTransaction(
+        { signature, ...latestBlockhash },
+        'confirmed'
+      );
+
+      if (confirmation.value.err) {
+        return this.errorResult(
+          amountSol * LAMPORTS_PER_SOL,
+          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
+          signature
+        );
+      }
+
+      // Parse transaction to get actual token amount received from postTokenBalances
+      let outputAmount = 0;
+      try {
+        const txDetails = await this.connection.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+
+        if (txDetails?.meta?.postTokenBalances) {
+          const walletAddress = this.wallet.publicKey.toBase58();
+          // Find the token balance entry for our wallet and the purchased token
+          const tokenBalance = txDetails.meta.postTokenBalances.find(
+            (balance) =>
+              balance.owner === walletAddress &&
+              balance.mint === tokenMint
+          );
+
+          if (tokenBalance?.uiTokenAmount?.uiAmount) {
+            outputAmount = tokenBalance.uiTokenAmount.uiAmount;
+            logger.info({
+              signature,
+              outputAmount,
+              decimals: tokenBalance.uiTokenAmount.decimals,
+            }, 'Parsed token amount from transaction postTokenBalances');
+          }
+        }
+      } catch (parseError) {
+        logger.warn({ signature, error: parseError }, 'Failed to parse transaction for token amount');
+      }
+
+      logger.info({ signature, amountSol, outputAmount }, 'PumpFun buy successful');
+
+      return {
+        success: true,
+        signature,
+        inputAmount: amountSol * LAMPORTS_PER_SOL,
+        outputAmount,
+        priceImpact: 0,
+        fees: {
+          platformFee: amountSol * LAMPORTS_PER_SOL * 0.01, // 1% pump.fun fee
+          networkFee: 5000,
+          priorityFee: priorityFee * LAMPORTS_PER_SOL,
+          totalFee: amountSol * LAMPORTS_PER_SOL * 0.01 + 5000 + priorityFee * LAMPORTS_PER_SOL,
+        },
+        timestamp: new Date(),
+      };
+    } catch (error: any) {
+      logger.error({
+        error: error.message,
+        code: error.code,
+        stack: error.stack?.split('\n').slice(0, 3).join(' -> ')
+      }, 'PumpFun buy failed');
+      return this.errorResult(amountSol * LAMPORTS_PER_SOL, error.message);
+    }
   }
 
-  async executeSell(
-    mint: string,
+  async sell(
+    tokenMint: string,
     amountTokens: number,
-    decimals: number,
-    options: {
-      slippageBps?: number;
-      useJito?: boolean;
-      maxRetries?: number;
-      skipBalanceCheck?: boolean;  // Trust position amount when RPC is unreliable
-    } = {}
+    slippagePct: number = config.defaultSlippageBps / 100,  // Convert bps to %
+    priorityFee: number = config.priorityFeeSol
   ): Promise<SwapResult> {
-    const {
-      slippageBps = config.defaultSlippageBps,  // Use config default (15%) for volatile tokens
-      useJito = config.enableJito,
-      maxRetries = 3,
-      skipBalanceCheck = false,
-    } = options;
+    if (!this.wallet) {
+      return this.errorResult(0, 'Wallet not initialized');
+    }
 
-    // Verify actual token balance before selling (with retry)
-    let actualBalance = 0;
-    let balanceCheckFailed = false;
+    // Paper trading simulation
+    if (config.paperTrading) {
+      return this.simulateSell(tokenMint, amountTokens, slippagePct);
+    }
 
-    if (!skipBalanceCheck) {
-      // Try balance check with retries
-      for (let i = 0; i < 3; i++) {
-        actualBalance = await this.getTokenBalance(mint);
-        if (actualBalance > 0) break;
+    try {
+      logger.info({ mint: tokenMint, amountTokens, slippage: slippagePct }, 'Executing PumpFun sell');
 
-        // Wait and retry - RPC might be slow
-        if (i < 2) {
-          logger.debug({ mint, attempt: i + 1 }, 'Balance check returned 0, retrying...');
-          await this.sleep(1000 * (i + 1));
+      const response = await fetch(`${PUMPPORTAL_API_URL}/trade-local`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          publicKey: this.wallet.publicKey.toBase58(),
+          action: 'sell',
+          mint: tokenMint,
+          amount: amountTokens,
+          denominatedInSol: 'false',
+          slippage: slippagePct,
+          priorityFee: priorityFee,
+          pool: 'auto', // Auto-detect if on bonding curve or Raydium
+        } as PumpPortalTradeRequest),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error({ status: response.status, error: errorText }, 'PumpPortal sell request failed');
+        return this.errorResult(0, `Sell request failed: ${response.status}`);
+      }
+
+      // PumpPortal returns raw transaction bytes directly, not JSON
+      const arrayBuffer = await response.arrayBuffer();
+      const txData = new Uint8Array(arrayBuffer);
+
+      // Check if response is actually JSON error
+      if (txData.length < 100) {
+        const text = new TextDecoder().decode(txData);
+        try {
+          const jsonError = JSON.parse(text);
+          if (jsonError.error) {
+            return this.errorResult(0, jsonError.error);
+          }
+        } catch {
+          // Not JSON, continue with deserialization
         }
       }
 
-      if (actualBalance === 0) {
-        balanceCheckFailed = true;
-        logger.warn({ mint, requestedAmount: amountTokens },
-          'Balance check returned 0 after retries - proceeding with tracked amount');
+      logger.debug({ bytes: txData.length }, 'Received raw transaction bytes');
+
+      // Deserialize and sign
+      const transaction = VersionedTransaction.deserialize(txData);
+      transaction.sign([this.wallet]);
+
+      // Send transaction
+      const signature = await this.connection.sendRawTransaction(
+        transaction.serialize(),
+        { skipPreflight: true, maxRetries: 3 }
+      );
+
+      logger.info({ signature }, 'PumpFun sell transaction sent');
+
+      // Confirm
+      const latestBlockhash = await this.connection.getLatestBlockhash();
+      const confirmation = await this.connection.confirmTransaction(
+        { signature, ...latestBlockhash },
+        'confirmed'
+      );
+
+      if (confirmation.value.err) {
+        return this.errorResult(
+          0,
+          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
+          signature
+        );
       }
+
+      logger.info({ signature, amountTokens }, 'PumpFun sell successful');
+
+      return {
+        success: true,
+        signature,
+        inputAmount: amountTokens,
+        outputAmount: 0, // SOL received, will be calculated
+        priceImpact: 0,
+        fees: {
+          platformFee: 0, // Calculated based on output
+          networkFee: 5000,
+          priorityFee: priorityFee * LAMPORTS_PER_SOL,
+          totalFee: 5000 + priorityFee * LAMPORTS_PER_SOL,
+        },
+        timestamp: new Date(),
+      };
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'PumpFun sell failed');
+      return this.errorResult(0, error.message);
     }
+  }
 
-    if (!skipBalanceCheck && !balanceCheckFailed && actualBalance < amountTokens * 0.99) {  // 1% tolerance
-      logger.warn({ mint, requested: amountTokens, actual: actualBalance },
-        'Insufficient token balance - adjusting sell amount');
+  private async simulateBuy(
+    tokenMint: string,
+    amountSol: number,
+    slippagePct: number
+  ): Promise<SwapResult> {
+    // Simulate buying on bonding curve
+    // In reality, tokens received depends on bonding curve state
+    const estimatedTokens = amountSol * 1_000_000; // Rough estimate for new tokens
 
-      if (actualBalance > 0) {
-        // Sell what we actually have
-        amountTokens = actualBalance;
-      }
-      // If actualBalance is 0 but balanceCheckFailed is true, we proceed with tracked amount
-    }
-
-    // If balance check completely failed, proceed anyway with tracked amount
-    // The swap API will fail if we truly have no tokens, but at least we try
-    if (balanceCheckFailed || skipBalanceCheck) {
-      logger.info({ mint, amountTokens, balanceCheckFailed, skipBalanceCheck },
-        'Proceeding with sell using tracked position amount');
-    }
-
-    const txId = `sell_${mint}_${Date.now()}`;
-
-    const pendingTx: PendingTransaction = {
-      id: txId,
-      type: 'sell',
-      mint,
-      inputAmount: amountTokens,
-      expectedOutput: 0,
-      status: 'pending',
-      retries: 0,
-      createdAt: new Date(),
-    };
-
-    this.pendingTxs.set(txId, pendingTx);
-    this.emit('txPending', pendingTx);
-
-    let result: SwapResult;
-    let lastError: string | undefined;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const startTime = Date.now();
-
-        // Route to appropriate exchange
-        // For sells, use 'auto' pool in PumpPortal which handles both
-        const useBondingCurve = this.isOnBondingCurve(mint);
-        if (useBondingCurve) {
-          logger.info({ mint, amountTokens }, 'Routing sell to PumpFun (auto-detect pool)');
-          result = await pumpFunSwap.sell(mint, amountTokens, slippageBps / 100);
-        } else {
-          logger.info({ mint, amountTokens }, 'Routing sell to Jupiter (graduated)');
-          result = await jupiterSwap.sell(mint, amountTokens, decimals, slippageBps);
-        }
-
-        if (result.success) {
-          pendingTx.status = 'confirmed';
-          pendingTx.signature = result.signature;
-          pendingTx.confirmedAt = new Date();
-
-          this.updateMetrics(result, Date.now() - startTime, false);
-          this.emit('txConfirmed', { ...pendingTx, result });
-
-          logger.info({
-            txId,
-            mint,
-            amountTokens,
-            outputSol: result.outputAmount,
-            signature: result.signature,
-          }, 'Sell executed');
-
-          return result;
-        }
-
-        lastError = result.error;
-        pendingTx.retries++;
-
-        logger.warn({
-          txId,
-          attempt: attempt + 1,
-          error: lastError,
-        }, 'Sell attempt failed, retrying');
-
-        await this.sleep(1000 * Math.pow(2, attempt));
-      } catch (error: any) {
-        lastError = error.message;
-        pendingTx.retries++;
-      }
-    }
-
-    pendingTx.status = 'failed';
-    pendingTx.error = lastError;
-    this.emit('txFailed', pendingTx);
+    logger.info({
+      mode: 'PAPER',
+      action: 'buy',
+      mint: tokenMint,
+      amountSol,
+      estimatedTokens,
+    }, 'Paper PumpFun buy');
 
     return {
-      success: false,
-      inputAmount: amountTokens,
-      outputAmount: 0,
-      priceImpact: 0,
-      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
-      error: lastError,
+      success: true,
+      signature: `PAPER_PUMP_BUY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      inputAmount: amountSol * LAMPORTS_PER_SOL,
+      outputAmount: estimatedTokens,
+      priceImpact: 0.5, // Estimate
+      fees: {
+        platformFee: amountSol * LAMPORTS_PER_SOL * 0.01,
+        networkFee: 5000,
+        priorityFee: 0,
+        totalFee: amountSol * LAMPORTS_PER_SOL * 0.01 + 5000,
+      },
       timestamp: new Date(),
     };
   }
 
-  private updateMetrics(result: SwapResult, confirmationTime: number, usedJito: boolean): void {
-    this.metrics.totalTransactions++;
+  private async simulateSell(
+    tokenMint: string,
+    amountTokens: number,
+    slippagePct: number
+  ): Promise<SwapResult> {
+    // Simulate selling on bonding curve
+    const estimatedSol = amountTokens / 1_000_000; // Rough estimate
 
-    if (result.success) {
-      this.successCount++;
-      this.slippageSum += result.priceImpact;
-      this.confirmationTimeSum += confirmationTime;
-      this.metrics.totalFeesPaid += result.fees.totalFee;
-    }
+    logger.info({
+      mode: 'PAPER',
+      action: 'sell',
+      mint: tokenMint,
+      amountTokens,
+      estimatedSol,
+    }, 'Paper PumpFun sell');
 
-    if (usedJito) {
-      this.jitoAttemptCount++;
-      if (result.success) {
-        this.jitoSuccessCount++;
-      }
-    }
-
-    // Update rates
-    this.metrics.successRate = this.successCount / this.metrics.totalTransactions;
-    this.metrics.avgSlippage = this.successCount > 0 ? this.slippageSum / this.successCount : 0;
-    this.metrics.avgConfirmationTime = this.successCount > 0
-      ? this.confirmationTimeSum / this.successCount
-      : 0;
-    this.metrics.jitoSuccessRate = this.jitoAttemptCount > 0
-      ? this.jitoSuccessCount / this.jitoAttemptCount
-      : 0;
+    return {
+      success: true,
+      signature: `PAPER_PUMP_SELL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      inputAmount: amountTokens,
+      outputAmount: estimatedSol * LAMPORTS_PER_SOL,
+      priceImpact: 0.5,
+      fees: {
+        platformFee: estimatedSol * LAMPORTS_PER_SOL * 0.01,
+        networkFee: 5000,
+        priorityFee: 0,
+        totalFee: estimatedSol * LAMPORTS_PER_SOL * 0.01 + 5000,
+      },
+      timestamp: new Date(),
+    };
   }
 
-  getPendingTransactions(): PendingTransaction[] {
-    return Array.from(this.pendingTxs.values()).filter((tx) => tx.status === 'pending');
-  }
-
-  getMetrics(): ExecutionMetrics {
-    return { ...this.metrics };
-  }
-
-  async getWalletBalance(): Promise<number> {
-    return jupiterSwap.getBalance();
-  }
-
-  async getTokenBalance(mint: string): Promise<number> {
-    return jupiterSwap.getTokenBalance(mint);
+  private errorResult(inputAmount: number, error: string, signature?: string): SwapResult {
+    return {
+      success: false,
+      signature,
+      inputAmount,
+      outputAmount: 0,
+      priceImpact: 0,
+      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
+      error,
+      timestamp: new Date(),
+    };
   }
 
   getWalletAddress(): string | null {
-    return jupiterSwap.getWalletAddress();
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  cleanupOldTransactions(maxAge: number = 3600000): void {
-    const cutoff = Date.now() - maxAge;
-
-    for (const [id, tx] of this.pendingTxs.entries()) {
-      if (tx.createdAt.getTime() < cutoff && tx.status !== 'pending') {
-        this.pendingTxs.delete(id);
-      }
-    }
+    return this.wallet?.publicKey.toBase58() || null;
   }
 }
 
-export const txManager = new TransactionManager();
+export const pumpFunSwap = new PumpFunSwap();
+</file>
+
+<file path="src/execution/types.ts">
+import { PublicKey } from '@solana/web3.js';
+
+export interface SwapQuote {
+  inputMint: string;
+  outputMint: string;
+  inputAmount: number;
+  outputAmount: number;
+  priceImpact: number;
+  slippageBps: number;
+  route: SwapRoute[];
+  fees: SwapFees;
+}
+
+export interface SwapRoute {
+  dex: string;
+  poolAddress: string;
+  inputMint: string;
+  outputMint: string;
+  inputAmount: number;
+  outputAmount: number;
+}
+
+export interface SwapFees {
+  platformFee: number;
+  networkFee: number;
+  priorityFee: number;
+  totalFee: number;
+}
+
+export interface SwapResult {
+  success: boolean;
+  signature?: string;
+  inputAmount: number;
+  outputAmount: number;
+  priceImpact: number;
+  fees: SwapFees;
+  error?: string;
+  timestamp: Date;
+  actualBalance?: number;  // Actual on-chain balance (for detecting manual sells)
+}
+
+export interface JitoBundleResult {
+  success: boolean;
+  bundleId?: string;
+  signatures: string[];
+  tipAmount: number;
+  landedSlot?: number;
+  error?: string;
+}
+
+export interface TransactionConfig {
+  priorityFee: number;
+  maxRetries: number;
+  confirmationTimeout: number;
+  useJito: boolean;
+  jitoTip: number;
+}
+
+export interface PendingTransaction {
+  id: string;
+  signature?: string;
+  type: 'buy' | 'sell';
+  mint: string;
+  inputAmount: number;
+  expectedOutput: number;
+  status: 'pending' | 'confirmed' | 'failed';
+  retries: number;
+  createdAt: Date;
+  confirmedAt?: Date;
+  error?: string;
+  poolType?: 'active' | 'high_risk';
+}
+
+export interface ExecutionMetrics {
+  totalTransactions: number;
+  successRate: number;
+  avgSlippage: number;
+  avgConfirmationTime: number;
+  totalFeesPaid: number;
+  jitoSuccessRate: number;
+}
+</file>
+
+<file path="src/risk/capital-allocator.ts">
+import { createChildLogger } from '../utils/logger';
+import { config } from '../config/settings';
+import { txManager } from '../execution/tx-manager';
+import { positionManager } from './position-manager';
+import { CapitalAllocation, RiskCheckResult, RiskLimits } from './types';
+
+const logger = createChildLogger('capital-allocator');
+
+export class CapitalAllocator {
+  private allocation: CapitalAllocation;
+  private limits: RiskLimits;
+  private pendingByPool: Map<string, number> = new Map();
+
+  constructor() {
+    const totalCapital = config.initialCapitalSol;
+
+    this.allocation = {
+      totalSol: totalCapital,
+      reserveSol: totalCapital * config.capitalAllocation.reserve,
+      activeSol: totalCapital * config.capitalAllocation.active,
+      highRiskSol: totalCapital * config.capitalAllocation.highRisk,
+      inPositions: 0,
+      availableActive: totalCapital * config.capitalAllocation.active,
+      availableHighRisk: totalCapital * config.capitalAllocation.highRisk,
+    };
+
+    this.limits = {
+      maxPositionSizeSol: config.maxPositionSize * totalCapital,
+      maxConcurrentPositions: config.maxConcurrentPositions,
+      dailyLossLimit: config.dailyLossLimit,
+      maxDrawdownLimit: 0.30, // 30% max drawdown
+      minPositionSizeSol: 0.001,
+    };
+  }
+
+  async start(): Promise<void> {
+    this.setupEventHandlers();
+    await this.syncWithWallet();
+    logger.info('Capital allocator started');
+  }
+
+  private setupEventHandlers(): void {
+    txManager.on('txPending', (tx) => {
+      if (tx.type === 'buy' && tx.poolType) {
+        const current = this.pendingByPool.get(tx.poolType) || 0;
+        this.pendingByPool.set(tx.poolType, current + tx.inputAmount);
+        logger.info({ 
+          pool: tx.poolType, 
+          amount: tx.inputAmount,
+          newPending: current + tx.inputAmount 
+        }, 'Capital reserved for pending tx');
+      }
+    });
+
+    const releasePending = (tx: any) => {
+      if (tx.type === 'buy' && tx.poolType) {
+        const current = this.pendingByPool.get(tx.poolType) || 0;
+        const newPending = Math.max(0, current - tx.inputAmount);
+        this.pendingByPool.set(tx.poolType, newPending);
+        logger.info({ 
+          pool: tx.poolType, 
+          amount: tx.inputAmount,
+          remainingPending: newPending
+        }, 'Pending capital released');
+      }
+    };
+
+    txManager.on('txConfirmed', releasePending);
+    txManager.on('txFailed', releasePending);
+  }
+
+  async syncWithWallet(): Promise<void> {
+    try {
+      const actualBalance = await txManager.getWalletBalance();
+      const inPositions = positionManager.getTotalExposure();
+
+      this.allocation.totalSol = actualBalance + inPositions;
+      this.allocation.inPositions = inPositions;
+
+      // Recalculate allocations
+      this.allocation.reserveSol = this.allocation.totalSol * config.capitalAllocation.reserve;
+      this.allocation.activeSol = this.allocation.totalSol * config.capitalAllocation.active;
+      this.allocation.highRiskSol = this.allocation.totalSol * config.capitalAllocation.highRisk;
+
+      // Calculate available capital by pool
+      const activeInPositions = this.getPoolExposure('active');
+      const highRiskInPositions = this.getPoolExposure('high_risk');
+
+      this.allocation.availableActive = Math.max(0, this.allocation.activeSol - activeInPositions);
+      this.allocation.availableHighRisk = Math.max(0, this.allocation.highRiskSol - highRiskInPositions);
+
+      // Update limits based on new total
+      this.limits.maxPositionSizeSol = config.maxPositionSize * this.allocation.totalSol;
+
+      logger.debug({
+        total: this.allocation.totalSol.toFixed(4),
+        available: actualBalance.toFixed(4),
+        inPositions: inPositions.toFixed(4),
+        availableActive: this.allocation.availableActive.toFixed(4),
+        availableHighRisk: this.allocation.availableHighRisk.toFixed(4),
+      }, 'Capital synced');
+    } catch (error) {
+      logger.error({ error }, 'Failed to sync capital');
+    }
+  }
+
+  private getPoolExposure(poolType: 'active' | 'high_risk'): number {
+    return positionManager
+      .getOpenPositions()
+      .filter((p) => p.poolType === poolType)
+      .reduce((sum, p) => sum + p.amountSol, 0);
+  }
+
+  checkRisk(
+    requestedSizeSol: number,
+    poolType: 'active' | 'high_risk'
+  ): RiskCheckResult {
+    const warnings: string[] = [];
+    let adjustedSize = requestedSizeSol;
+    let approved = true;
+
+    // Check position count limit
+    const currentPositions = positionManager.getPositionCount();
+    if (currentPositions >= this.limits.maxConcurrentPositions) {
+      logger.info({
+        currentPositions,
+        maxPositions: this.limits.maxConcurrentPositions,
+      }, 'BLOCKED: Max concurrent positions reached');
+      return {
+        approved: false,
+        reason: `Max positions (${this.limits.maxConcurrentPositions}) reached`,
+        warnings: [],
+      };
+    }
+
+    // Check pool availability
+    const available =
+      poolType === 'active'
+        ? this.allocation.availableActive
+        : this.allocation.availableHighRisk;
+    
+    // Deduct pending transactions
+    const pending = this.pendingByPool.get(poolType) || 0;
+    const effectiveAvailable = Math.max(0, available - pending);
+
+    if (requestedSizeSol > effectiveAvailable) {
+      adjustedSize = effectiveAvailable;
+      warnings.push(`Size reduced from ${available.toFixed(4)} to ${effectiveAvailable.toFixed(4)} (pending: ${pending.toFixed(4)})`);
+    }
+
+    // Check max position size
+    if (adjustedSize > this.limits.maxPositionSizeSol) {
+      adjustedSize = this.limits.maxPositionSizeSol;
+      warnings.push(`Size capped at max: ${this.limits.maxPositionSizeSol.toFixed(4)} SOL`);
+    }
+
+    // Check min position size
+    if (adjustedSize < this.limits.minPositionSizeSol) {
+      return {
+        approved: false,
+        reason: `Size ${adjustedSize.toFixed(4)} below minimum ${this.limits.minPositionSizeSol} SOL`,
+        warnings,
+      };
+    }
+
+    // Check total exposure
+    const totalExposure = positionManager.getTotalExposure() + adjustedSize;
+    const maxExposure = this.allocation.totalSol - this.allocation.reserveSol;
+
+    if (totalExposure > maxExposure) {
+      const allowedSize = maxExposure - positionManager.getTotalExposure();
+      if (allowedSize < this.limits.minPositionSizeSol) {
+        return {
+          approved: false,
+          reason: 'Would exceed total exposure limit',
+          warnings,
+        };
+      }
+      adjustedSize = allowedSize;
+      warnings.push(`Size reduced due to exposure limit: ${adjustedSize.toFixed(4)} SOL`);
+    }
+
+    return {
+      approved: true,
+      adjustedSize,
+      reason: 'Risk check passed',
+      warnings,
+    };
+  }
+
+  getAllocation(): CapitalAllocation {
+    return { ...this.allocation };
+  }
+
+  getLimits(): RiskLimits {
+    return { ...this.limits };
+  }
+
+  getAvailableCapital(poolType: 'active' | 'high_risk'): number {
+    return poolType === 'active'
+      ? this.allocation.availableActive
+      : this.allocation.availableHighRisk;
+  }
+
+  getExposurePercent(): number {
+    if (this.allocation.totalSol === 0) return 0;
+    return (this.allocation.inPositions / this.allocation.totalSol) * 100;
+  }
+
+  reserveCapital(amount: number, poolType: 'active' | 'high_risk'): void {
+    if (poolType === 'active') {
+      this.allocation.availableActive = Math.max(0, this.allocation.availableActive - amount);
+    } else {
+      this.allocation.availableHighRisk = Math.max(0, this.allocation.availableHighRisk - amount);
+    }
+    this.allocation.inPositions += amount;
+  }
+
+  releaseCapital(amount: number, poolType: 'active' | 'high_risk'): void {
+    if (poolType === 'active') {
+      this.allocation.availableActive += amount;
+    } else {
+      this.allocation.availableHighRisk += amount;
+    }
+    this.allocation.inPositions = Math.max(0, this.allocation.inPositions - amount);
+  }
+
+  suggestPoolType(rugScore: number): 'active' | 'high_risk' {
+    // Higher rug score = safer token = active pool
+    // Lower rug score = riskier = high risk pool
+    return rugScore >= 70 ? 'active' : 'high_risk';
+  }
+
+  getStatus(): string {
+    const exposure = this.getExposurePercent();
+    const positions = positionManager.getPositionCount();
+
+    return [
+      `Total: ${this.allocation.totalSol.toFixed(4)} SOL`,
+      `In Positions: ${this.allocation.inPositions.toFixed(4)} SOL (${exposure.toFixed(1)}%)`,
+      `Available Active: ${this.allocation.availableActive.toFixed(4)} SOL`,
+      `Available High Risk: ${this.allocation.availableHighRisk.toFixed(4)} SOL`,
+      `Positions: ${positions}/${this.limits.maxConcurrentPositions}`,
+    ].join(' | ');
+  }
+}
+
+export const capitalAllocator = new CapitalAllocator();
 </file>
 
 <file path=".gitignore">
@@ -21479,6 +21172,394 @@ export const dropTables = async (pool: Pool): Promise<void> => {
 };
 </file>
 
+<file path="src/execution/tx-manager.ts">
+import { EventEmitter } from 'events';
+import { createChildLogger } from '../utils/logger';
+import { config } from '../config/settings';
+import { jupiterSwap } from './jupiter-swap';
+import { pumpFunSwap } from './pumpfun-swap';
+import { jitoBundle } from './jito-bundle';
+import { SwapResult, PendingTransaction, ExecutionMetrics } from './types';
+
+const logger = createChildLogger('tx-manager');
+
+// Track which tokens are on bonding curve vs graduated
+const bondingCurveTokens: Set<string> = new Set();
+
+export class TransactionManager extends EventEmitter {
+  private pendingTxs: Map<string, PendingTransaction> = new Map();
+  private metrics: ExecutionMetrics = {
+    totalTransactions: 0,
+    successRate: 0,
+    avgSlippage: 0,
+    avgConfirmationTime: 0,
+    totalFeesPaid: 0,
+    jitoSuccessRate: 0,
+  };
+  private successCount = 0;
+  private jitoSuccessCount = 0;
+  private jitoAttemptCount = 0;
+  private slippageSum = 0;
+  private confirmationTimeSum = 0;
+
+  constructor() {
+    super();
+  }
+
+  async initialize(): Promise<void> {
+    jupiterSwap.initialize();
+    pumpFunSwap.initialize();
+    await jitoBundle.initialize();
+    logger.info('Transaction manager initialized');
+  }
+
+  // Mark a token as being on bonding curve (not graduated yet)
+  markAsBondingCurve(mint: string): void {
+    bondingCurveTokens.add(mint);
+  }
+
+  // Mark a token as graduated (now on Raydium)
+  markAsGraduated(mint: string): void {
+    bondingCurveTokens.delete(mint);
+  }
+
+  // Check if token is on bonding curve
+  isOnBondingCurve(mint: string): boolean {
+    // If we've explicitly tracked it, use that
+    if (bondingCurveTokens.has(mint)) return true;
+
+    // Default: assume pump.fun tokens ending in "pump" are on bonding curve
+    // unless we know they've graduated
+    return mint.endsWith('pump');
+  }
+
+  async executeBuy(
+    mint: string,
+    amountSol: number,
+    options: {
+      slippageBps?: number;
+      useJito?: boolean;
+      maxRetries?: number;
+      poolType?: 'active' | 'high_risk';
+    } = {}
+  ): Promise<SwapResult> {
+    const {
+      slippageBps = 100,
+      useJito = config.enableJito && amountSol > 0.1,
+      maxRetries = 3,
+      poolType,
+    } = options;
+
+    const txId = `buy_${mint}_${Date.now()}`;
+
+    const pendingTx: PendingTransaction = {
+      id: txId,
+      type: 'buy',
+      mint,
+      inputAmount: amountSol,
+      expectedOutput: 0, // Will be set after quote
+      status: 'pending',
+      retries: 0,
+      createdAt: new Date(),
+      poolType,
+    };
+
+    this.pendingTxs.set(txId, pendingTx);
+    this.emit('txPending', pendingTx);
+
+    let result: SwapResult;
+    let lastError: string | undefined;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const startTime = Date.now();
+
+        // Route to appropriate exchange
+        const useBondingCurve = this.isOnBondingCurve(mint);
+        if (useBondingCurve) {
+          logger.info({ mint, amountSol }, 'Routing buy to PumpFun (bonding curve)');
+          result = await pumpFunSwap.buy(mint, amountSol, slippageBps / 100); // Convert bps to %
+        } else {
+          logger.info({ mint, amountSol }, 'Routing buy to Jupiter (graduated)');
+          result = await jupiterSwap.buy(mint, amountSol, slippageBps);
+        }
+
+        if (result.success) {
+          pendingTx.status = 'confirmed';
+          pendingTx.signature = result.signature;
+          pendingTx.confirmedAt = new Date();
+
+          this.updateMetrics(result, Date.now() - startTime, false);
+          this.emit('txConfirmed', { ...pendingTx, result });
+
+          logger.info({
+            txId,
+            mint,
+            amountSol,
+            outputAmount: result.outputAmount,
+            signature: result.signature,
+          }, 'Buy executed');
+
+          return result;
+        }
+
+        lastError = result.error;
+        pendingTx.retries++;
+
+        // Check for error 6005 (BondingCurveComplete) - token graduated to Raydium
+        if (lastError?.includes('6005') || lastError?.includes('BondingCurveComplete')) {
+          logger.info({ mint }, 'Token has graduated from bonding curve - switching to Jupiter');
+          this.markAsGraduated(mint);
+          // Don't wait, immediately retry via Jupiter
+          continue;
+        }
+
+        logger.warn({
+          txId,
+          attempt: attempt + 1,
+          error: lastError,
+        }, 'Buy attempt failed, retrying');
+
+        // Wait before retry
+        await this.sleep(1000 * Math.pow(2, attempt));
+      } catch (error: any) {
+        lastError = error.message;
+        pendingTx.retries++;
+
+        // Check for error 6005 in exception as well
+        if (lastError?.includes('6005') || lastError?.includes('BondingCurveComplete')) {
+          logger.info({ mint }, 'Token has graduated from bonding curve - switching to Jupiter');
+          this.markAsGraduated(mint);
+          continue;
+        }
+      }
+    }
+
+    pendingTx.status = 'failed';
+    pendingTx.error = lastError;
+    this.emit('txFailed', pendingTx);
+
+    return {
+      success: false,
+      inputAmount: amountSol,
+      outputAmount: 0,
+      priceImpact: 0,
+      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
+      error: lastError,
+      timestamp: new Date(),
+    };
+  }
+
+  async executeSell(
+    mint: string,
+    amountTokens: number,
+    decimals: number,
+    options: {
+      slippageBps?: number;
+      useJito?: boolean;
+      maxRetries?: number;
+      skipBalanceCheck?: boolean;  // Trust position amount when RPC is unreliable
+    } = {}
+  ): Promise<SwapResult> {
+    const {
+      slippageBps = config.defaultSlippageBps,  // Use config default (15%) for volatile tokens
+      useJito = config.enableJito,
+      maxRetries = 3,
+      skipBalanceCheck = false,
+    } = options;
+
+    // Verify actual token balance before selling (with retry)
+    let actualBalance = 0;
+    let balanceCheckFailed = false;
+
+    if (!skipBalanceCheck) {
+      // Try balance check with retries
+      for (let i = 0; i < 3; i++) {
+        actualBalance = await this.getTokenBalance(mint);
+        if (actualBalance > 0) break;
+
+        // Wait and retry - RPC might be slow
+        if (i < 2) {
+          logger.debug({ mint, attempt: i + 1 }, 'Balance check returned 0, retrying...');
+          await this.sleep(1000 * (i + 1));
+        }
+      }
+
+      if (actualBalance === 0) {
+        balanceCheckFailed = true;
+        logger.warn({ mint, requestedAmount: amountTokens },
+          'Balance check returned 0 after retries - proceeding with tracked amount');
+      }
+    }
+
+    if (!skipBalanceCheck && !balanceCheckFailed && actualBalance < amountTokens * 0.99) {  // 1% tolerance
+      logger.warn({ mint, requested: amountTokens, actual: actualBalance },
+        'Insufficient token balance - adjusting sell amount');
+
+      if (actualBalance > 0) {
+        // Sell what we actually have
+        amountTokens = actualBalance;
+      }
+      // If actualBalance is 0 but balanceCheckFailed is true, we proceed with tracked amount
+    }
+
+    // If balance check completely failed, proceed anyway with tracked amount
+    // The swap API will fail if we truly have no tokens, but at least we try
+    if (balanceCheckFailed || skipBalanceCheck) {
+      logger.info({ mint, amountTokens, balanceCheckFailed, skipBalanceCheck },
+        'Proceeding with sell using tracked position amount');
+    }
+
+    const txId = `sell_${mint}_${Date.now()}`;
+
+    const pendingTx: PendingTransaction = {
+      id: txId,
+      type: 'sell',
+      mint,
+      inputAmount: amountTokens,
+      expectedOutput: 0,
+      status: 'pending',
+      retries: 0,
+      createdAt: new Date(),
+    };
+
+    this.pendingTxs.set(txId, pendingTx);
+    this.emit('txPending', pendingTx);
+
+    let result: SwapResult;
+    let lastError: string | undefined;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const startTime = Date.now();
+
+        // Route to appropriate exchange
+        // For sells, use 'auto' pool in PumpPortal which handles both
+        const useBondingCurve = this.isOnBondingCurve(mint);
+        if (useBondingCurve) {
+          logger.info({ mint, amountTokens }, 'Routing sell to PumpFun (auto-detect pool)');
+          result = await pumpFunSwap.sell(mint, amountTokens, slippageBps / 100);
+        } else {
+          logger.info({ mint, amountTokens }, 'Routing sell to Jupiter (graduated)');
+          result = await jupiterSwap.sell(mint, amountTokens, decimals, slippageBps);
+        }
+
+        if (result.success) {
+          pendingTx.status = 'confirmed';
+          pendingTx.signature = result.signature;
+          pendingTx.confirmedAt = new Date();
+
+          this.updateMetrics(result, Date.now() - startTime, false);
+          this.emit('txConfirmed', { ...pendingTx, result });
+
+          logger.info({
+            txId,
+            mint,
+            amountTokens,
+            outputSol: result.outputAmount,
+            signature: result.signature,
+          }, 'Sell executed');
+
+          return result;
+        }
+
+        lastError = result.error;
+        pendingTx.retries++;
+
+        logger.warn({
+          txId,
+          attempt: attempt + 1,
+          error: lastError,
+        }, 'Sell attempt failed, retrying');
+
+        await this.sleep(1000 * Math.pow(2, attempt));
+      } catch (error: any) {
+        lastError = error.message;
+        pendingTx.retries++;
+      }
+    }
+
+    pendingTx.status = 'failed';
+    pendingTx.error = lastError;
+    this.emit('txFailed', pendingTx);
+
+    return {
+      success: false,
+      inputAmount: amountTokens,
+      outputAmount: 0,
+      priceImpact: 0,
+      fees: { platformFee: 0, networkFee: 0, priorityFee: 0, totalFee: 0 },
+      error: lastError,
+      timestamp: new Date(),
+    };
+  }
+
+  private updateMetrics(result: SwapResult, confirmationTime: number, usedJito: boolean): void {
+    this.metrics.totalTransactions++;
+
+    if (result.success) {
+      this.successCount++;
+      this.slippageSum += result.priceImpact;
+      this.confirmationTimeSum += confirmationTime;
+      this.metrics.totalFeesPaid += result.fees.totalFee;
+    }
+
+    if (usedJito) {
+      this.jitoAttemptCount++;
+      if (result.success) {
+        this.jitoSuccessCount++;
+      }
+    }
+
+    // Update rates
+    this.metrics.successRate = this.successCount / this.metrics.totalTransactions;
+    this.metrics.avgSlippage = this.successCount > 0 ? this.slippageSum / this.successCount : 0;
+    this.metrics.avgConfirmationTime = this.successCount > 0
+      ? this.confirmationTimeSum / this.successCount
+      : 0;
+    this.metrics.jitoSuccessRate = this.jitoAttemptCount > 0
+      ? this.jitoSuccessCount / this.jitoAttemptCount
+      : 0;
+  }
+
+  getPendingTransactions(): PendingTransaction[] {
+    return Array.from(this.pendingTxs.values()).filter((tx) => tx.status === 'pending');
+  }
+
+  getMetrics(): ExecutionMetrics {
+    return { ...this.metrics };
+  }
+
+  async getWalletBalance(): Promise<number> {
+    return jupiterSwap.getBalance();
+  }
+
+  async getTokenBalance(mint: string): Promise<number> {
+    return jupiterSwap.getTokenBalance(mint);
+  }
+
+  getWalletAddress(): string | null {
+    return jupiterSwap.getWalletAddress();
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  cleanupOldTransactions(maxAge: number = 3600000): void {
+    const cutoff = Date.now() - maxAge;
+
+    for (const [id, tx] of this.pendingTxs.entries()) {
+      if (tx.createdAt.getTime() < cutoff && tx.status !== 'pending') {
+        this.pendingTxs.delete(id);
+      }
+    }
+  }
+}
+
+export const txManager = new TransactionManager();
+</file>
+
 <file path=".claude/settings.local.json">
 {
   "permissions": {
@@ -21529,6 +21610,79 @@ ENABLE_JITO=false
 
 # C100 Token (for auto-claim and buyback)
 C100_TOKEN_MINT=
+</file>
+
+<file path="client/src/App.tsx">
+import { Header } from './components/Header';
+import { StatsGrid } from './components/StatsGrid';
+import { ChallengeCard } from './components/ChallengeCard';
+import { TokenScanner } from './components/TokenScanner';
+import { TradeList } from './components/TradeList';
+import { AIStatus } from './components/AIStatus';
+import { Watchlist } from './components/Watchlist';
+import { Positions } from './components/Positions';
+import { EquityChart } from './components/EquityChart';
+import { C100Card } from './components/C100Card';
+import { useSocket } from './hooks/useSocket';
+
+function App() {
+  const {
+    isConnected,
+    stats,
+    trades,
+    positions,
+    positionsSummary,
+    walletState,
+    equityHistory,
+    scannerData,
+    isScanning,
+    toasts,
+    aiDecision,
+    watchlistTokens,
+    watchlistStats,
+    c100Data
+  } = useSocket();
+
+  return (
+    <>
+      <div className="dashboard">
+        <Header isConnected={isConnected} />
+        
+        <StatsGrid stats={stats} />
+
+        <C100Card data={c100Data} />
+
+        <div className="main-grid">
+          <div className="left-column">
+            <ChallengeCard stats={stats} />
+            <TokenScanner data={scannerData || undefined} isScanning={isScanning} tokensScanned={stats.tokensScanned} />
+            <EquityChart history={equityHistory} walletBalance={walletState?.solBalance} />
+            <Positions positions={positions} summary={positionsSummary} />
+          </div>
+
+          <div className="right-column">
+            <TradeList trades={trades} />
+            <AIStatus stats={stats} decision={aiDecision} />
+            <Watchlist tokens={watchlistTokens} stats={watchlistStats} />
+          </div>
+        </div>
+      </div>
+
+      <div className="toast-container">
+        {toasts.map((toast, i) => (
+          <div key={i} className={`toast ${toast.type}`}>
+            <div className="toast-title">{toast.title}</div>
+            <div className="toast-message">{toast.message}</div>
+          </div>
+        ))}
+      </div>
+
+
+    </>
+  );
+}
+
+export default App;
 </file>
 
 <file path="src/signals/entry-evaluator.ts">
@@ -21620,8 +21774,9 @@ export class EntryEvaluator {
         }
       }
 
-      // Token is young but doesn't qualify for snipe - let it age
-      if (tokenAgeSeconds < 60) {
+      // Token is young but doesn't qualify for snipe - let it age a bit more
+      // Reduced from 60s to 10s to allow faster trading
+      if (tokenAgeSeconds < 10) {
         return {
           canEnter: false,
           source: 'none',
@@ -21742,79 +21897,6 @@ export class EntryEvaluator {
 export const entryEvaluator = new EntryEvaluator();
 </file>
 
-<file path="client/src/App.tsx">
-import { Header } from './components/Header';
-import { StatsGrid } from './components/StatsGrid';
-import { ChallengeCard } from './components/ChallengeCard';
-import { TokenScanner } from './components/TokenScanner';
-import { TradeList } from './components/TradeList';
-import { AIStatus } from './components/AIStatus';
-import { Watchlist } from './components/Watchlist';
-import { Positions } from './components/Positions';
-import { EquityChart } from './components/EquityChart';
-import { C100Card } from './components/C100Card';
-import { useSocket } from './hooks/useSocket';
-
-function App() {
-  const {
-    isConnected,
-    stats,
-    trades,
-    positions,
-    positionsSummary,
-    walletState,
-    equityHistory,
-    scannerData,
-    isScanning,
-    toasts,
-    aiDecision,
-    watchlistTokens,
-    watchlistStats,
-    c100Data
-  } = useSocket();
-
-  return (
-    <>
-      <div className="dashboard">
-        <Header isConnected={isConnected} />
-        
-        <StatsGrid stats={stats} />
-
-        <C100Card data={c100Data} />
-
-        <div className="main-grid">
-          <div className="left-column">
-            <ChallengeCard stats={stats} />
-            <TokenScanner data={scannerData || undefined} isScanning={isScanning} tokensScanned={stats.tokensScanned} />
-            <EquityChart history={equityHistory} walletBalance={walletState?.solBalance} />
-            <Positions positions={positions} summary={positionsSummary} />
-          </div>
-
-          <div className="right-column">
-            <TradeList trades={trades} />
-            <AIStatus stats={stats} decision={aiDecision} />
-            <Watchlist tokens={watchlistTokens} stats={watchlistStats} />
-          </div>
-        </div>
-      </div>
-
-      <div className="toast-container">
-        {toasts.map((toast, i) => (
-          <div key={i} className={`toast ${toast.type}`}>
-            <div className="toast-title">{toast.title}</div>
-            <div className="toast-message">{toast.message}</div>
-          </div>
-        ))}
-      </div>
-
-
-    </>
-  );
-}
-
-export default App;
-</file>
-
 <file path="src/risk/position-manager.ts">
 import { EventEmitter } from 'events';
 import { createChildLogger } from '../utils/logger';
@@ -21823,6 +21905,7 @@ import { priceFeed } from '../data/price-feed';
 import { txManager } from '../execution/tx-manager';
 import { repository } from '../db/repository';
 import { Position, RiskCheckResult } from './types';
+import { velocityTracker } from '../signals/velocity-tracker';
 
 // Estimated fee per transaction in SOL (Jupiter swap fee + priority fee)
 const ESTIMATED_TX_FEE_SOL = 0.001;
@@ -22043,6 +22126,7 @@ export class PositionManager extends EventEmitter {
   private async checkExitConditions(position: Position): Promise<void> {
     const currentPrice = position.currentPrice;
     const profitPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+    const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
 
     // GUARD: Skip if profit percent is invalid (entry price = 0, or other corruption)
     if (!isFinite(profitPercent) || isNaN(profitPercent)) {
@@ -22058,10 +22142,11 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // CRITICAL FIX: Flash crash detection - 3+ consecutive price drops = immediate exit
-    // Analysis showed percentage-based stop losses miss flash crashes
+    // Flash crash detection - disabled for first 90 seconds (snipe tokens too volatile)
     const recentPrices = priceFeed.getPriceHistory(position.mint, 10);
-    if (recentPrices.length >= 4) {
+
+    // Only check flash crash for positions older than 90 seconds
+    if (positionAgeSeconds > 90 && recentPrices.length >= 4) {
       let consecutiveDrops = 0;
       // Check from newest to oldest
       for (let i = recentPrices.length - 1; i > 0; i--) {
@@ -22072,23 +22157,27 @@ export class PositionManager extends EventEmitter {
         }
       }
 
-      if (consecutiveDrops >= 3) {
+      // Require 4+ consecutive drops AND 15%+ total drop (was 3 drops with no minimum)
+      if (consecutiveDrops >= 4) {
         // Calculate the total drop across consecutive ticks
         const startPrice = recentPrices[recentPrices.length - 1 - consecutiveDrops].priceSol;
         const endPrice = recentPrices[recentPrices.length - 1].priceSol;
         const dropPercent = (startPrice - endPrice) / startPrice;
 
-        logger.error({
-          positionId: position.id,
-          mint: position.mint.substring(0, 15),
-          consecutiveDrops,
-          dropPercent: (dropPercent * 100).toFixed(1) + '%',
-          startPrice,
-          endPrice,
-        }, 'FLASH CRASH DETECTED: 3+ consecutive drops - emergency exit');
+        // Only trigger if drop is significant (>15%)
+        if (dropPercent > 0.15) {
+          logger.error({
+            positionId: position.id,
+            mint: position.mint.substring(0, 15),
+            consecutiveDrops,
+            dropPercent: (dropPercent * 100).toFixed(1) + '%',
+            startPrice,
+            endPrice,
+          }, 'FLASH CRASH DETECTED: 4+ consecutive drops >15% - emergency exit');
 
-        await this.closePosition(position.id, 'stop_loss', true); // High slippage for emergency
-        return;
+          await this.closePosition(position.id, 'stop_loss', true); // High slippage for emergency
+          return;
+        }
       }
     }
 
@@ -22106,8 +22195,7 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 0. RAPID DROP CHECK - Exit immediately if price crashes in first 30 seconds
-    const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
+    // 0. RAPID DROP CHECK - Exit immediately if price crashes in first 20 seconds
     const rapidDropConfig = (config as any).rapidDropExit;
 
     if (rapidDropConfig?.enabled && positionAgeSeconds <= rapidDropConfig.windowSeconds) {
@@ -22172,9 +22260,38 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 3. INITIAL RECOVERY CHECK (+50%)
+    // 3. MOMENTUM-AWARE TAKE PROFIT
+    // Check current momentum to decide TP thresholds dynamically
     const tpStrategy = config.takeProfitStrategy;
-    if (!position.initialRecovered && profitPercent >= tpStrategy.initialRecovery.triggerPercent) {
+    const momentum = velocityTracker.getMomentumStrength(position.mint);
+
+    // Dynamic TP thresholds based on momentum (tightened):
+    // STRONG: Hold a bit longer (+100%), moderate trailing (22%)
+    // MEDIUM: Normal (+75%), normal trailing (18%)
+    // WEAK: Early TP (+40%), sell 60%, tight trailing (15%)
+    let dynamicTpTrigger: number;
+    let dynamicTrailingPercent: number;
+    let dynamicSellPercent: number;
+
+    switch (momentum.strength) {
+      case 'strong':
+        dynamicTpTrigger = 1.00;        // +100% for strong momentum (tightened from 150%)
+        dynamicTrailingPercent = 0.22;  // 22% trailing (tightened from 30%)
+        dynamicSellPercent = 0.33;      // Sell 33%
+        break;
+      case 'weak':
+        dynamicTpTrigger = 0.40;        // +40% for weak momentum (tightened from 50%)
+        dynamicTrailingPercent = 0.15;  // 15% trailing (tightened from 20%)
+        dynamicSellPercent = 0.60;      // Sell 60% (lock in more profit)
+        break;
+      default: // 'medium' or 'unknown'
+        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +75% default
+        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 18% default
+        dynamicSellPercent = 0.40;      // Sell 40%
+    }
+
+    // INITIAL RECOVERY with dynamic threshold
+    if (!position.initialRecovered && profitPercent >= dynamicTpTrigger) {
       // Calculate how much to sell to recover initial investment
       const currentValue = position.amount * currentPrice;
       const sellAmount = position.initialInvestment / currentPrice;
@@ -22182,54 +22299,70 @@ export class PositionManager extends EventEmitter {
       logger.info({
         positionId: position.id,
         profitPercent: (profitPercent * 100).toFixed(2),
+        momentum: momentum.strength,
+        momentumReason: momentum.reason,
+        dynamicTpTrigger: (dynamicTpTrigger * 100).toFixed(0) + '%',
         sellAmount,
         initialInvestment: position.initialInvestment,
         currentValue,
-      }, 'Initial recovery: selling to recover initial investment at +50%');
+      }, `🎯 MOMENTUM TP: ${momentum.strength} momentum → taking profit at +${(dynamicTpTrigger * 100).toFixed(0)}%`);
 
       const success = await this.partialCloseNewStrategy(position, sellAmount, 'initial_recovery');
 
       // ONLY mark as recovered and set trailing stop on successful sell
       if (success) {
         position.initialRecovered = true;
-        position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+        position.trailingStop = currentPrice * (1 - dynamicTrailingPercent);
         await this.persistPosition(position);
       }
       return;
     }
 
-    // 4. SCALED EXITS (every +50% after recovery)
+    // 4. SCALED EXITS with dynamic intervals
     if (position.initialRecovered) {
-      const profitSinceRecovery = profitPercent - tpStrategy.initialRecovery.triggerPercent;
-      const exitCount = Math.floor(profitSinceRecovery / tpStrategy.scaledExits.intervalPercent);
+      const profitSinceRecovery = profitPercent - dynamicTpTrigger;
+      // Use same interval as trigger for consistency
+      const scaledInterval = dynamicTpTrigger;
+      const exitCount = Math.floor(profitSinceRecovery / scaledInterval);
 
       if (exitCount > position.scaledExitsTaken && position.amount > 0) {
-        const sellAmount = position.amount * tpStrategy.scaledExits.sellPercent;
+        const sellAmount = position.amount * dynamicSellPercent;
 
         logger.info({
           positionId: position.id,
           profitPercent: (profitPercent * 100).toFixed(2),
+          momentum: momentum.strength,
           exitNumber: position.scaledExitsTaken + 1,
-          sellPercent: tpStrategy.scaledExits.sellPercent * 100,
+          sellPercent: (dynamicSellPercent * 100).toFixed(0),
           sellAmount,
-        }, 'Scaled exit: selling 20% of remaining at +50% interval');
+        }, `📊 Scaled exit #${position.scaledExitsTaken + 1}: ${momentum.strength} momentum → selling ${(dynamicSellPercent * 100).toFixed(0)}%`);
 
         const success = await this.partialCloseNewStrategy(position, sellAmount, 'scaled_exit');
 
         // ONLY increment counter and update trailing stop on successful sell
         if (success) {
           position.scaledExitsTaken++;
-          position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+          position.trailingStop = currentPrice * (1 - dynamicTrailingPercent);
           await this.persistPosition(position);
         }
       }
     }
 
-    // 5. Update trailing stop on new highs (after initial recovery)
+    // 5. Update trailing stop on new highs (after initial recovery) - also momentum-aware
     if (position.initialRecovered && currentPrice >= position.highestPrice) {
-      const newTrailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+      const newTrailingStop = currentPrice * (1 - dynamicTrailingPercent);
       if (!position.trailingStop || newTrailingStop > position.trailingStop) {
         position.trailingStop = newTrailingStop;
+
+        // Log when trailing stop updates on strong momentum
+        if (momentum.strength === 'strong') {
+          logger.debug({
+            positionId: position.id,
+            newHigh: currentPrice,
+            trailingStop: newTrailingStop,
+            trailingPercent: (dynamicTrailingPercent * 100).toFixed(0) + '%',
+          }, '🚀 Strong momentum - trailing stop updated on new high');
+        }
       }
     }
   }
@@ -22614,6 +22747,29 @@ export class PositionManager extends EventEmitter {
 export const positionManager = new PositionManager();
 </file>
 
+<file path="public/index.html">
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trader By Claude</title>
+  <script type="module" crossorigin src="/assets/index-bH9va_4k.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BZU8IHLs.css">
+</head>
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>
+</file>
+
 <file path="src/config/settings.ts">
 import dotenv from 'dotenv';
 dotenv.config();
@@ -22633,7 +22789,7 @@ export const config = {
 
   // Trading Parameters
   initialCapitalSol: parseFloat(process.env.INITIAL_CAPITAL_SOL || '1.0'),
-  maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.10'),  // 10% of capital max (allows small balances to trade)
+  maxPositionSize: parseFloat(process.env.MAX_POSITION_SIZE || '0.25'),  // 25% of capital max (allows 0.07 SOL trades with smaller balances)
   dailyLossLimit: parseFloat(process.env.DAILY_LOSS_LIMIT || '0.15'),
   maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS || '2'),  // Reduced to 2 - focus on quality over quantity
 
@@ -22656,23 +22812,24 @@ export const config = {
   pumpFunProgram: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
 
   // Risk Parameters
+  // UPDATED: Reduced reserve to allow more capital for trading
   capitalAllocation: {
-    reserve: 0.40,    // 40% never trade
-    active: 0.40,     // 40% normal trades
-    highRisk: 0.20,   // 20% meme plays
+    reserve: 0.20,    // 20% never trade (was 40% - too conservative)
+    active: 0.50,     // 50% normal trades
+    highRisk: 0.30,   // 30% meme plays
   },
 
   stopLossPercent: 0.12,      // -12% stop loss for established tokens
 
-  // Age-based stop loss for new tokens (wider stop during initial volatility)
+  // Age-based stop loss for new tokens - tightened back up
   ageBasedStopLoss: {
     enabled: true,
-    // For tokens < 60 seconds old: use wider stop
+    // For tokens < 60 seconds old: wider stop but not too wide
     newTokenThresholdSeconds: 60,
-    newTokenStopLossPercent: 0.25,  // -25% for brand new tokens
+    newTokenStopLossPercent: 0.20,  // -20% for brand new tokens (tightened from 35%)
     // For tokens 60-180 seconds: gradual tightening
     youngTokenThresholdSeconds: 180,
-    youngTokenStopLossPercent: 0.18, // -18% for young tokens
+    youngTokenStopLossPercent: 0.15, // -15% for young tokens (tightened from 25%)
     // After 180 seconds: use standard stop loss (0.12)
   },
 
@@ -22681,31 +22838,32 @@ export const config = {
   stopLossGracePeriodSeconds: 2,
 
   // CRITICAL FIX: Minimum token age before ANY entry (including snipe mode)
-  // Analysis showed trades under 3 seconds are catastrophic losers (-77% to -87%)
-  minTokenAgeSeconds: 15,  // Let rugs reveal themselves first
+  // Wait for initial pump/dump to settle - buying at peak = instant loss
+  minTokenAgeSeconds: 15,  // Wait 15 seconds for initial volatility to settle
 
   // NEW: Rapid drop detection - exit immediately if price crashes
+  // UPDATED: More lenient for snipe tokens - they're volatile early
   rapidDropExit: {
     enabled: true,
-    dropPercent: 0.20,       // 20% drop triggers immediate exit
-    windowSeconds: 30,       // Within first 30 seconds of position
+    dropPercent: 0.30,       // 30% drop triggers immediate exit (was 20% - too tight for snipe)
+    windowSeconds: 20,       // Within first 20 seconds only (was 30 - too long)
     useHighSlippage: true,   // Use stopLossSlippageBps for panic sell
   },
 
-  // NEW Take Profit Strategy: recover initial at +50%, then scale out
+  // Take Profit Strategy - balanced (momentum-aware code will adjust dynamically)
   takeProfitStrategy: {
-    // At +50% gain, sell enough to recover initial investment
+    // At +75% gain, sell enough to recover initial investment
     initialRecovery: {
-      triggerPercent: 0.50,  // +50% gain
+      triggerPercent: 0.75,  // +75% gain (balanced - momentum code adjusts this)
       action: 'recover_initial' as const,
     },
-    // After initial recovery, sell 20% of remainder every +50%
+    // After initial recovery, sell 25% of remainder every +75%
     scaledExits: {
-      intervalPercent: 0.50,  // Every +50% gain
-      sellPercent: 0.20,      // Sell 20% of remaining
+      intervalPercent: 0.75,  // Every +75% gain
+      sellPercent: 0.25,      // Sell 25% of remaining
     },
-    // Trailing stop on final portion
-    trailingStopPercent: 0.15,  // 15% trailing stop
+    // Trailing stop - tightened
+    trailingStopPercent: 0.18,  // 18% trailing stop (tightened from 25%)
   },
 
   // LEGACY: Keep for backwards compatibility but unused
@@ -22713,7 +22871,7 @@ export const config = {
     { multiplier: 2.0, sellPercent: 0.25 },
     { multiplier: 3.0, sellPercent: 0.25 },
   ],
-  trailingStopPercent: 0.15,  // 15% trailing stop (updated from 20%)
+  trailingStopPercent: 0.18,  // 18% trailing stop (tightened)
 
   // AI Parameters
   ddqnConfig: {
@@ -22747,7 +22905,7 @@ export const config = {
   requireNonColdPhase: false, // DISABLED: Allow cold phase entries if other signals are strong
 
   // Trade execution settings
-  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.02'),  // INCREASED from 0.01 - tiny positions get destroyed by slippage
+  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.07'),  // Base position size (user requested 0.07)
   minPositionSol: 0.015,     // NEW: Minimum position size (below this, slippage destroys profits)
   defaultSlippageBps: 1500,  // 15% slippage for normal trades
   stopLossSlippageBps: 3000, // NEW: 30% slippage for stop loss (ensure execution on fast drops)
@@ -22770,7 +22928,7 @@ export const config = {
   // Token Watchlist - AI-driven entry (TWO TIERS: snipe fast OR wait for data)
   watchlist: {
     minDataPoints: 20,       // Reduced: 20 price points for safe mode
-    minAgeSeconds: 120,      // Reduced: 2 minutes for safe mode (snipe mode can be faster)
+    minAgeSeconds: 3,        // Aligned with minTokenAgeSeconds
     minConfidence: 0.60,     // Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
     maxDrawdown: 0.15,       // Don't buy tokens already dumping
@@ -22779,15 +22937,15 @@ export const config = {
     requireUptrend: false,   // Disabled: allow dip buys (snipe mode has its own check)
   },
 
-  // SNIPE MODE: Allow early entry with EXCEPTIONAL velocity (strict thresholds)
+  // SNIPE MODE: Quality entries only - wait for confirmation
   snipeMode: {
     enabled: true,
-    maxAgeSeconds: 90,        // Only snipe tokens < 90 seconds old
-    minTxCount: 12,           // Need 12+ transactions (high activity)
-    minUniqueBuyers: 8,       // Need 8+ unique wallets (not wash trading)
-    minBuyPressure: 0.75,     // Need 75%+ buys (strong demand)
-    maxMarketCapSol: 60,      // Only snipe small caps (< 60 SOL mcap)
-    minBuyPressureStreak: 3,  // Need 3+ consecutive buy-heavy windows
+    maxAgeSeconds: 45,        // Only snipe tokens 15-45 seconds old (entry window)
+    minTxCount: 15,           // 15+ transactions (need solid activity)
+    minUniqueBuyers: 10,      // 10+ unique wallets (real demand)
+    minBuyPressure: 0.70,     // 70%+ buys (strong but achievable)
+    maxMarketCapSol: 40,      // Under 40 SOL mcap (still early)
+    minBuyPressureStreak: 3,  // 3+ consecutive buy-heavy windows
   },
 
   // ESTABLISHED MODE: For DexScreener trending & whale copies (already have proven data)
@@ -22836,29 +22994,6 @@ export const config = {
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 export const LAMPORTS_PER_SOL = 1_000_000_000;
-</file>
-
-<file path="public/index.html">
-<!doctype html>
-<html lang="en">
-
-<head>
-  <meta charset="UTF-8" />
-  <link rel="icon" type="image/png" href="/logo.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Trader By Claude</title>
-  <script type="module" crossorigin src="/assets/index-bH9va_4k.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BZU8IHLs.css">
-</head>
-
-<body>
-  <div id="root"></div>
-</body>
-
-</html>
 </file>
 
 <file path="src/index.ts">
@@ -23258,19 +23393,30 @@ class TradingBot {
     }
 
     for (const mint of readyTokens) {
+      logger.info({ mint: mint.substring(0, 15), readyCount: readyTokens.length }, 'Processing ready watchlist token');
+
       // Skip if already in a position or recently processed
-      if (this.processedMints.has(mint)) continue;
-      if (positionManager.getPositionByMint(mint)) continue;
+      if (this.processedMints.has(mint)) {
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already processed');
+        continue;
+      }
+      if (positionManager.getPositionByMint(mint)) {
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already in position');
+        continue;
+      }
 
       const filterResult = tokenWatchlist.passesHardFilters(mint);
       if (!filterResult.passes) {
-        logger.debug({ mint: mint.substring(0, 15), reason: filterResult.reason }, 'Watchlist token rejected by hard filters');
+        logger.info({ mint: mint.substring(0, 15), reason: filterResult.reason }, 'Watchlist token rejected by hard filters');
         continue;
       }
 
       // Get watchlist features for logging/decision
       const watchlistFeatures = tokenWatchlist.extractFeatures(mint);
-      if (!watchlistFeatures) continue;
+      if (!watchlistFeatures) {
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - no features extracted');
+        continue;
+      }
 
       logger.info({
         mint: mint.substring(0, 15),
@@ -23610,9 +23756,22 @@ class TradingBot {
       this.rejectionStats.entryEval++;
       this.rejectionStats.total++;
       logger.info({ mint, source: entryResult.source, reason: entryResult.reason }, 'REJECTED: Entry evaluation failed');
-      priceFeed.removeFromWatchList(mint);
-      velocityTracker.clearToken(mint);
-      pumpPortalWs.unsubscribeFromToken(mint);
+
+      // CRITICAL FIX: Don't remove tokens from tracking if they just need more time
+      // Keep them in watchlist for re-evaluation after they age or get more data
+      const keepForLater = entryResult.reason?.includes('too young')
+        || entryResult.reason?.includes('waiting for better signals')
+        || entryResult.reason?.includes('waiting for more data')
+        || entryResult.reason?.includes('Need ') // "Need X price points"
+        || entryResult.reason?.includes('< 15s');
+
+      if (!keepForLater) {
+        priceFeed.removeFromWatchList(mint);
+        velocityTracker.clearToken(mint);
+        pumpPortalWs.unsubscribeFromToken(mint);
+      } else {
+        logger.debug({ mint }, 'Keeping token in watchlist for re-evaluation');
+      }
       return;
     }
 
