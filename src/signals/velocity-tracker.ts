@@ -195,6 +195,69 @@ export class VelocityTracker {
   getStatus(): string {
     return `Tracking ${this.tokenTrades.size} tokens`;
   }
+
+  /**
+   * Get momentum strength for dynamic take profit decisions
+   * Returns: 'strong' | 'medium' | 'weak' | 'unknown'
+   *
+   * STRONG: Hold longer, TP at +150-200%
+   * MEDIUM: Normal TP at +100%
+   * WEAK: Take profit early at +50%
+   */
+  getMomentumStrength(mint: string): {
+    strength: 'strong' | 'medium' | 'weak' | 'unknown';
+    buyPressure: number;
+    txPerMinute: number;
+    uniqueBuyers: number;
+    reason: string;
+  } {
+    const metrics = this.getMetrics(mint);
+
+    if (!metrics || metrics.txCount < 3) {
+      return {
+        strength: 'unknown',
+        buyPressure: 0,
+        txPerMinute: 0,
+        uniqueBuyers: 0,
+        reason: 'Insufficient data',
+      };
+    }
+
+    const buyPressure = metrics.buyPressure;
+    const txPerMinute = metrics.txPerMinute;
+    const uniqueBuyers = metrics.uniqueBuyers.size;
+
+    // STRONG momentum: >70% buys, >10 tx/min, growing buyer base
+    if (buyPressure >= 0.70 && txPerMinute >= 10 && uniqueBuyers >= 5) {
+      return {
+        strength: 'strong',
+        buyPressure,
+        txPerMinute,
+        uniqueBuyers,
+        reason: `Strong: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min, ${uniqueBuyers} buyers`,
+      };
+    }
+
+    // WEAK momentum: <50% buys OR very low activity
+    if (buyPressure < 0.50 || txPerMinute < 3) {
+      return {
+        strength: 'weak',
+        buyPressure,
+        txPerMinute,
+        uniqueBuyers,
+        reason: `Weak: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min`,
+      };
+    }
+
+    // MEDIUM: everything in between
+    return {
+      strength: 'medium',
+      buyPressure,
+      txPerMinute,
+      uniqueBuyers,
+      reason: `Medium: ${(buyPressure * 100).toFixed(0)}% buys, ${txPerMinute.toFixed(0)} tx/min`,
+    };
+  }
 }
 
 export const velocityTracker = new VelocityTracker();

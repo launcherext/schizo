@@ -5,6 +5,7 @@ import { priceFeed } from '../data/price-feed';
 import { txManager } from '../execution/tx-manager';
 import { repository } from '../db/repository';
 import { Position, RiskCheckResult } from './types';
+import { velocityTracker } from '../signals/velocity-tracker';
 
 // Estimated fee per transaction in SOL (Jupiter swap fee + priority fee)
 const ESTIMATED_TX_FEE_SOL = 0.001;
@@ -361,9 +362,38 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 3. INITIAL RECOVERY CHECK (+50%)
+    // 3. MOMENTUM-AWARE TAKE PROFIT
+    // Check current momentum to decide TP thresholds dynamically
     const tpStrategy = config.takeProfitStrategy;
-    if (!position.initialRecovered && profitPercent >= tpStrategy.initialRecovery.triggerPercent) {
+    const momentum = velocityTracker.getMomentumStrength(position.mint);
+
+    // Dynamic TP thresholds based on momentum:
+    // STRONG: Hold longer (+150%), wider trailing (30%)
+    // MEDIUM: Normal (+100%), normal trailing (25%)
+    // WEAK: Early TP (+50%), sell 50%, tighter trailing (20%)
+    let dynamicTpTrigger: number;
+    let dynamicTrailingPercent: number;
+    let dynamicSellPercent: number;
+
+    switch (momentum.strength) {
+      case 'strong':
+        dynamicTpTrigger = 1.50;        // +150% for strong momentum
+        dynamicTrailingPercent = 0.30;  // 30% trailing (wider)
+        dynamicSellPercent = 0.33;      // Sell 33% (keep more riding)
+        break;
+      case 'weak':
+        dynamicTpTrigger = 0.50;        // +50% for weak momentum (take profit early!)
+        dynamicTrailingPercent = 0.20;  // 20% trailing (tighter)
+        dynamicSellPercent = 0.50;      // Sell 50% (lock in more profit)
+        break;
+      default: // 'medium' or 'unknown'
+        dynamicTpTrigger = tpStrategy.initialRecovery.triggerPercent; // +100% default
+        dynamicTrailingPercent = tpStrategy.trailingStopPercent;       // 25% default
+        dynamicSellPercent = 0.40;      // Sell 40%
+    }
+
+    // INITIAL RECOVERY with dynamic threshold
+    if (!position.initialRecovered && profitPercent >= dynamicTpTrigger) {
       // Calculate how much to sell to recover initial investment
       const currentValue = position.amount * currentPrice;
       const sellAmount = position.initialInvestment / currentPrice;
@@ -371,54 +401,70 @@ export class PositionManager extends EventEmitter {
       logger.info({
         positionId: position.id,
         profitPercent: (profitPercent * 100).toFixed(2),
+        momentum: momentum.strength,
+        momentumReason: momentum.reason,
+        dynamicTpTrigger: (dynamicTpTrigger * 100).toFixed(0) + '%',
         sellAmount,
         initialInvestment: position.initialInvestment,
         currentValue,
-      }, 'Initial recovery: selling to recover initial investment at +50%');
+      }, `🎯 MOMENTUM TP: ${momentum.strength} momentum → taking profit at +${(dynamicTpTrigger * 100).toFixed(0)}%`);
 
       const success = await this.partialCloseNewStrategy(position, sellAmount, 'initial_recovery');
 
       // ONLY mark as recovered and set trailing stop on successful sell
       if (success) {
         position.initialRecovered = true;
-        position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+        position.trailingStop = currentPrice * (1 - dynamicTrailingPercent);
         await this.persistPosition(position);
       }
       return;
     }
 
-    // 4. SCALED EXITS (every +50% after recovery)
+    // 4. SCALED EXITS with dynamic intervals
     if (position.initialRecovered) {
-      const profitSinceRecovery = profitPercent - tpStrategy.initialRecovery.triggerPercent;
-      const exitCount = Math.floor(profitSinceRecovery / tpStrategy.scaledExits.intervalPercent);
+      const profitSinceRecovery = profitPercent - dynamicTpTrigger;
+      // Use same interval as trigger for consistency
+      const scaledInterval = dynamicTpTrigger;
+      const exitCount = Math.floor(profitSinceRecovery / scaledInterval);
 
       if (exitCount > position.scaledExitsTaken && position.amount > 0) {
-        const sellAmount = position.amount * tpStrategy.scaledExits.sellPercent;
+        const sellAmount = position.amount * dynamicSellPercent;
 
         logger.info({
           positionId: position.id,
           profitPercent: (profitPercent * 100).toFixed(2),
+          momentum: momentum.strength,
           exitNumber: position.scaledExitsTaken + 1,
-          sellPercent: tpStrategy.scaledExits.sellPercent * 100,
+          sellPercent: (dynamicSellPercent * 100).toFixed(0),
           sellAmount,
-        }, 'Scaled exit: selling 20% of remaining at +50% interval');
+        }, `📊 Scaled exit #${position.scaledExitsTaken + 1}: ${momentum.strength} momentum → selling ${(dynamicSellPercent * 100).toFixed(0)}%`);
 
         const success = await this.partialCloseNewStrategy(position, sellAmount, 'scaled_exit');
 
         // ONLY increment counter and update trailing stop on successful sell
         if (success) {
           position.scaledExitsTaken++;
-          position.trailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+          position.trailingStop = currentPrice * (1 - dynamicTrailingPercent);
           await this.persistPosition(position);
         }
       }
     }
 
-    // 5. Update trailing stop on new highs (after initial recovery)
+    // 5. Update trailing stop on new highs (after initial recovery) - also momentum-aware
     if (position.initialRecovered && currentPrice >= position.highestPrice) {
-      const newTrailingStop = currentPrice * (1 - tpStrategy.trailingStopPercent);
+      const newTrailingStop = currentPrice * (1 - dynamicTrailingPercent);
       if (!position.trailingStop || newTrailingStop > position.trailingStop) {
         position.trailingStop = newTrailingStop;
+
+        // Log when trailing stop updates on strong momentum
+        if (momentum.strength === 'strong') {
+          logger.debug({
+            positionId: position.id,
+            newHigh: currentPrice,
+            trailingStop: newTrailingStop,
+            trailingPercent: (dynamicTrailingPercent * 100).toFixed(0) + '%',
+          }, '🚀 Strong momentum - trailing stop updated on new high');
+        }
       }
     }
   }
