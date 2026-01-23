@@ -225,6 +225,7 @@ export class PositionManager extends EventEmitter {
   private async checkExitConditions(position: Position): Promise<void> {
     const currentPrice = position.currentPrice;
     const profitPercent = (currentPrice - position.entryPrice) / position.entryPrice;
+    const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
 
     // GUARD: Skip if profit percent is invalid (entry price = 0, or other corruption)
     if (!isFinite(profitPercent) || isNaN(profitPercent)) {
@@ -240,10 +241,13 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // CRITICAL FIX: Flash crash detection - 3+ consecutive price drops = immediate exit
-    // Analysis showed percentage-based stop losses miss flash crashes
+    // Flash crash detection - BUT disabled for first 90 seconds of snipe positions
+    // Analysis showed this was triggering on normal early volatility and causing early exits
     const recentPrices = priceFeed.getPriceHistory(position.mint, 10);
-    if (recentPrices.length >= 4) {
+
+    // ONLY check flash crash for positions older than 90 seconds
+    // Young snipe tokens are too volatile - normal swings look like crashes
+    if (positionAgeSeconds > 90 && recentPrices.length >= 4) {
       let consecutiveDrops = 0;
       // Check from newest to oldest
       for (let i = recentPrices.length - 1; i > 0; i--) {
@@ -254,23 +258,27 @@ export class PositionManager extends EventEmitter {
         }
       }
 
-      if (consecutiveDrops >= 3) {
+      // Require 4+ consecutive drops AND 15%+ total drop (was 3 drops with no minimum)
+      if (consecutiveDrops >= 4) {
         // Calculate the total drop across consecutive ticks
         const startPrice = recentPrices[recentPrices.length - 1 - consecutiveDrops].priceSol;
         const endPrice = recentPrices[recentPrices.length - 1].priceSol;
         const dropPercent = (startPrice - endPrice) / startPrice;
 
-        logger.error({
-          positionId: position.id,
-          mint: position.mint.substring(0, 15),
-          consecutiveDrops,
-          dropPercent: (dropPercent * 100).toFixed(1) + '%',
-          startPrice,
-          endPrice,
-        }, 'FLASH CRASH DETECTED: 3+ consecutive drops - emergency exit');
+        // Only trigger if drop is significant (>15%)
+        if (dropPercent > 0.15) {
+          logger.error({
+            positionId: position.id,
+            mint: position.mint.substring(0, 15),
+            consecutiveDrops,
+            dropPercent: (dropPercent * 100).toFixed(1) + '%',
+            startPrice,
+            endPrice,
+          }, 'FLASH CRASH DETECTED: 4+ consecutive drops >15% - emergency exit');
 
-        await this.closePosition(position.id, 'stop_loss', true); // High slippage for emergency
-        return;
+          await this.closePosition(position.id, 'stop_loss', true); // High slippage for emergency
+          return;
+        }
       }
     }
 
@@ -288,8 +296,7 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 0. RAPID DROP CHECK - Exit immediately if price crashes in first 30 seconds
-    const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
+    // 0. RAPID DROP CHECK - Exit immediately if price crashes in first 20 seconds
     const rapidDropConfig = (config as any).rapidDropExit;
 
     if (rapidDropConfig?.enabled && positionAgeSeconds <= rapidDropConfig.windowSeconds) {
