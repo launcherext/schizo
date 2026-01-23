@@ -7,8 +7,9 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ isConnected }) => {
   return (
     <header className="header">
-      <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', width: '300px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <img src="/header_full.png" alt="1 to 100 Sol Challenge" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+      <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+        <img src="/logo.png" alt="Trader By Claude" style={{ height: '50px', width: 'auto', objectFit: 'contain' }} />
+        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Trader By Claude</h1>
       </div>
       <div 
         className="live-badge" 
