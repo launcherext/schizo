@@ -86,8 +86,9 @@ export class EntryEvaluator {
         }
       }
 
-      // Token is young but doesn't qualify for snipe - let it age
-      if (tokenAgeSeconds < 60) {
+      // Token is young but doesn't qualify for snipe - let it age a bit more
+      // Reduced from 60s to 10s to allow faster trading
+      if (tokenAgeSeconds < 10) {
         return {
           canEnter: false,
           source: 'none',
