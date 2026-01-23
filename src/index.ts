@@ -395,18 +395,27 @@ class TradingBot {
 
     for (const mint of readyTokens) {
       // Skip if already in a position or recently processed
-      if (this.processedMints.has(mint)) continue;
-      if (positionManager.getPositionByMint(mint)) continue;
+      if (this.processedMints.has(mint)) {
+        logger.debug({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already processed');
+        continue;
+      }
+      if (positionManager.getPositionByMint(mint)) {
+        logger.debug({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already in position');
+        continue;
+      }
 
       const filterResult = tokenWatchlist.passesHardFilters(mint);
       if (!filterResult.passes) {
-        logger.debug({ mint: mint.substring(0, 15), reason: filterResult.reason }, 'Watchlist token rejected by hard filters');
+        logger.info({ mint: mint.substring(0, 15), reason: filterResult.reason }, 'Watchlist token rejected by hard filters');
         continue;
       }
 
       // Get watchlist features for logging/decision
       const watchlistFeatures = tokenWatchlist.extractFeatures(mint);
-      if (!watchlistFeatures) continue;
+      if (!watchlistFeatures) {
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - no features extracted');
+        continue;
+      }
 
       logger.info({
         mint: mint.substring(0, 15),
