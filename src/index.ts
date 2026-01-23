@@ -394,13 +394,15 @@ class TradingBot {
     }
 
     for (const mint of readyTokens) {
+      logger.info({ mint: mint.substring(0, 15), readyCount: readyTokens.length }, 'Processing ready watchlist token');
+
       // Skip if already in a position or recently processed
       if (this.processedMints.has(mint)) {
-        logger.debug({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already processed');
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already processed');
         continue;
       }
       if (positionManager.getPositionByMint(mint)) {
-        logger.debug({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already in position');
+        logger.info({ mint: mint.substring(0, 15) }, 'Watchlist: skipping - already in position');
         continue;
       }
 
