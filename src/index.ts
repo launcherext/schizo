@@ -746,9 +746,22 @@ class TradingBot {
       this.rejectionStats.entryEval++;
       this.rejectionStats.total++;
       logger.info({ mint, source: entryResult.source, reason: entryResult.reason }, 'REJECTED: Entry evaluation failed');
-      priceFeed.removeFromWatchList(mint);
-      velocityTracker.clearToken(mint);
-      pumpPortalWs.unsubscribeFromToken(mint);
+
+      // CRITICAL FIX: Don't remove tokens from tracking if they just need more time
+      // Keep them in watchlist for re-evaluation after they age or get more data
+      const keepForLater = entryResult.reason?.includes('too young')
+        || entryResult.reason?.includes('waiting for better signals')
+        || entryResult.reason?.includes('waiting for more data')
+        || entryResult.reason?.includes('Need ') // "Need X price points"
+        || entryResult.reason?.includes('< 15s');
+
+      if (!keepForLater) {
+        priceFeed.removeFromWatchList(mint);
+        velocityTracker.clearToken(mint);
+        pumpPortalWs.unsubscribeFromToken(mint);
+      } else {
+        logger.debug({ mint }, 'Keeping token in watchlist for re-evaluation');
+      }
       return;
     }
 

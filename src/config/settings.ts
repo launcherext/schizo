@@ -153,7 +153,7 @@ export const config = {
   // Token Watchlist - AI-driven entry (TWO TIERS: snipe fast OR wait for data)
   watchlist: {
     minDataPoints: 20,       // Reduced: 20 price points for safe mode
-    minAgeSeconds: 120,      // Reduced: 2 minutes for safe mode (snipe mode can be faster)
+    minAgeSeconds: 15,       // Aligned with minTokenAgeSeconds - re-evaluate after initial wait
     minConfidence: 0.60,     // Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
     maxDrawdown: 0.15,       // Don't buy tokens already dumping
