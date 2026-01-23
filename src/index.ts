@@ -441,11 +441,13 @@ class TradingBot {
       };
 
       try {
-        await this.analyzeAndTrade(syntheticEvent);
-        this.processedMints.add(mint);
+        const result = await this.analyzeAndTrade(syntheticEvent);
 
-        // Cleanup processed token from watchlist
-        tokenWatchlist.removeToken(mint);
+        // Only mark as processed and remove from watchlist if token shouldn't be re-evaluated
+        if (!result.keepForLater) {
+          this.processedMints.add(mint);
+          tokenWatchlist.removeToken(mint);
+        }
       } catch (error) {
         logger.error({ mint, error }, 'Failed to analyze watchlist token');
       }
@@ -481,8 +483,12 @@ class TradingBot {
 
       try {
         logger.info({ mint: token.mint.substring(0, 15) }, 'Analyzing token...');
-        await this.analyzeAndTrade(token);
-        this.processedMints.add(token.mint);
+        const result = await this.analyzeAndTrade(token);
+
+        // Only mark as processed if token shouldn't be re-evaluated later
+        if (!result.keepForLater) {
+          this.processedMints.add(token.mint);
+        }
 
         // Clean up old processed mints
         if (this.processedMints.size > 1000) {
@@ -495,7 +501,7 @@ class TradingBot {
     }
   }
 
-  private async analyzeAndTrade(token: NewTokenEvent): Promise<void> {
+  private async analyzeAndTrade(token: NewTokenEvent): Promise<{ keepForLater: boolean }> {
     const { mint } = token;
 
     logger.debug({ mint }, 'Analyzing token');
@@ -511,7 +517,7 @@ class TradingBot {
       this.rejectionStats.quickSafety++;
       this.rejectionStats.total++;
       logger.info({ mint, flags: quickSafety.flags }, 'REJECTED: Quick safety check failed');
-      return;
+      return { keepForLater: false };
     }
 
     // Get price/liquidity data
@@ -594,14 +600,14 @@ class TradingBot {
       this.rejectionStats.liquidity++;
       this.rejectionStats.total++;
       logger.warn({ mint }, 'REJECTED: No price data from PumpPortal or DexScreener');
-      return;
+      return { keepForLater: false };
     }
 
     if (liquiditySol < minLiquidity) {
       this.rejectionStats.liquidity++;
       this.rejectionStats.total++;
       logger.info({ mint, liquiditySol, minRequired: minLiquidity }, 'REJECTED: Insufficient liquidity');
-      return;
+      return { keepForLater: false };
     }
 
     // Create unified price data for downstream processing
@@ -650,7 +656,7 @@ class TradingBot {
       this.rejectionStats.rugScore++;
       this.rejectionStats.total++;
       logger.info({ mint, rugTotal: rugScore.total, minRequired: config.minRugScore }, 'REJECTED: Token failed rug check');
-      return;
+      return { keepForLater: false };
     }
 
     // Extract features (priceData is guaranteed non-null here due to earlier checks)
@@ -773,7 +779,7 @@ class TradingBot {
       } else {
         logger.debug({ mint }, 'Keeping token in watchlist for re-evaluation');
       }
-      return;
+      return { keepForLater };
     }
 
     // Extract buy pressure from entry evaluation for AI confidence calculation
@@ -806,7 +812,7 @@ class TradingBot {
       this.rejectionStats.total++;
       logger.info({ mint, action: Action[decision.action], qValues: decision.qValues }, 'REJECTED: AI decided not to buy');
       priceFeed.removeFromWatchList(mint);
-      return;
+      return { keepForLater: false };
     }
 
     // Risk check
@@ -827,7 +833,7 @@ class TradingBot {
       this.rejectionStats.total++;
       logger.info({ mint, reason: riskCheck.reason, poolType, requestedSize: decision.positionSize.sizeSol }, 'REJECTED: Risk check failed');
       priceFeed.removeFromWatchList(mint);
-      return;
+      return { keepForLater: false };
     }
 
     // All filters passed!
@@ -847,7 +853,7 @@ class TradingBot {
         minRequired: minPositionSol
       }, 'REJECTED: Position size below minimum (would be destroyed by slippage)');
       priceFeed.removeFromWatchList(mint);
-      return;
+      return { keepForLater: false };
     }
 
     // CRITICAL FIX: Pre-trade price drift verification
@@ -866,7 +872,7 @@ class TradingBot {
         }, 'ABORTED: Price crashed >15% before execution - avoiding immediate loss');
         priceFeed.removeFromWatchList(mint);
         velocityTracker.clearToken(mint);
-        return;
+        return { keepForLater: false };
       }
     }
 
@@ -881,6 +887,8 @@ class TradingBot {
       poolType,
       token.creator
     );
+
+    return { keepForLater: false };
   }
 
   private makeDecision(
