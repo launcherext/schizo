@@ -56,7 +56,7 @@ interface DexScreenerResponse {
 export class DexScreenerScanner extends EventEmitter {
   private scanInterval: NodeJS.Timeout | null = null;
   private seenTokens: Set<string> = new Set();
-  private scanIntervalMs = 120000; // 2 minutes between scans
+  private scanIntervalMs = 60000; // 1 minute between scans (was 2 min)
   private maxSeenTokens = 1000;
 
   constructor() {
@@ -89,27 +89,87 @@ export class DexScreenerScanner extends EventEmitter {
 
   private async scanTrending(): Promise<void> {
     try {
-      // Fetch top Solana pairs by 24h volume
-      const response = await fetch(
-        'https://api.dexscreener.com/latest/dex/tokens/solana',
-        {
-          headers: {
-            'Accept': 'application/json',
-          },
+      // Try multiple DexScreener endpoints for better coverage
+      const endpoints = [
+        // Token boosts - promoted/trending tokens
+        'https://api.dexscreener.com/token-boosts/top/v1',
+        // Latest token profiles (new listings)
+        'https://api.dexscreener.com/token-profiles/latest/v1',
+      ];
+
+      let allPairs: DexScreenerPair[] = [];
+
+      // Fetch from boost/profile endpoints first
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            headers: { 'Accept': 'application/json' },
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            // These endpoints return array of {tokenAddress, chainId, ...}
+            if (Array.isArray(data)) {
+              const solanaTokens = data
+                .filter((t: any) => t.chainId === 'solana')
+                .slice(0, 20);
+
+              // Fetch pair data for each token
+              for (const token of solanaTokens) {
+                const pairData = await this.fetchTokenPairs(token.tokenAddress);
+                if (pairData) allPairs.push(...pairData);
+              }
+            }
+          }
+        } catch (err) {
+          logger.debug({ endpoint, err }, 'Endpoint fetch failed');
         }
-      );
+      }
 
-      if (!response.ok) {
-        logger.warn({ status: response.status }, 'DexScreener API returned non-OK status');
+      // Search for various categories of active Solana tokens
+      const searchTerms = [
+        'pump', // pump.fun tokens
+        'ai',   // AI narrative tokens
+        'pepe', // Meme tokens
+        'doge', // Dog tokens
+        'cat',  // Cat tokens
+        'trump', // Political tokens
+      ];
+
+      for (const term of searchTerms) {
+        try {
+          const searchResponse = await fetch(
+            `https://api.dexscreener.com/latest/dex/search?q=${term}`,
+            {
+              headers: { 'Accept': 'application/json' },
+            }
+          );
+
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json() as DexScreenerResponse;
+            if (searchData.pairs && Array.isArray(searchData.pairs)) {
+              // Filter for Solana pairs only
+              const solanaPairs = searchData.pairs.filter(
+                (p: any) => p.chainId === 'solana'
+              );
+              allPairs.push(...solanaPairs);
+            }
+          }
+          // Small delay to avoid rate limiting
+          await new Promise(r => setTimeout(r, 200));
+        } catch (err) {
+          logger.debug({ term, err }, 'Search term fetch failed');
+        }
+      }
+
+      if (allPairs.length === 0) {
+        logger.debug('No pairs found from DexScreener endpoints');
         return;
       }
 
-      const data = await response.json() as DexScreenerResponse;
+      logger.info({ pairsFound: allPairs.length }, 'DexScreener pairs fetched');
 
-      if (!data.pairs || !Array.isArray(data.pairs)) {
-        logger.warn('No pairs in DexScreener response');
-        return;
-      }
+      const data = { pairs: allPairs };
 
       let foundCount = 0;
 
@@ -198,6 +258,29 @@ export class DexScreenerScanner extends EventEmitter {
     if (marketCap > 10_000_000) return false; // Under $10M mcap
 
     return true;
+  }
+
+  // Fetch pair data for a specific token
+  private async fetchTokenPairs(tokenAddress: string): Promise<DexScreenerPair[] | null> {
+    try {
+      const response = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`,
+        {
+          headers: { 'Accept': 'application/json' },
+        }
+      );
+
+      if (!response.ok) return null;
+
+      const data = await response.json() as DexScreenerResponse;
+      if (data.pairs && Array.isArray(data.pairs)) {
+        // Filter for Solana pairs
+        return data.pairs.filter((p: any) => p.chainId === 'solana');
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   // Manual trigger for testing
