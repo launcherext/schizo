@@ -254,9 +254,26 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // 1. STOP LOSS CHECK (age-based for new tokens)
+    // 0. RAPID DROP CHECK - Exit immediately if price crashes in first 30 seconds
     const positionAgeSeconds = (Date.now() - position.entryTime.getTime()) / 1000;
+    const rapidDropConfig = (config as any).rapidDropExit;
 
+    if (rapidDropConfig?.enabled && positionAgeSeconds <= rapidDropConfig.windowSeconds) {
+      if (profitPercent <= -rapidDropConfig.dropPercent) {
+        logger.error({
+          positionId: position.id,
+          currentPrice,
+          entryPrice: position.entryPrice,
+          profitPercent: (profitPercent * 100).toFixed(2),
+          positionAgeSeconds: positionAgeSeconds.toFixed(0),
+        }, `RAPID DROP DETECTED - Emergency exit at ${(profitPercent * 100).toFixed(0)}%`);
+
+        await this.closePosition(position.id, 'stop_loss', true); // true = use high slippage
+        return;
+      }
+    }
+
+    // 1. STOP LOSS CHECK (age-based for new tokens)
     // Grace period: don't trigger stop loss for first X seconds
     if (positionAgeSeconds < config.stopLossGracePeriodSeconds) {
       // Skip stop loss check during grace period
@@ -285,7 +302,7 @@ export class PositionManager extends EventEmitter {
           positionAgeSeconds: positionAgeSeconds.toFixed(0),
         }, `Stop loss triggered at -${(effectiveStopLoss * 100).toFixed(0)}%`);
 
-        await this.closePosition(position.id, 'stop_loss');
+        await this.closePosition(position.id, 'stop_loss', true); // Use high slippage for stop loss
         return;
       }
     }
@@ -299,7 +316,7 @@ export class PositionManager extends EventEmitter {
         profitPercent: (profitPercent * 100).toFixed(2),
       }, 'Trailing stop triggered');
 
-      await this.closePosition(position.id, 'trailing_stop');
+      await this.closePosition(position.id, 'trailing_stop', true); // Use high slippage for trailing stop
       return;
     }
 
@@ -492,7 +509,8 @@ export class PositionManager extends EventEmitter {
 
   async closePosition(
     positionId: string,
-    reason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected'
+    reason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'manual' | 'ai_signal' | 'rug_detected',
+    useHighSlippage: boolean = false
   ): Promise<void> {
     const position = this.positions.get(positionId);
 
@@ -508,10 +526,23 @@ export class PositionManager extends EventEmitter {
 
     position.status = 'closing';
 
+    // Use high slippage for stop loss / emergency exits to ensure execution
+    // Analysis showed stop loss trades failing due to insufficient slippage
+    const slippageBps = (useHighSlippage || reason === 'stop_loss' || reason === 'rug_detected')
+      ? ((config as any).stopLossSlippageBps || 3000)  // 30% for emergency exits
+      : config.defaultSlippageBps;                      // 15% for normal exits
+
+    logger.info({
+      positionId,
+      reason,
+      slippageBps,
+      useHighSlippage,
+    }, 'Executing position close');
+
     // Execute full sell with proper slippage for volatile tokens
     // skipBalanceCheck: trust our tracked position amount (RPC can be unreliable)
     const result = await txManager.executeSell(position.mint, position.amount, 9, {
-      slippageBps: config.defaultSlippageBps,
+      slippageBps,
       skipBalanceCheck: true,
     });
 

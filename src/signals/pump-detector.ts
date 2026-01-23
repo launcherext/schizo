@@ -182,6 +182,19 @@ export class PumpDetector {
   }
 
   isGoodEntry(metrics: PumpMetrics): boolean {
+    // CRITICAL: Reject cold phase tokens - they have no momentum data
+    // Analysis showed 100% of trades entering in "cold" phase lost money
+    if ((config as any).requireNonColdPhase && metrics.phase === 'cold') {
+      logger.debug({ phase: metrics.phase, heat: metrics.heat }, 'Rejecting cold phase token');
+      return false;
+    }
+
+    // Reject if heat is below minimum threshold
+    if (metrics.heat < (config as any).minPumpHeat) {
+      logger.debug({ heat: metrics.heat, minRequired: (config as any).minPumpHeat }, 'Rejecting low heat token');
+      return false;
+    }
+
     // Good entry: building phase with decent confidence, or early hot
     if (metrics.phase === 'building' && metrics.confidence > 0.4 && metrics.buyPressure > 0.5) {
       return true;

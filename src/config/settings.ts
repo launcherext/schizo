@@ -60,7 +60,15 @@ export const config = {
   },
 
   // Grace period: don't trigger stop loss for first X seconds
-  stopLossGracePeriodSeconds: 15,  // 15 second grace period
+  stopLossGracePeriodSeconds: 10,  // REDUCED from 15 - faster reaction to drops
+
+  // NEW: Rapid drop detection - exit immediately if price crashes
+  rapidDropExit: {
+    enabled: true,
+    dropPercent: 0.20,       // 20% drop triggers immediate exit
+    windowSeconds: 30,       // Within first 30 seconds of position
+    useHighSlippage: true,   // Use stopLossSlippageBps for panic sell
+  },
 
   // NEW Take Profit Strategy: recover initial at +50%, then scale out
   takeProfitStrategy: {
@@ -113,11 +121,14 @@ export const config = {
   minHolderCount: 50,
   maxTop10Concentration: 0.30,
   minRugScore: 45,
-  minPumpHeat: 0,  // Lowered from 33 to 0 for testing live trades
+  minPumpHeat: 20,           // INCREASED from 0: Require some pump activity (cold phase = 0 heat)
+  requireNonColdPhase: true, // NEW: Don't enter tokens in "cold" pump phase
 
   // Trade execution settings
-  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.01'),
-  defaultSlippageBps: 1500,  // 15% slippage
+  tradeAmountSol: parseFloat(process.env.BASE_POSITION_SOL || '0.02'),  // INCREASED from 0.01 - tiny positions get destroyed by slippage
+  minPositionSol: 0.015,     // NEW: Minimum position size (below this, slippage destroys profits)
+  defaultSlippageBps: 1500,  // 15% slippage for normal trades
+  stopLossSlippageBps: 3000, // NEW: 30% slippage for stop loss (ensure execution on fast drops)
   priorityFeeSol: 0.0001,    // Priority fee in SOL
   jitoBribeSol: 0.00001,     // Jito bribe (if enabled)
 
@@ -134,16 +145,16 @@ export const config = {
     maxMarketCapSol: 100,    // Allow slightly larger caps for tokens with real traction
   },
 
-  // Token Watchlist - AI-driven entry (BALANCED: trade more but stay safe)
+  // Token Watchlist - AI-driven entry (TIGHTENED: wait for real data before entry)
   watchlist: {
-    minDataPoints: 10,       // LOWERED: 10 price updates enough to analyze
-    minAgeSeconds: 180,      // LOWERED: 3 minutes to see initial pattern
-    minConfidence: 0.58,     // LOWERED: Allow more trades with moderate confidence
+    minDataPoints: 30,       // INCREASED from 10: Need enough price history for meaningful analysis
+    minAgeSeconds: 300,      // INCREASED from 180: Wait 5 minutes to see real price action
+    minConfidence: 0.60,     // INCREASED from 0.58: Slightly higher bar
     maxConfidence: 0.80,     // Higher bar for older tokens
-    maxDrawdown: 0.20,       // RELAXED: Allow 20% drawdown (some rebound potential)
-    minMarketCapSol: 25,     // LOWERED: 25 SOL min market cap
-    minUniqueTraders: 5,     // LOWERED: 5 unique traders is achievable
-    requireUptrend: false,   // DISABLED: Allow dip buys
+    maxDrawdown: 0.15,       // TIGHTENED from 0.20: Don't buy tokens already dumping
+    minMarketCapSol: 30,     // INCREASED from 25: Slightly higher floor
+    minUniqueTraders: 8,     // INCREASED from 5: More real traders = less likely rug
+    requireUptrend: true,    // ENABLED: Only buy tokens with positive momentum
   },
 
   // Momentum Override - bypass lower confidence if signals are strong

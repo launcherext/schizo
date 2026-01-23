@@ -726,11 +726,27 @@ class TradingBot {
     this.rejectionStats.passed++;
     logger.info({ mint, rugScore: rugScore.total, heat: pumpMetrics.heat, poolType }, 'PASSED: All filters - proceeding to trade');
 
+    // Enforce minimum position size (analysis showed tiny positions lose 100% to slippage)
+    const positionSize = riskCheck.adjustedSize || decision.positionSize.sizeSol;
+    const minPositionSol = (config as any).minPositionSol || 0.015;
+
+    if (positionSize < minPositionSol) {
+      this.rejectionStats.riskCheck++;
+      this.rejectionStats.passed--; // Undo the passed increment
+      logger.info({
+        mint,
+        positionSize,
+        minRequired: minPositionSol
+      }, 'REJECTED: Position size below minimum (would be destroyed by slippage)');
+      priceFeed.removeFromWatchList(mint);
+      return;
+    }
+
     // Execute trade
     await this.executeBuy(
       mint,
       tokenInfo?.symbol || 'UNKNOWN',
-      riskCheck.adjustedSize || decision.positionSize.sizeSol,
+      positionSize,
       priceData!.priceSol,
       features,
       pumpMetrics,
