@@ -165,8 +165,9 @@ export class Repository {
       INSERT INTO positions (id, mint, symbol, entry_price, current_price, amount,
                             amount_sol, entry_time, highest_price, lowest_price,
                             stop_loss, take_profit_json, tp_sold_json, status, pool_type,
-                            initial_recovered, scaled_exits_taken, initial_investment, realized_pnl)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                            initial_recovered, scaled_exits_taken, initial_investment, realized_pnl,
+                            trailing_stop)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       ON CONFLICT (id) DO UPDATE SET
         current_price = EXCLUDED.current_price,
         highest_price = GREATEST(positions.highest_price, EXCLUDED.current_price),
@@ -176,6 +177,7 @@ export class Repository {
         initial_recovered = EXCLUDED.initial_recovered,
         scaled_exits_taken = EXCLUDED.scaled_exits_taken,
         realized_pnl = EXCLUDED.realized_pnl,
+        trailing_stop = COALESCE(EXCLUDED.trailing_stop, positions.trailing_stop),
         last_update = NOW()
     `, [
       position.id, position.mint, position.symbol, position.entry_price,
@@ -184,7 +186,8 @@ export class Repository {
       position.stop_loss, position.take_profit_json, position.tp_sold_json,
       position.status, position.pool_type,
       position.initial_recovered, position.scaled_exits_taken,
-      position.initial_investment, position.realized_pnl
+      position.initial_investment, position.realized_pnl,
+      position.trailing_stop
     ]);
   }
 

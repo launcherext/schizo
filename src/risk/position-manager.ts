@@ -82,6 +82,8 @@ export class PositionManager extends EventEmitter {
           initialInvestment: (dbPos as any).initial_investment || amountSol,
           // NEW: Accumulated PnL from partial closes
           realizedPnl: partialClosePnl,
+          // CRITICAL: Persist trailing stop across restarts
+          trailingStop: (dbPos as any).trailing_stop ? parseFloat((dbPos as any).trailing_stop.toString()) : undefined,
         };
 
         this.positions.set(position.id, position);
@@ -231,7 +233,12 @@ export class PositionManager extends EventEmitter {
         // Update highest/lowest
         if (position.currentPrice > position.highestPrice) {
           position.highestPrice = position.currentPrice;
+          const oldTrailingStop = position.trailingStop;
           this.updateTrailingStop(position);
+          // If trailing stop was updated, persist immediately
+          if (position.trailingStop !== oldTrailingStop) {
+            await this.persistPosition(position);
+          }
         }
         if (position.currentPrice < position.lowestPrice) {
           position.lowestPrice = position.currentPrice;
@@ -317,22 +324,59 @@ export class PositionManager extends EventEmitter {
       return;
     }
 
-    // PROTECT PROFITS: Exit if price drops 15% from peak while in profit
-    // This catches sharp reversals that the wider trailing stop would miss
+    // PROTECT PROFITS: Exit if price drops significantly from peak
+    // FIXED: Don't require current profit - a crash from +300% to -10% should still exit
     const dropFromPeak = position.highestPrice > 0
       ? (position.highestPrice - currentPrice) / position.highestPrice
       : 0;
 
-    if (profitPercent > 0.20 && dropFromPeak > 0.15) {
-      // We're in profit but price dropped 15%+ from peak - protect gains
+    // Calculate the peak profit (how high we were from entry)
+    const peakProfitPercent = (position.highestPrice - position.entryPrice) / position.entryPrice;
+
+    // EMERGENCY EXIT: If we reached +20% peak profit and dropped 25%+ from that peak, EXIT NOW
+    // This catches the case where price pumped +300% then crashed back down
+    if (peakProfitPercent > 0.20 && dropFromPeak > 0.25) {
       logger.warn({
         positionId: position.id,
         mint: position.mint.substring(0, 15),
-        profitPercent: (profitPercent * 100).toFixed(1) + '%',
+        peakProfitPercent: (peakProfitPercent * 100).toFixed(1) + '%',
+        currentProfitPercent: (profitPercent * 100).toFixed(1) + '%',
         dropFromPeak: (dropFromPeak * 100).toFixed(1) + '%',
         highestPrice: position.highestPrice,
         currentPrice,
-      }, 'PROTECT PROFITS: 15%+ drop from peak while in profit - exiting');
+      }, 'PROTECT PROFITS: 25%+ drop from peak (was +20% at peak) - emergency exit');
+
+      await this.closePosition(position.id, 'trailing_stop', true);
+      return;
+    }
+
+    // AGGRESSIVE DROP EXIT: If dropped 40%+ from peak, exit regardless of where we bought
+    // This is the "pump and dump" detector - price went up, now it's crashing
+    if (dropFromPeak > 0.40 && positionAgeSeconds > 30) {
+      logger.warn({
+        positionId: position.id,
+        mint: position.mint.substring(0, 15),
+        dropFromPeak: (dropFromPeak * 100).toFixed(1) + '%',
+        highestPrice: position.highestPrice,
+        currentPrice,
+        profitPercent: (profitPercent * 100).toFixed(1) + '%',
+      }, 'AGGRESSIVE EXIT: 40%+ drop from peak - cutting losses');
+
+      await this.closePosition(position.id, 'trailing_stop', true);
+      return;
+    }
+
+    // EARLY TRAILING STOP CHECK - check this BEFORE other exits
+    // This ensures we don't miss the trailing stop due to later checks returning early
+    if (position.trailingStop && currentPrice <= position.trailingStop) {
+      logger.info({
+        positionId: position.id,
+        mint: position.mint.substring(0, 15),
+        currentPrice,
+        trailingStop: position.trailingStop,
+        profitPercent: (profitPercent * 100).toFixed(2) + '%',
+        dropFromPeak: (dropFromPeak * 100).toFixed(1) + '%',
+      }, 'TRAILING STOP TRIGGERED (early check)');
 
       await this.closePosition(position.id, 'trailing_stop', true);
       return;
@@ -967,6 +1011,8 @@ export class PositionManager extends EventEmitter {
       scaled_exits_taken: position.scaledExitsTaken,
       initial_investment: position.initialInvestment,
       realized_pnl: position.realizedPnl,
+      // CRITICAL: Persist trailing stop so it survives restarts
+      trailing_stop: position.trailingStop,
     });
   }
 
