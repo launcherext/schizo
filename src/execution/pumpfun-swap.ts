@@ -175,7 +175,11 @@ export class PumpFunSwap {
         timestamp: new Date(),
       };
     } catch (error: any) {
-      logger.error({ error: error.message }, 'PumpFun buy failed');
+      logger.error({
+        error: error.message,
+        code: error.code,
+        stack: error.stack?.split('\n').slice(0, 3).join(' -> ')
+      }, 'PumpFun buy failed');
       return this.errorResult(amountSol * LAMPORTS_PER_SOL, error.message);
     }
   }
